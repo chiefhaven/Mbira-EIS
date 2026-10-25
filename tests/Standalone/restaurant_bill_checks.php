@@ -456,7 +456,32 @@ check(str_contains($sellControllerSource, '\'desktop_pos\' ? null : $transaction
 $controller = $controllerClass->newInstanceWithoutConstructor();
 $alignDesktopCashPayment = $controllerClass->getMethod('__alignDesktopPosCashPayment');
 $alignDesktopCashPayment->setAccessible(true);
+$desktopCatalogPrice = $controllerClass->getMethod('__desktopPosCatalogPrice');
+$desktopCatalogPrice->setAccessible(true);
 $storedTotal = (object) ['final_total' => '11000.0000'];
+$catalogVariation = (object) ['default_sell_price' => '17021.2800', 'sell_price_inc_tax' => '20000.0000'];
+$catalogLinePrice = $desktopCatalogPrice->invoke($controller, 'desktop_pos', 17021.28, 0, 50, 50, $catalogVariation);
+check($catalogLinePrice === ['unit_price_inc_tax' => '20000.0000', 'item_tax' => '2978.7200'],
+    'desktop taxed sale uses the backend catalog inclusive price and its exact tax difference');
+$secondCatalogLinePrice = $desktopCatalogPrice->invoke(
+    $controller,
+    'desktop_pos',
+    9361.70,
+    0,
+    50,
+    50,
+    (object) ['default_sell_price' => '9361.7000', 'sell_price_inc_tax' => '11000.0000']
+);
+check($secondCatalogLinePrice === ['unit_price_inc_tax' => '11000.0000', 'item_tax' => '1638.3000']
+    && number_format((float) $catalogLinePrice['unit_price_inc_tax']
+        + (float) $secondCatalogLinePrice['unit_price_inc_tax'], 4, '.', '') === '31000.0000',
+    'multiple taxed desktop lines reconcile to their backend catalog totals without fractional-tax drift');
+check($desktopCatalogPrice->invoke($controller, 'api', 17021.28, 0, 50, 50, $catalogVariation) === null,
+    'non-desktop sales retain the existing tax calculation');
+check($desktopCatalogPrice->invoke($controller, 'desktop_pos', 17021.28, 10, 50, 50, $catalogVariation) === null,
+    'discounted desktop lines retain the existing discount-aware tax calculation');
+check($desktopCatalogPrice->invoke($controller, 'desktop_pos', 17000, 0, 50, 50, $catalogVariation) === null,
+    'custom desktop line prices do not override backend tax calculation');
 $cashInput = ['source' => 'desktop_pos', 'status' => 'final',
     'payment' => [['method' => 'cash', 'amount' => '10999.9999']]];
 check($alignDesktopCashPayment->invoke($controller, $cashInput, $storedTotal)['payment'][0]['amount'] === '11000.0000',
