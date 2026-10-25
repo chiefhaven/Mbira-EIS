@@ -446,7 +446,12 @@ check(snapshot($db) === $before, 'failed kitchen dispatch rolls back bill, invoi
 [$db, $service, $waiter] = restaurantFixture();
 $controllerClass = new ReflectionClass(Modules\Connector\Http\Controllers\Api\SellController::class);
 $sellControllerSource = file_get_contents(dirname(__DIR__, 2).'/Modules/Connector/Http/Controllers/Api/SellController.php');
-check(str_contains($sellControllerSource, "'desktop_pos' ? null : $transaction->final_total"),
+$productSellControllerSource = file_get_contents(dirname(__DIR__, 2).'/Modules/Connector/Http/Controllers/Api/ProductSellController.php');
+check(substr_count($sellControllerSource, '$q->whereRaw(\'1 = 0\');') === 1,
+    'sales list returns no rows when the user lacks direct-view, own-sale and commission-agent visibility');
+check(substr_count($productSellControllerSource, '$q->whereRaw(\'1 = 0\');') === 1,
+    'product sales list returns no rows when the user lacks direct-view, own-sale and commission-agent visibility');
+check(str_contains($sellControllerSource, '\'desktop_pos\' ? null : $transaction->final_total'),
     'desktop API payment status uses the persisted invoice total rather than the raw pre-storage float');
 $controller = $controllerClass->newInstanceWithoutConstructor();
 $alignDesktopCashPayment = $controllerClass->getMethod('__alignDesktopPosCashPayment');

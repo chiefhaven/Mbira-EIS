@@ -681,6 +681,15 @@ class ProductSellController extends ApiController
                 if ($user->hasAnyPermission(['view_commission_agent_sell', 'access_commission_agent_shipping'])) {
                     $q->orWhere('transactions.commission_agent', $user->id);
                 }
+
+                if (! $user->hasAnyPermission([
+                    'view_own_sell_only',
+                    'access_own_shipping',
+                    'view_commission_agent_sell',
+                    'access_commission_agent_shipping',
+                ])) {
+                    $q->whereRaw('1 = 0');
+                }
             });
         }
 
