@@ -15,7 +15,7 @@ use Modules\EIS\Events\SaleCompleted;
  * Drafts, quotations, suspended sales, credit sales and partially paid sales (partial cash included) do not,
  * so they are neither submitted nor left behind as pending EIS rows (pending rows count against the offline
  * limits). Adding/editing payments or settling contact dues initiates submission when a sale becomes
- * fully paid. The hourly DispatchAllUnsubmittedSalesJob remains a fallback for unsubmitted sales.
+ * fully paid.
  */
 class SaleSubmissionRule
 {
@@ -23,11 +23,10 @@ class SaleSubmissionRule
      * Ask EIS to submit a sale that was just saved.
      *
      * Safe to call inside or after the sale's database transaction: SaleCompleted is fired once the
-     * outermost transaction has committed, and never if it rolls back. DispatchEisSaleJob then applies
-     * qualifies() to the stored sale, so callers do not have to check the payment themselves.
+     * outermost transaction has committed, and never if it rolls back. The SaleCompleted listener
+     * queues the EIS submission after that commit so checkout can return immediately.
      *
-     * A failure is only logged. The sale is already saved, EIS keeps the failed submission and the
-     * scheduler retries it, so it must not turn a saved sale into an error for the cashier.
+     * A failure is retained in EIS sale tracking. It does not undo the already-saved sale.
      */
     public static function initiate(Transaction $transaction): void
     {

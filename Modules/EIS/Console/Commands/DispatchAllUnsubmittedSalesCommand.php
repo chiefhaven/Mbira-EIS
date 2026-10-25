@@ -3,30 +3,28 @@
 namespace Modules\EIS\Console\Commands;
 
 use Illuminate\Console\Command;
-use Illuminate\Support\Facades\Log;
-use Modules\EIS\Jobs\DispatchAllUnsubmittedSalesJob;
+use App\Transaction;
 use Modules\EIS\Models\EisSetting;
+use Modules\EIS\Services\Sales\DirectSaleSubmissionService;
 
 class DispatchAllUnsubmittedSalesCommand extends Command
 {
     protected $signature = 'eis:dispatch-unsubmitted
                             {--business-id= : Business ID to process}
-                            {--chunk-size=50 : Number of transactions per chunk}
                             {--date-from= : Start date (YYYY-MM-DD)}
                             {--date-to= : End date (YYYY-MM-DD)}
-                            {--dry-run : Show what would be dispatched without actually dispatching}';
+                            {--dry-run : Show eligible transactions without submitting them}';
 
-    protected $description = 'Dispatch all unsubmitted sales to EIS';
+    protected $description = 'Submit all eligible unsubmitted sales to EIS directly';
 
-    public function handle()
+    public function handle(DirectSaleSubmissionService $submission)
     {
         $businessId = $this->option('business-id');
-        $chunkSize = (int) $this->option('chunk-size');
         $dateFrom = $this->option('date-from');
         $dateTo = $this->option('date-to');
         $dryRun = $this->option('dry-run');
 
-        $this->info('Starting dispatch of unsubmitted sales...');
+        $this->info('Starting direct submission of unsubmitted sales...');
 
         // Get unsubmitted transactions count
         $query = $this->buildTransactionQuery($businessId, $dateFrom, $dateTo);
@@ -56,32 +54,41 @@ class DispatchAllUnsubmittedSalesCommand extends Command
                 $this->info('... and ' . ($total - 20) . ' more transactions.');
             }
 
-            $this->info('Dry run completed. No jobs were dispatched.');
+            $this->info('Dry run completed. Nothing was submitted.');
             return 0;
         }
 
-        $this->info('Dispatching jobs...');
+        $submitted = 0;
+        $failed = 0;
+        $query->orderBy('id')->chunkById(100, function ($transactions) use ($submission, &$submitted, &$failed) {
+            foreach ($transactions as $transaction) {
+                $result = $submission->submit($transaction);
+                if ($result['status'] === 'submitted') {
+                    $submitted++;
+                    $this->line("Submitted {$transaction->invoice_no} directly to EIS.");
+                } elseif ($result['status'] !== 'skipped') {
+                    $failed++;
+                    $this->error("Failed {$transaction->invoice_no}: ".($result['message'] ?: 'EIS did not confirm submission.'));
+                }
+            }
+        });
+        $this->info("Direct submission finished: {$submitted} submitted, {$failed} failed.");
 
-        // Dispatch the job
-        $job = new DispatchAllUnsubmittedSalesJob(
-            $businessId,
-            $chunkSize,
-            $dateFrom,
-            $dateTo
-        );
-
-        dispatch($job);
-
-        $this->info("All {$total} unsubmitted transactions have been dispatched.");
-        $this->info('Check the queue worker logs for progress.');
-
-        return 0;
+        return $failed === 0 ? 0 : 1;
     }
 
     protected function buildTransactionQuery($businessId, $dateFrom, $dateTo)
     {
-        $query = \App\Transaction::where('status', 'completed')
+        $validBusinessIds = EisSetting::where('status', 1)
+            ->whereNotNull('tpin')
+            ->whereNotNull('device_id')
+            ->whereNotNull('jwt_token')
+            ->pluck('business_id');
+        $query = Transaction::where('type', 'sell')
+            ->where('status', 'final')
             ->whereNotNull('invoice_no')
+            ->where('payment_status', 'paid')
+            ->whereIn('business_id', $validBusinessIds)
             ->whereDoesntHave('eisSale', function ($query) {
                 $query->where('status', 'submitted');
             });

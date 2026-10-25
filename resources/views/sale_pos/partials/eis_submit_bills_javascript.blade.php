@@ -75,7 +75,7 @@ $(document).ready(function() {
                                     btn.html(originalHtml);
                                     btn.prop('disabled', false);
                                     
-                                    if (result.success || result.message) {
+                                    if (result.success) {
                                         toastr.success(result.message || '{{ __("lang_v1.bills_submitted_successfully") }}');
                                         // Reload the datatable if it exists
                                         if (typeof sell_table !== 'undefined') {
@@ -86,7 +86,10 @@ $(document).ready(function() {
                                             location.reload();
                                         }, 2000);
                                     } else {
-                                        toastr.error(result.error || '{{ __("messages.something_went_wrong") }}');
+                                        var details = (result.failed || []).map(function(item) {
+                                            return item.invoice_no + ': ' + item.error;
+                                        }).join('\n');
+                                        toastr.error([result.message || result.error, details].filter(Boolean).join('\n') || '{{ __("messages.something_went_wrong") }}');
                                     }
                                 },
                                 error: function(xhr) {

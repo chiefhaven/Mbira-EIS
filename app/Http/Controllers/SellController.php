@@ -29,9 +29,9 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Log;
 use Modules\EIS\Events\SaleCompleted;
+use Modules\EIS\Services\Sales\DirectSaleSubmissionService;
 use Spatie\Activitylog\Models\Activity;
 use Yajra\DataTables\Facades\DataTables;
-use Modules\EIS\Jobs\DispatchAllUnsubmittedSalesJob;
 
 class SellController extends Controller
 {
@@ -1501,7 +1501,7 @@ class SellController extends Controller
     /**
      * Check EIS health before submitting bills
      */
-    public function eisSubmitAllBills(Request $request)
+    public function eisSubmitAllBills(Request $request, DirectSaleSubmissionService $submission)
     {
         try {
             $business_id = $request->session()->get('user.business_id');
@@ -1513,19 +1513,50 @@ class SellController extends Controller
                 ], 400);
             }
 
-            \Modules\EIS\Jobs\DispatchAllUnsubmittedSalesJob::dispatch(
-                $business_id, 50, null, null, $this->eisPermittedLocationIds((int) $business_id)
-            );
+            $transactionIds = Transaction::where('business_id', $business_id)
+                ->whereIn('location_id', $this->eisPermittedLocationIds((int) $business_id))
+                ->where('type', 'sell')
+                ->where('status', 'final')
+                ->where('payment_status', 'paid')
+                ->whereDoesntHave('eisSale', fn ($query) => $query->where('status', 'submitted'))
+                ->orderBy('transaction_date')
+                ->pluck('id');
 
-            Log::info('EIS bills submission initiated', [
+            $submitted = 0;
+            $failed = [];
+            foreach ($transactionIds as $transactionId) {
+                $transaction = Transaction::where('business_id', $business_id)->find($transactionId);
+                if (!$transaction) {
+                    continue;
+                }
+                $result = $submission->submit($transaction);
+                if ($result['status'] === 'submitted') {
+                    $submitted++;
+                } elseif ($result['status'] !== 'skipped') {
+                    $failed[] = [
+                        'transaction_id' => $transaction->id,
+                        'invoice_no' => $transaction->invoice_no,
+                        'error' => $result['message'] ?: 'EIS did not confirm submission.',
+                    ];
+                }
+            }
+
+            Log::info('Direct EIS bulk sale submission completed', [
                 'business_id' => $business_id,
-                'user_id' => auth()->id()
+                'user_id' => auth()->id(),
+                'requested' => $transactionIds->count(),
+                'submitted' => $submitted,
+                'failed' => count($failed),
             ]);
 
             return response()->json([
-                'success' => true,
-                'message' => 'Bills queued for submission using each sale location and terminal. Check submission status for results.'
-            ]);
+                'success' => $failed === [],
+                'message' => $failed === []
+                    ? "Finished direct EIS submission: {$submitted} bills submitted."
+                    : "Finished direct EIS submission: {$submitted} submitted, ".count($failed).' failed.',
+                'submitted' => $submitted,
+                'failed' => $failed,
+            ], $failed === [] ? 200 : 207);
 
         } catch (\Exception $e) {
             Log::error('Failed to submit bills', [

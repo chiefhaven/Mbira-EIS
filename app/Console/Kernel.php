@@ -6,8 +6,6 @@ use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Foundation\Console\Kernel as ConsoleKernel;
 use Illuminate\Support\Facades\Log;
 use Modules\EIS\Jobs\DispatchAllUnsubmittedSalesJob;
-use Modules\EIS\Jobs\RetryAllFailedTransactionsJob;
-use Modules\EIS\Jobs\SubmitSaleJob;
 use Modules\EIS\Jobs\SyncEISConfigurationJob;
 class Kernel extends ConsoleKernel
 {
@@ -46,7 +44,7 @@ class Kernel extends ConsoleKernel
                     Log::error('EIS Configuration Sync Job Scheduler Failure');
             });
 
-            // Schedule the EIS sale submission job
+            // Schedule the EIS fallback through the queue to avoid blocking the scheduler.
             $schedule->job(new DispatchAllUnsubmittedSalesJob())
                 ->hourly()
                 ->name('eis-sale-submission')

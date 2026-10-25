@@ -462,4 +462,25 @@ try {
 } finally {
     Carbon\Carbon::setTestNow();
 }
+$listenerReflection = new ReflectionClass(Modules\EIS\Listeners\DispatchEisSaleJob::class);
+checkRetry(!$listenerReflection->implementsInterface(Illuminate\Contracts\Queue\ShouldQueue::class),
+    'Checkout listener dispatches the submission job without blocking checkout on EIS');
+$dispatched = [];
+$container->instance(Illuminate\Contracts\Bus\Dispatcher::class, new class($dispatched) implements Illuminate\Contracts\Bus\Dispatcher {
+    public function __construct(public array &$dispatched) {}
+    public function dispatch($command) { $this->dispatched[] = $command; return $command; }
+    public function dispatchSync($command, $handler = null) { throw new RuntimeException('Unexpected synchronous job dispatch'); }
+    public function dispatchNow($command, $handler = null) { throw new RuntimeException('Unexpected direct job execution'); }
+    public function hasCommandHandler($command) { return false; }
+    public function getCommandHandler($command) { return null; }
+    public function getMiddleware($command) { return []; }
+    public function pipeThrough(array $pipes) {}
+    public function map(array $map) {}
+});
+$directTransaction = submissionFixture();
+(new Modules\EIS\Listeners\DispatchEisSaleJob())->handle(new Modules\EIS\Events\SaleCompleted($directTransaction));
+checkRetry(count($dispatched) === 1
+    && $dispatched[0] instanceof Modules\EIS\Jobs\SubmitOfflineSalesJob
+    && $dispatched[0]->onQueue('eis-submission') === $dispatched[0],
+    'Checkout queues EIS submission in the background for a paid final sale');
 echo "PASS: {$checks} EIS submission retry checks (isolated database, no network).\n";
