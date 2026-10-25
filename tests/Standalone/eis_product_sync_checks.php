@@ -78,7 +78,7 @@ function catalogFixture(): array
         'product_variations' => ['product_id', 'variation_template_id', 'name', 'is_dummy'],
         'variations' => ['product_id', 'product_variation_id', 'name', 'default_sell_price', 'default_purchase_price',
             'dpp_inc_tax', 'sell_price_inc_tax', 'sub_sku', 'profit_percent', 'deleted_at'],
-        'business_locations' => ['business_id', 'eis_site_id', 'name'],
+        'business_locations' => ['business_id', 'eis_site_id', 'name', 'is_active'],
         'product_locations' => ['product_id', 'location_id'],
         'units' => ['business_id', 'short_name', 'actual_name'],
         'tax_rates' => ['business_id', 'configuration_id', 'tax_rate_id', 'name', 'is_activated', 'rate', 'deleted_at'],
@@ -108,8 +108,8 @@ function catalogFixture(): array
     $db->table('business')->insert([['id' => 1], ['id' => 2]]);
     $db->table('eis_settings')->insert(['business_id' => 1, 'location_id' => 1, 'status' => 0, 'branch_id' => 'SITE-A']);
     $db->table('business_locations')->insert([
-        ['id' => 1, 'business_id' => 1, 'eis_site_id' => 'SITE-A'],
-        ['id' => 2, 'business_id' => 2, 'eis_site_id' => 'SITE-A'],
+        ['id' => 1, 'business_id' => 1, 'eis_site_id' => 'SITE-A', 'is_active' => 1],
+        ['id' => 2, 'business_id' => 2, 'eis_site_id' => 'SITE-A', 'is_active' => 1],
     ]);
     $db->table('eis_configurations')->insert(['id' => 1, 'business_id' => 1, 'eis_setting_id' => 1, 'location_id' => 1]);
     $db->table('units')->insert(['business_id' => 1, 'short_name' => 'pcs', 'actual_name' => 'Pieces']);
@@ -438,7 +438,6 @@ foreach ([
 
 // Exercise the actual local-only update endpoint with real validation and persistence.
 $db->getSchemaBuilder()->table('business_locations', function (Blueprint $table) {
-    $table->boolean('is_active')->default(true);
     $table->string('location_id')->nullable();
     foreach (['receipt_printer_type', 'selling_price_group_id', 'default_payment_accounts', 'invoice_scheme_id',
         'invoice_layout_id', 'sale_invoice_scheme_id'] as $column) {
@@ -679,8 +678,11 @@ $client->pages = [['data' => [catalogItem('TERMINAL', '108977')]]];
 pullCatalog($sync);
 $product = Product::where('business_id', 1)->firstOrFail();
 $variation = \App\Variation::where('product_id', $product->id)->firstOrFail();
-$db->table('business_locations')->insert(['id' => 3, 'business_id' => 1, 'eis_site_id' => 'SITE-B']);
-foreach ([3 => '42.0000', 2 => '999.0000'] as $location => $quantity) {
+$db->table('business_locations')->insert([
+    ['id' => 3, 'business_id' => 1, 'eis_site_id' => 'SITE-B', 'is_active' => 1],
+    ['id' => 4, 'business_id' => 1, 'eis_site_id' => 'SITE-C', 'is_active' => 0],
+]);
+foreach ([3 => '42.0000', 4 => '500.0000', 2 => '999.0000'] as $location => $quantity) {
     $db->table('variation_location_details')->insert([
         'product_id' => $product->id, 'variation_id' => $variation->id,
         'location_id' => $location, 'qty_available' => $quantity,
@@ -694,13 +696,15 @@ function listedStock(int $businessId, $locationId = null, $permitted = 'all')
         ->selectRaw('SUM(vld.qty_available) as current_stock')->value('current_stock');
 }
 catalogCheck((float) listedStock(1) === 109019.0,
-    'Business stock includes quantities from its own allowed locations');
+    'Business stock includes quantities from its active locations only');
 catalogCheck((float) listedStock(1, 1) === 108977.0, 'Selected terminal displays exact EIS stock');
 catalogCheck((float) listedStock(1, 3) === 42.0, 'Another location displays only its own quantity');
 catalogCheck((float) listedStock(1, null, [3]) === 42.0, 'Permitted location contributes only its own quantity');
 catalogCheck((float) listedStock(1, null, [1]) === 108977.0, 'Permitted terminal quantity is included');
+catalogCheck(listedStock(1, 4) === null, 'Inactive location stock is excluded when specifically selected');
+catalogCheck(listedStock(1, null, [4]) === null, 'Inactive permitted location stock is excluded');
 $db->table('eis_settings')->where('business_id', 1)->update(['site_id' => 'SITE-B']);
-catalogCheck((float) listedStock(1) === 109019.0, 'Changing terminal site does not change the business locations in scope');
+catalogCheck((float) listedStock(1) === 109019.0, 'Changing terminal site does not change the active business locations in scope');
 $db->table('eis_settings')->where('business_id', 1)->update(['site_id' => 'UNKNOWN']);
 catalogCheck((float) listedStock(1) === 109019.0, 'Missing terminal site does not alter ordinary business stock totals');
 $db->table('eis_settings')->where('business_id', 1)->delete();
