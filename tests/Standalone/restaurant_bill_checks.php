@@ -449,6 +449,20 @@ $sellControllerSource = file_get_contents(dirname(__DIR__, 2).'/Modules/Connecto
 check(str_contains($sellControllerSource, "'desktop_pos' ? null : $transaction->final_total"),
     'desktop API payment status uses the persisted invoice total rather than the raw pre-storage float');
 $controller = $controllerClass->newInstanceWithoutConstructor();
+$alignDesktopCashPayment = $controllerClass->getMethod('__alignDesktopPosCashPayment');
+$alignDesktopCashPayment->setAccessible(true);
+$storedTotal = (object) ['final_total' => '11000.0000'];
+$cashInput = ['source' => 'desktop_pos', 'status' => 'final',
+    'payment' => [['method' => 'cash', 'amount' => '10999.9999']]];
+check($alignDesktopCashPayment->invoke($controller, $cashInput, $storedTotal)['payment'][0]['amount'] === '11000.0000',
+    'desktop full cash tender is aligned to the persisted backend invoice total');
+$creditInput = ['source' => 'desktop_pos', 'status' => 'final', 'payment' => []];
+check($alignDesktopCashPayment->invoke($controller, $creditInput, $storedTotal) === $creditInput,
+    'desktop credit sale remains unpaid without synthetic payment');
+$otherPaymentInput = ['source' => 'api', 'status' => 'final',
+    'payment' => [['method' => 'cash', 'amount' => '10999.9999']]];
+check($alignDesktopCashPayment->invoke($controller, $otherPaymentInput, $storedTotal) === $otherPaymentInput,
+    'non-desktop API payment amounts are not normalized');
 $contactUtil = new class extends App\Utils\ContactUtil {
     public function getCustomerGroup($business_id, $contact_id) { return null; }
 };

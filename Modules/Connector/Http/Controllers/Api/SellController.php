@@ -934,6 +934,7 @@ class SellController extends ApiController
                     \Modules\Connector\Support\TillAssignment::bind($user, $transaction->id, $request->attributes->get('connector_till_id'));
 
                     $this->transactionUtil->createOrUpdateSellLines($transaction, $input['products'], $input['location_id'], false, null, [], false);
+                    $input = $this->__alignDesktopPosCashPayment($input, $transaction);
                     //Add change return
                     $change_return = $this->dummyPaymentLine;
                     $change_return['amount'] = $input['change_return'];
@@ -1666,6 +1667,17 @@ class SellController extends ApiController
         }
 
         return $formated_data;
+    }
+
+    private function __alignDesktopPosCashPayment(array $input, $transaction): array
+    {
+        if (($input['source'] ?? null) === 'desktop_pos' && ($input['status'] ?? null) === 'final' &&
+            isset($input['payment']) && count($input['payment']) === 1 &&
+            ($input['payment'][0]['method'] ?? null) === 'cash') {
+            $input['payment'][0]['amount'] = $transaction->final_total;
+        }
+
+        return $input;
     }
 
     /**
