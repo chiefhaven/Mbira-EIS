@@ -25,6 +25,27 @@
         <button id="eis-sales-lookup" type="button" class="btn btn-primary">Retrieve invoice</button>
     </div></div>
     <div class="box"><div class="box-body table-responsive">
+        <h3>Recent tracked sales</h3>
+        <p>Sync retrieves the exact tracked invoice from EIS and updates this sale only when the returned invoice matches the saved payload.</p>
+        <table class="table table-striped"><thead><tr><th>ID</th><th>POS invoice</th><th>EIS invoice</th><th>Location / terminal</th><th>Status</th><th>Receipt</th><th>Last error</th><th>Action</th></tr></thead><tbody>
+            @forelse($sales as $sale)
+            <tr data-sale-id="{{ $sale->id }}">
+                <td>{{ $sale->id }}</td>
+                <td>{{ $sale->invoice_number }}</td>
+                <td>{{ $sale->eis_invoice_number }}</td>
+                <td>{{ optional($locations->firstWhere('id', $sale->location_id))->name }} / {{ $sale->eis_setting_id }}</td>
+                <td class="eis-sale-status">{{ $sale->status }}</td>
+                <td class="eis-sale-receipt">{{ $sale->receipt_number }}</td>
+                <td>{{ $sale->error_message }}</td>
+                <td><button type="button" class="btn btn-default eis-sale-sync" data-id="{{ $sale->id }}">Sync from EIS</button></td>
+            </tr>
+            @empty
+            <tr><td colspan="8">No tracked sales found.</td></tr>
+            @endforelse
+        </tbody></table>
+        <pre id="eis-sales-result" style="max-height: 500px; overflow: auto;" aria-live="polite"></pre>
+    </div></div>
+    <div class="box"><div class="box-body table-responsive">
         <h3>Recent linked return adjustments</h3>
         <p>Prepared requests need explicit review and confirmation. Started, rejected, partial or unknown outcomes cannot be resent and block further return edits until verified with MRA. Sending never applies local stock or accounting again. Reload to refresh statuses.</p>
         <table class="table table-striped"><thead><tr><th>ID</th><th>Sale / return</th><th>Terminal</th><th>Type</th><th>Status</th><th>Result</th><th></th></tr></thead><tbody>
@@ -39,7 +60,6 @@
             <label><input id="eis-sales-confirm" type="checkbox"> I reviewed this exact invoice and linked POS return. Send once to EIS.</label>
             <button id="eis-sales-submit" type="button" class="btn btn-danger">Send reviewed credit/debit note</button>
         </div>
-        <pre id="eis-sales-result" style="max-height: 500px; overflow: auto;" aria-live="polite"></pre>
     </div></div>
 </section>
 @endsection
@@ -49,6 +69,7 @@ $(function() {
     var lookupUrl = @json(route('eis.sales.lookup'));
     var showUrl = @json(route('eis.sales.show', ['id' => 0]));
     var submitUrl = @json(route('eis.sales.submit', ['id' => 0]));
+    var syncUrl = @json(route('eis.sales.sync', ['id' => 0]));
     var pending = null;
     function reset() {
         pending = null;
@@ -57,12 +78,17 @@ $(function() {
     }
     function request(url, method, data) {
         reset();
-        $('#eis-sales-lookup, #eis-sales-submit, .eis-sales-review').prop('disabled', true);
+        $('#eis-sales-lookup, #eis-sales-submit, .eis-sales-review, .eis-sale-sync').prop('disabled', true);
         $.ajax({url: url, method: method, data: data, dataType: 'json',
             headers: {'X-CSRF-TOKEN': $('meta[name="csrf-token"]').attr('content')}})
             .done(function(result) {
                 $('#eis-sales-result').text(JSON.stringify(result.data, null, 2));
                 $('#eis-sales-message').attr('class', 'alert alert-info').text(result.message || 'Response received.');
+                if (result.data && result.data.id && result.data.status) {
+                    var row = $('tr[data-sale-id="' + result.data.id + '"]');
+                    row.find('.eis-sale-status').text(result.data.status);
+                    row.find('.eis-sale-receipt').text(result.data.receipt_number || '');
+                }
                 if (result.data && result.data.status === 'prepared') {
                     pending = result.data;
                     $('#eis-sales-confirmation').prop('hidden', false);
@@ -72,7 +98,7 @@ $(function() {
                 if (result.data) $('#eis-sales-result').text(JSON.stringify(result.data, null, 2));
                 $('#eis-sales-message').attr('class', 'alert alert-danger').text(first ? errors[first][0] :
                     (result.message || 'No successful result confirmed. Review the saved status before further action.'));
-            }).always(function() { $('#eis-sales-lookup, #eis-sales-submit, .eis-sales-review').prop('disabled', false); });
+            }).always(function() { $('#eis-sales-lookup, #eis-sales-submit, .eis-sales-review, .eis-sale-sync').prop('disabled', false); });
     }
     $('#eis-sales-lookup').on('click', function() {
         request(lookupUrl, 'POST', {terminal_id: $('#eis-sales-terminal').val(),
@@ -80,6 +106,9 @@ $(function() {
     });
     $('#eis-sales-terminal, #eis-sales-operation, #eis-sales-invoice').on('change input', reset);
     $('.eis-sales-review').on('click', function() { request(showUrl.replace(/\/0$/, '/' + $(this).attr('data-id')), 'GET', {}); });
+    $('.eis-sale-sync').on('click', function() {
+        request(syncUrl.replace(/\/0\/sync$/, '/' + $(this).attr('data-id') + '/sync'), 'POST', {});
+    });
     $('#eis-sales-submit').on('click', function() {
         if (!pending || !$('#eis-sales-confirm').prop('checked')) {
             $('#eis-sales-message').attr('class', 'alert alert-danger').text('Review and confirm the saved request first.'); return;

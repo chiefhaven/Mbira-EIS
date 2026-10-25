@@ -18,6 +18,7 @@ Route::prefix('eis/stock/tools')->middleware('auth')->name('eis.stock.tools.')->
 Route::prefix('eis/sales')->middleware('auth')->name('eis.sales.')->group(function () {
     Route::get('/', [SalesController::class, 'index'])->name('index');
     Route::post('lookup', [SalesController::class, 'lookup'])->name('lookup');
+    Route::post('{id}/sync', [SalesController::class, 'syncSale'])->whereNumber('id')->name('sync');
     Route::get('adjustments/{id}', [SalesController::class, 'show'])->whereNumber('id')->name('show');
     Route::post('adjustments/{id}/submit', [SalesController::class, 'submit'])->whereNumber('id')->name('submit');
 });

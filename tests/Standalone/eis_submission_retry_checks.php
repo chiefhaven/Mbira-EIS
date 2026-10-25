@@ -56,6 +56,7 @@ $container->instance('db.schema', $schema);
 $schema->table('eis_sales', function (Blueprint $t) {
     $t->integer('location_id')->default(3); $t->integer('eis_setting_id')->default(1);
     $t->string('eis_invoice_number')->nullable();
+    $t->boolean('is_fiscalized')->default(false); $t->dateTime('fiscalized_at')->nullable();
 });
 $schema->create('business_locations', function (Blueprint $t) {
     $t->increments('id'); $t->integer('business_id'); $t->string('eis_site_id');
@@ -248,6 +249,24 @@ $submittedCount = count($client->payloads);
 $service->submit($uncertainSale, $settings);
 checkRetry(count($client->payloads) === $submittedCount,
     'Verified invoice without a receipt is never resubmitted on a later call');
+$recoveryClient->responder = function (EisSetting $setting, string $operation, array $payload) {
+    $tracking = EisSale::where('eis_invoice_number', $payload['invoiceNumber'])->firstOrFail();
+    $saved = $tracking->request_payload;
+    return ['outcome' => 'accepted', 'response' => ['statusCode' => 1, 'data' => [
+        'invoiceHeader' => $saved['invoiceHeader'],
+        'invoiceLineItems' => $saved['invoiceLineItems'],
+        'invoiceSummary' => $saved['invoiceSummary'],
+        'validationURL' => 'https://eis.invalid/validate?vc=SYNC-RECEIPT&S=SYNC-SIGNATURE',
+        'dateSubmitted' => '2026-10-25T21:52:32.97',
+    ]]];
+};
+$syncResult = $recovery->sync($uncertainSubmitted, $settings);
+checkRetry($syncResult['receipt_available'] && $syncResult['receipt_number'] === 'SYNC-RECEIPT'
+    && $uncertainSubmitted->fresh()->receipt_signature === 'SYNC-SIGNATURE',
+    'Individual sync saves the official EIS receipt number and signature');
+checkRetry($uncertainSubmitted->fresh()->response_payload['manual_sync']['method'] === 'get-invoice-by-number'
+    && $uncertainSale->fresh()->is_fiscalized,
+    'Individual sync records lookup evidence and projects verified receipt to the POS sale');
 
 $recoveryClient->responder = function (EisSetting $setting, string $operation, array $payload) {
     return ['outcome' => 'accepted', 'response' => ['statusCode' => 1, 'data' => [

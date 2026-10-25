@@ -9,6 +9,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Modules\EIS\Models\EisSetting;
 use Modules\EIS\Services\Sales\SaleAdjustmentService;
+use Modules\EIS\Services\Sales\SaleOutcomeRecoveryService;
 use Modules\EIS\Services\Sales\SalesApiClient;
 use Modules\EIS\Services\Terminal\TerminalContext;
 
@@ -23,9 +24,15 @@ class SalesController extends Controller
         $locations = $locations->get(['id', 'name']);
         $terminals = EisSetting::where('business_id', $request->user()->business_id)
             ->whereIn('location_id', $locations->pluck('id'))->get(['id', 'location_id', 'device_id']);
+        $sales = DB::table('eis_sales as e')->join('transactions as t', 't.id', '=', 'e.transaction_id')
+            ->where('e.business_id', $request->user()->business_id)->where('t.business_id', $request->user()->business_id)
+            ->whereIn('e.location_id', $locations->pluck('id'))->whereIn('t.location_id', $locations->pluck('id'))
+            ->orderByDesc('e.id')->limit(50)
+            ->get(['e.id', 'e.transaction_id', 'e.invoice_number', 'e.eis_invoice_number', 'e.status',
+                'e.receipt_number', 'e.error_message', 'e.location_id', 'e.eis_setting_id', 'e.submitted_at']);
         $adjustments = DB::table('eis_sale_adjustments')->where('business_id', $request->user()->business_id)
             ->whereIn('location_id', $locations->pluck('id'))->orderByDesc('id')->limit(50)->get();
-        return view('eis::sales.index', compact('locations', 'terminals', 'adjustments'));
+        return view('eis::sales.index', compact('locations', 'terminals', 'sales', 'adjustments'));
     }
 
     public function lookup(Request $request, SalesApiClient $client)
@@ -71,6 +78,38 @@ class SalesController extends Controller
     public function show(Request $request, int $id)
     {
         return response()->json(['success' => true, 'data' => $this->review($this->record($request, $id))]);
+    }
+
+    public function syncSale(Request $request, int $id, SaleOutcomeRecoveryService $service)
+    {
+        $this->authorize($request);
+        $sale = DB::table('eis_sales as e')->join('transactions as t', 't.id', '=', 'e.transaction_id')
+            ->where('e.business_id', $request->user()->business_id)
+            ->where('t.business_id', $request->user()->business_id)
+            ->where('e.id', $id)->whereColumn('t.location_id', 'e.location_id')
+            ->first(['e.id', 'e.transaction_id', 'e.business_id', 'e.location_id', 'e.eis_setting_id']);
+        abort_unless($sale, 404);
+        $permitted = $request->user()->permitted_locations((int) $request->user()->business_id);
+        abort_unless($permitted === 'all'
+            || in_array((int) $sale->location_id, array_map('intval', (array) $permitted), true), 403);
+
+        $setting = EisSetting::where('business_id', $request->user()->business_id)
+            ->where('location_id', $sale->location_id)->findOrFail($sale->eis_setting_id);
+        $trackedSale = \Modules\EIS\Models\EisSale::where('business_id', $sale->business_id)->findOrFail($sale->id);
+        try {
+            $result = $service->sync($trackedSale, $setting);
+        } catch (\Illuminate\Http\Client\ConnectionException $exception) {
+            Log::warning('EIS individual sale sync unavailable', ['eis_sale_id' => $id, 'terminal_id' => $setting->id]);
+            return response()->json(['success' => false, 'message' => 'EIS could not be reached. The local sale was not changed.'], 502);
+        } catch (\InvalidArgumentException $exception) {
+            return $this->blocked($exception->getMessage());
+        } catch (\UnexpectedValueException $exception) {
+            return response()->json(['success' => false, 'message' => $exception->getMessage()], 409);
+        }
+        return response()->json(['success' => true, 'data' => $result,
+            'message' => $result['receipt_available']
+                ? 'Invoice and official receipt details synchronized from EIS.'
+                : 'Invoice confirmed by EIS. No official receipt number was returned; existing receipt details were preserved.']);
     }
 
     public function submit(Request $request, int $id, SaleAdjustmentService $service)
