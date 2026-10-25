@@ -369,12 +369,12 @@ class SellController extends Controller
 
                             if (auth()->user()->can('business_settings.access')) {
                                 $fiscalSale = $row->relationLoaded('eisSale') ? $row->eisSale : null;
-                                $eisInvoiceNumber = $fiscalSale ? ($fiscalSale->eis_invoice_number
-                                    ?: ($fiscalSale->fiscal_invoice_number ?: $fiscalSale->receipt_number)) : null;
-                                if ($fiscalSale && $fiscalSale->status === 'submitted' && $eisInvoiceNumber && $fiscalSale->eis_setting_id) {
-                                    $html .= '<li><a href="#" class="eis-void-sync" data-terminal-id="'.(int) $fiscalSale->eis_setting_id
-                                        .'" data-invoice-number="'.e($eisInvoiceNumber).'">'
-                                        .'<i class="fas fa-sync"></i> Sync EIS void status</a></li>';
+                                $eisInvoiceNumber = $fiscalSale ? $fiscalSale->eis_invoice_number : null;
+                                if ($fiscalSale && in_array($fiscalSale->status, ['pending', 'failed', 'submitted'], true)
+                                    && $eisInvoiceNumber && $fiscalSale->eis_setting_id) {
+                                    $html .= '<li><a href="#" class="eis-sale-sync" data-sync-url="'
+                                        .e(route('eis.sales.sync', ['id' => $fiscalSale->id])).'">'
+                                        .'<i class="fas fa-sync"></i> Sync EIS Invoice/Receipt</a></li>';
                                 }
                             }
 
