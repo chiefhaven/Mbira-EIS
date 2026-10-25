@@ -3,6 +3,7 @@
 namespace Modules\EIS\Services\Sales;
 
 use App\Transaction;
+use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
@@ -253,9 +254,22 @@ class SaleSubmissionService
             $terminal = \Modules\EIS\Models\EisTerminalConfiguration::where('configuration_id', $configuration->id)->firstOrFail();
             $terminalPosition = (int) $terminal->terminal_position;
             $taxpayerId = (int) $terminal->taxpayer_id;
-            $transactionCount = $this->invoiceGenerator->getDailyCount((int) $transaction->business_id, (int) $setting->id) + 1;
+            $transactionDate = $transaction->transaction_date
+                ? Carbon::parse($transaction->transaction_date)
+                : now();
+            $transactionCount = $this->invoiceGenerator->getNextDailyCount(
+                (int) $transaction->business_id,
+                (int) $setting->id,
+                $transactionDate
+            );
             $invoiceNumber = $this->invoiceGenerator->generateInvoiceNumber(
-                $transaction->business_id, $transactionCount, $terminalPosition, $taxpayerId, (int) $setting->id);
+                $transaction->business_id,
+                $transactionCount,
+                $terminalPosition,
+                $taxpayerId,
+                (int) $setting->id,
+                $transactionDate
+            );
 
             Log::debug('EIS Number generated', [
                 'transaction_id' => $transaction->id,
@@ -302,9 +316,13 @@ class SaleSubmissionService
      * @param int $businessId
      * @return int
      */
-    protected function getTransactionCount(int $businessId, ?int $terminalId = null): int
+    protected function getTransactionCount(
+        int $businessId,
+        ?int $terminalId = null,
+        ?\DateTimeInterface $transactionDate = null
+    ): int
     {
-        return $this->invoiceGenerator->getDailyCount($businessId, $terminalId) + 1;
+        return $this->invoiceGenerator->getNextDailyCount($businessId, $terminalId, $transactionDate);
     }
 
     /**

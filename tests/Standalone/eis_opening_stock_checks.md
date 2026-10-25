@@ -91,10 +91,11 @@ terminal by updating its existing settings and terminal configuration records.
 Health caches already include both business ID and credential/host identity.
 
 EIS invoice sequence numbers use the current taxpayer ID, terminal position and
-Julian day encoded in the persisted fiscal invoice number. The next sequence is
-that terminal's invoice count for today plus one; the business ID is not prepended
-to the sequence. Pending and failed invoices retain their allocated numbers and
-retries reuse them. A new day or replacement terminal has its own count.
+Julian day encoded in the persisted fiscal invoice number. The Julian day and
+terminal count are based on the sale's transaction date; the next sequence is
+that date's invoice count plus one. The business ID is not prepended to the
+sequence. Pending and failed invoices retain their allocated numbers and retries
+reuse them. Each transaction date or replacement terminal has its own count.
 
 Internal module routes, including formerly public terminal/configuration
 read endpoints, now require authenticated same-business access. Body, route,

@@ -5,7 +5,6 @@ namespace Modules\EIS\Services\Sales;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Modules\EIS\Models\EisConfiguration;
-use Modules\EIS\Models\EisSale;
 use Modules\EIS\Models\EisSetting;
 use Modules\EIS\Models\EisTerminalConfiguration;
 
@@ -73,10 +72,9 @@ class InvoiceNumberGenerator
      * @param \DateTime $date
      * @return int
      */
-    public function toJulianDate(\DateTime $date): int
+    public function toJulianDate(\DateTimeInterface $date): int
     {
-        $date = clone $date;
-        $date->setTime(0, 0, 0);
+        $date = \DateTimeImmutable::createFromInterface($date)->setTime(0, 0, 0);
         
         $year = (int) $date->format('Y');
         $month = (int) $date->format('m');
@@ -107,11 +105,18 @@ class InvoiceNumberGenerator
      * @param int|null $terminalPosition
      * @return string
      */
-    public function generateInvoiceNumber(int $businessId, int $transactionCount, ?int $terminalPosition, ?int $taxpayerId, ?int $terminalId = null): string
+    public function generateInvoiceNumber(
+        int $businessId,
+        int $transactionCount,
+        ?int $terminalPosition,
+        ?int $taxpayerId,
+        ?int $terminalId = null,
+        ?\DateTimeInterface $transactionDate = null
+    ): string
     {
         try {
 
-            return DB::transaction(function () use ($businessId, $transactionCount, $terminalPosition, $taxpayerId, $terminalId) {
+            return DB::transaction(function () use ($businessId, $transactionCount, $terminalPosition, $taxpayerId, $terminalId, $transactionDate) {
                 // Get EIS settings
                 $settings = EisSetting::where('business_id', $businessId)->when($terminalId !== null, fn ($query) => $query->whereKey($terminalId))->whereHas('configuration', function ($query) use ($terminalPosition, $taxpayerId) {
                     $query->whereHas('terminalConfiguration', fn ($terminal) => $terminal
@@ -135,7 +140,7 @@ class InvoiceNumberGenerator
                 $terminalPos = $terminalPosition ?? 1;
 
                 // Use full astronomical Julian Date
-                $julianDate = $this->toJulianDate(now());
+                $julianDate = $this->toJulianDate($transactionDate ?? now());
                 
                 // Encode each component to Base64
                 $encodedTaxpayerId = $this->base10ToBase64($taxpayerId);
@@ -300,7 +305,7 @@ class InvoiceNumberGenerator
             $invoiceNumbers = [];
             $configuration = \Modules\EIS\Services\Terminal\TerminalContext::configuration($businessId, $terminalId);
             $terminal = EisTerminalConfiguration::where('configuration_id', $configuration->id)->firstOrFail();
-            $sequence = $this->getDailyCount($businessId, (int) $configuration->eis_setting_id) + 1;
+            $sequence = $this->getNextDailyCount($businessId, (int) $configuration->eis_setting_id);
             
             for ($i = 0; $i < $count; $i++) {
                 $invoiceNumbers[] = $this->generateInvoiceNumber($businessId, $sequence + $i,
@@ -319,13 +324,12 @@ class InvoiceNumberGenerator
         }
     }
 
-    /**
-     * Count invoices issued today for the business's current terminal.
-     *
-     * @param int $businessId
-     * @return int
-     */
-    public function getDailyCount(int $businessId, ?int $terminalId = null): int
+    /** Count unique EIS invoices issued today by the selected terminal. */
+    public function getDailyCount(
+        int $businessId,
+        ?int $terminalId = null,
+        ?\DateTimeInterface $transactionDate = null
+    ): int
     {
         $settings = \Modules\EIS\Services\Terminal\TerminalContext::settings($businessId, null, $terminalId);
         $configuration = EisConfiguration::where('business_id', $businessId)->where('eis_setting_id', $settings->id)->firstOrFail();
@@ -335,14 +339,52 @@ class InvoiceNumberGenerator
         }
         $prefix = $this->base10ToBase64($terminal->taxpayer_id).'-'
             .$this->base10ToBase64($terminal->terminal_position).'-'
-            .$this->base10ToBase64($this->toJulianDate(now())).'-';
+            .$this->base10ToBase64($this->toJulianDate($transactionDate ?? now())).'-';
 
-        return EisSale::where('business_id', $businessId)
+        $invoices = DB::table('eis_sales')
+            ->where('business_id', $businessId)
             ->where('eis_setting_id', $settings->id)
-            ->where('eis_invoice_number', 'like', $prefix.'%')
-            ->pluck('eis_invoice_number')
-            ->filter(fn (string $number) => str_starts_with($number, $prefix))
-            ->count();
+            ->where(function ($query) use ($prefix) {
+                $query->where('eis_invoice_number', 'like', $prefix.'%')
+                    ->orWhere(function ($legacyQuery) {
+                        $legacyQuery->where(function ($numberQuery) {
+                            $numberQuery->whereNull('eis_invoice_number')->orWhere('eis_invoice_number', '');
+                        })->whereNotNull('request_payload');
+                    });
+            })
+            ->get(['eis_invoice_number', 'request_payload']);
+        $countedInvoices = [];
+        foreach ($invoices as $invoice) {
+            $number = $invoice->eis_invoice_number;
+            if (!is_string($number) || $number === '') {
+                $payload = is_string($invoice->request_payload)
+                    ? json_decode($invoice->request_payload, true)
+                    : null;
+                $number = is_array($payload) ? ($payload['invoiceHeader']['invoiceNumber'] ?? null) : null;
+            }
+            if (!is_string($number) || !str_starts_with($number, $prefix)) {
+                continue;
+            }
+
+            $encodedCount = substr($number, strlen($prefix));
+            if ($encodedCount === '' || str_contains($encodedCount, '-')
+                || $this->base64ToBase10($encodedCount) < 1) {
+                continue;
+            }
+            $countedInvoices[$number] = true;
+        }
+
+        return count($countedInvoices);
+    }
+
+    /** Return the next sequence for today's invoices on the selected terminal. */
+    public function getNextDailyCount(
+        int $businessId,
+        ?int $terminalId = null,
+        ?\DateTimeInterface $transactionDate = null
+    ): int
+    {
+        return $this->getDailyCount($businessId, $terminalId, $transactionDate) + 1;
     }
 
     /**
