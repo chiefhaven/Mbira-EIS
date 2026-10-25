@@ -1801,7 +1801,7 @@ class ProductUtil extends Util
     {
         $query = Variation::join('products as p', 'p.id', '=', 'variations.product_id')
                   ->join('units', 'p.unit_id', '=', 'units.id')
-                  ->leftjoin('variation_location_details as vld', 'variations.id', '=', 'vld.variation_id')
+                  ->join('variation_location_details as vld', 'variations.id', '=', 'vld.variation_id')
                   ->leftjoin('business_locations as l', 'vld.location_id', '=', 'l.id')
                   ->leftjoin('categories as c', 'p.category_id', '=', 'c.id')
                   ->join('product_variations as pv', 'variations.product_variation_id', '=', 'pv.id')
