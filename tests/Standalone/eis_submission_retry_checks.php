@@ -257,14 +257,24 @@ checkRetry(count($client->payloads) === $submittedCount,
 $recoveryClient->responder = function (EisSetting $setting, string $operation, array $payload) {
     $tracking = EisSale::where('eis_invoice_number', $payload['invoiceNumber'])->firstOrFail();
     $saved = $tracking->request_payload;
+    $header = $saved['invoiceHeader'];
+    $header['invoiceDateTime'] = Carbon\Carbon::parse($header['invoiceDateTime'])->format('Y-m-d\TH:i:s');
+    $lines = $saved['invoiceLineItems'];
+    foreach ($lines as &$line) { unset($line['totalVAT']); }
+    unset($line);
     return ['outcome' => 'accepted', 'response' => ['statusCode' => 1, 'data' => [
-        'invoiceHeader' => $saved['invoiceHeader'],
-        'invoiceLineItems' => $saved['invoiceLineItems'],
+        'invoiceHeader' => $header,
+        'invoiceLineItems' => $lines,
         'invoiceSummary' => $saved['invoiceSummary'],
-        'validationURL' => 'https://eis.invalid/validate?vc=SYNC-RECEIPT&S=SYNC-SIGNATURE',
+        'validationURL' => 'https://eservices.mra.mw/doc/v/?vc=SYNC-RECEIPT&c=SYNC-CODE',
         'dateSubmitted' => '2026-10-25T21:52:32.97',
     ]]];
 };
+$uncertainSubmitted->update([
+    'error_message' => 'Earlier submission failure',
+    'receipt_signature' => 'OLD-SIGNATURE',
+]);
+$beforeManualSync = $uncertainSubmitted->fresh();
 $syncResult = $recovery->sync($uncertainSubmitted, $settings);
 checkRetry(end($recoveryClient->requests)['payload']['invoiceNumber']
     === $uncertainSubmitted->getRawOriginal('fiscal_invoice_number')
@@ -273,11 +283,23 @@ checkRetry(end($recoveryClient->requests)['payload']['invoiceNumber']
     'Individual sync looks up eis_sales.fiscal_invoice_number, not the POS transaction number');
 checkRetry($syncResult['receipt_available'] && $syncResult['receipt_number'] === 'SYNC-RECEIPT'
     && $uncertainSubmitted->fresh()->fiscal_invoice_number === $uncertainSubmitted->eis_invoice_number
-    && $uncertainSubmitted->fresh()->receipt_signature === 'SYNC-SIGNATURE',
-    'Individual sync saves the official EIS receipt number and signature');
-checkRetry($uncertainSubmitted->fresh()->response_payload['manual_sync']['method'] === 'get-invoice-by-number'
-    && $uncertainSale->fresh()->is_fiscalized,
-    'Individual sync records lookup evidence and projects verified receipt to the POS sale');
+    && $uncertainSubmitted->fresh()->receipt_number === 'SYNC-RECEIPT',
+    'Individual sync saves fiscal invoice identity and the official receipt number');
+$afterManualSync = $uncertainSubmitted->fresh();
+checkRetry($afterManualSync->status === 'submitted'
+    && $afterManualSync->submitted_at->format('Y-m-d H:i:s') === '2026-10-25 21:52:32',
+    'Individual sync updates submitted status and EIS submission time');
+checkRetry($afterManualSync->response_payload === $syncResult['response'],
+    'Individual sync stores the exact EIS lookup response');
+checkRetry($afterManualSync->qr_code === 'https://eservices.mra.mw/doc/v/?vc=SYNC-RECEIPT&c=SYNC-CODE'
+    && $afterManualSync->receipt_signature === 'SYNC-CODE'
+    && $afterManualSync->error_message === null,
+    'Individual sync refreshes QR, receipt signature and clears stale error');
+checkRetry($afterManualSync->receipt_signature !== $beforeManualSync->receipt_signature
+    && $afterManualSync->is_fiscalized === $beforeManualSync->is_fiscalized
+    && $afterManualSync->fiscalized_at === $beforeManualSync->fiscalized_at
+    && !$uncertainSale->fresh()->is_fiscalized,
+    'Individual sync leaves fiscalization flags and transactions unchanged');
 
 $recoveryClient->responder = function (EisSetting $setting, string $operation, array $payload) {
     return ['outcome' => 'accepted', 'response' => ['statusCode' => 1, 'data' => [
