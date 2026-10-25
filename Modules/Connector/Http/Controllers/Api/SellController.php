@@ -1548,7 +1548,18 @@ class SellController extends ApiController
                 $item_tax = 0;
                 $unit_price_inc_tax = $discounted_price;
                 $tax_id = $this->__getValue('tax_rate_id', $product_data, $sell_line, null, 'tax_id');
-                if (! empty($tax_id)) {
+                $catalog_price = $this->__desktopPosCatalogPrice(
+                    $formated_data['source'] ?? null,
+                    $unit_price,
+                    $discount_amount,
+                    $tax_id,
+                    $product->tax,
+                    $variation
+                );
+                if ($catalog_price !== null) {
+                    $item_tax = $catalog_price['item_tax'];
+                    $unit_price_inc_tax = $catalog_price['unit_price_inc_tax'];
+                } elseif (! empty($tax_id)) {
                     $tax = TaxRate::where('business_id', $business_id)
                                 ->findOrFail($tax_id);
 
@@ -1687,6 +1698,22 @@ class SellController extends ApiController
         }
 
         return $input;
+    }
+
+    private function __desktopPosCatalogPrice($source, $unit_price, $discount_amount, $tax_id, $product_tax_id, $variation): ?array
+    {
+        if ($source !== 'desktop_pos' || empty($tax_id) || (int) $tax_id !== (int) $product_tax_id ||
+            (float) $discount_amount !== 0.0 || ! isset($variation->default_sell_price, $variation->sell_price_inc_tax) ||
+            (float) $unit_price !== (float) $variation->default_sell_price) {
+            return null;
+        }
+
+        $inclusive_price = (float) $variation->sell_price_inc_tax;
+
+        return [
+            'unit_price_inc_tax' => $variation->sell_price_inc_tax,
+            'item_tax' => number_format($inclusive_price - (float) $unit_price, 4, '.', ''),
+        ];
     }
 
     /**
