@@ -20,7 +20,8 @@ class SaleSubmissionService
         protected SaleTransformer $transformer,
         protected EisSaleClient $client,
         protected SaleResponseService $responseService,
-        protected InvoiceNumberGenerator $invoiceGenerator
+        protected InvoiceNumberGenerator $invoiceGenerator,
+        protected ?SaleOutcomeRecoveryService $outcomeRecovery = null
     ) {}
 
     /**
@@ -53,6 +54,10 @@ class SaleSubmissionService
         }
 
         if ($existing && $existing->status === 'submitted') {
+            $recovery = $existing->response_payload['recovery'] ?? [];
+            if (($recovery['state'] ?? null) === 'verified' && empty($recovery['receipt_available'])) {
+                return $existing;
+            }
             \App\Services\Sales\SavedSaleWriteGuard::recordFiscalReceipt($transaction->getConnection(), $transaction->id);
             $transaction->refresh();
             return $existing;
@@ -67,6 +72,27 @@ class SaleSubmissionService
             $location = \App\BusinessLocation::where('business_id', $transaction->business_id)->find($transaction->location_id);
             if (!$location || (string) $location->eis_site_id !== \Modules\EIS\Services\Terminal\TerminalContext::site($settings)) {
                 throw new EisSaleException('Sale location does not match the business terminal site.');
+            }
+        }
+
+        $recovery = $existing?->response_payload['recovery'] ?? [];
+        if (in_array($recovery['state'] ?? null, ['lookup_required', 'confirmed_absent'], true)) {
+            $kind = ($recovery['kind'] ?? null) === 'duplicate' ? 'duplicate' : 'ambiguous';
+            $resolution = $this->outcomeRecovery()->resolve(
+                $existing,
+                $eisSetting,
+                $existing->request_payload ?? [],
+                $existing->response_payload['submission_attempt'] ?? [],
+                $kind
+            );
+            if ($resolution === 'verified') {
+                return $existing->refresh();
+            }
+            if ($resolution !== 'absent' || $kind !== 'ambiguous') {
+                throw new EisSaleException(
+                    'EIS submission outcome is unresolved. The exact invoice will be looked up again before another submission.',
+                    $kind === 'duplicate' ? EisSaleException::DUPLICATE_INVOICE : 0
+                );
             }
         }
 
@@ -134,12 +160,28 @@ class SaleSubmissionService
             // queue/manual retries are recognized and include the signature.
             if (! ($response['success'] ?? false) || ($response['data']['statusCode'] ?? null) !== 1) {
                 $eisSale->update(['response_payload' => $response]);
+                $payload = $this->prepareOfflineValidationData($transaction, $settings, $eisSale, $payload);
                 if (($response['error_code'] ?? null) === 'DUPLICATE_INVOICE') {
                     $duplicateInvoice = true;
+                    $resolution = $this->outcomeRecovery()->resolve($eisSale, $eisSetting, $payload, $response, 'duplicate');
+                    if ($resolution === 'verified') {
+                        return $eisSale->refresh();
+                    }
                     throw new EisSaleException(
-                        'EIS reports this invoice number already exists; verify the exact invoice through the read-only lookup before any further submission.',
+                        'EIS reports this invoice number already exists. Automatic lookup could not verify an exact match; no further submission will be attempted.',
                         EisSaleException::DUPLICATE_INVOICE
                     );
+                }
+                if ($this->isAmbiguousSubmissionResponse($response)) {
+                    $resolution = $this->outcomeRecovery()->resolve($eisSale, $eisSetting, $payload, $response, 'ambiguous');
+                    if ($resolution === 'verified') {
+                        return $eisSale->refresh();
+                    }
+                    if ($resolution !== 'absent') {
+                        throw new EisSaleException(
+                            'EIS submission outcome is unresolved. The exact invoice will be looked up again before another submission.'
+                        );
+                    }
                 }
                 throw new EisSaleException($response['error'] ?? $response['data']['remark'] ?? 'EIS rejected the invoice');
             }
@@ -159,32 +201,7 @@ class SaleSubmissionService
                 'eis_invoice_number' => $eisInvoiceNumber ?? null,
             ]);
 
-            if (empty($payload['invoiceSummary']['validationURL'])) {
-                try {
-                    $offlineData = $this->transformer->generateOfflineValidationData($settings, $transaction, $payload);
-                    $validationUrl = $offlineData['validationURL'] ?? null;
-                    if (!is_string($validationUrl) || trim($validationUrl) === '') {
-                        throw new \UnexpectedValueException('EIS did not produce an offline validation URL.');
-                    }
-                    $offlineSignature = $offlineData['offlineDataSignature'] ?? null;
-                    if (!is_string($offlineSignature) || trim($offlineSignature) === '') {
-                        throw new \UnexpectedValueException('EIS did not produce an offline signature.');
-                    }
-                    $payload['offlineSignatureData'] = $offlineData;
-                    $payload['invoiceSummary']['offlineSignature'] = $offlineSignature;
-                    $payload['invoiceSummary']['validationURL'] = $validationUrl;
-                    $eisSale->update([
-                        'qr_code' => $validationUrl,
-                        'request_payload' => $payload,
-                    ]);
-                } catch (\InvalidArgumentException|\UnexpectedValueException $qrException) {
-                    Log::error('Failed to create EIS offline receipt QR after submission failure', [
-                        'transaction_id' => $transaction->id,
-                        'eis_invoice_number' => $eisInvoiceNumber ?? null,
-                        'error' => $qrException->getMessage(),
-                    ]);
-                }
-            }
+            $payload = $this->prepareOfflineValidationData($transaction, $settings, $eisSale, $payload);
 
             $eisSale->update([
                 'status' => 'failed',
@@ -205,6 +222,50 @@ class SaleSubmissionService
 
             throw $e;
         }
+    }
+
+    private function outcomeRecovery(): SaleOutcomeRecoveryService
+    {
+        return $this->outcomeRecovery ?? app(SaleOutcomeRecoveryService::class);
+    }
+
+    private function prepareOfflineValidationData(
+        Transaction $transaction,
+        object $settings,
+        EisSale $sale,
+        array $payload
+    ): array {
+        if (!empty($payload['invoiceSummary']['validationURL'])) {
+            return $payload;
+        }
+        try {
+            $offlineData = $this->transformer->generateOfflineValidationData($settings, $transaction, $payload);
+            $validationUrl = $offlineData['validationURL'] ?? null;
+            $offlineSignature = $offlineData['offlineDataSignature'] ?? null;
+            if (!is_string($validationUrl) || trim($validationUrl) === ''
+                || !is_string($offlineSignature) || trim($offlineSignature) === '') {
+                throw new \UnexpectedValueException('EIS did not produce a complete offline validation receipt.');
+            }
+            $payload['offlineSignatureData'] = $offlineData;
+            $payload['invoiceSummary']['offlineSignature'] = $offlineSignature;
+            $payload['invoiceSummary']['validationURL'] = $validationUrl;
+            $sale->update(['qr_code' => $validationUrl, 'request_payload' => $payload]);
+        } catch (\InvalidArgumentException|\UnexpectedValueException $exception) {
+            Log::error('Failed to create EIS offline receipt QR after submission failure', [
+                'transaction_id' => $transaction->id,
+                'eis_invoice_number' => $payload['invoiceHeader']['invoiceNumber'] ?? null,
+                'error' => $exception->getMessage(),
+            ]);
+        }
+        return $payload;
+    }
+
+    private function isAmbiguousSubmissionResponse(array $response): bool
+    {
+        $errorCode = (string) ($response['error_code'] ?? '');
+        $status = (int) ($response['status'] ?? 0);
+        return in_array($errorCode, ['CONNECTION_ERROR', 'REQUEST_ERROR', 'UNEXPECTED_ERROR'], true)
+            || ($errorCode === 'HTTP_ERROR_'.$status && $status >= 500 && $status < 600);
     }
 
     private function storedOfflineSignatureData(?array $payload): ?array

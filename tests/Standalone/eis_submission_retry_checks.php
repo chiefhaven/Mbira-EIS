@@ -18,7 +18,9 @@ use Modules\EIS\Services\Http\EisSaleClient;
 use Modules\EIS\Services\Sales\InvoiceNumberGenerator;
 use Modules\EIS\Services\Sales\OfflineSignatureService;
 use Modules\EIS\Services\Sales\SaleResponseService;
+use Modules\EIS\Services\Sales\SaleOutcomeRecoveryService;
 use Modules\EIS\Services\Sales\SaleSubmissionService;
+use Modules\EIS\Services\Sales\SalesApiClient;
 use Modules\EIS\Services\Sales\SaleTransformer;
 
 $container = new Container();
@@ -101,7 +103,19 @@ $client = new class extends EisSaleClient {
         return $this->response;
     }
 };
-$service = new class($transformer, $client, new SaleResponseService(), new InvoiceNumberGenerator()) extends SaleSubmissionService {
+$recoveryClient = new class extends SalesApiClient {
+    public array $responses = [];
+    public $responder = null;
+    public int $calls = 0;
+    public function __construct() {}
+    public function send(EisSetting $setting, string $operation, array $payload = []): array {
+        ++$this->calls;
+        return $this->responder ? ($this->responder)($setting, $operation, $payload)
+            : (array_shift($this->responses) ?? ['outcome' => 'unknown', 'response' => []]);
+    }
+};
+$recovery = new SaleOutcomeRecoveryService($recoveryClient);
+$service = new class($transformer, $client, new SaleResponseService(), new InvoiceNumberGenerator(), $recovery) extends SaleSubmissionService {
     public int $generated = 0;
     protected function generateEISInvoiceNumber(Transaction $transaction, EisSetting $setting): string {
         return 'GENERATED-'.++$this->generated;
@@ -205,6 +219,54 @@ checkRetry(EisSale::where('transaction_id', $duplicateSale->id)->value('status')
     'Duplicate invoice outcome remains failed for verification and is removed from blind automatic retries');
 checkRetry($duplicateError->getCode() === EisSaleException::DUPLICATE_INVOICE,
     'Duplicate invoice has a distinct non-retryable exception code');
+$duplicateTracking = EisSale::where('transaction_id', $duplicateSale->id)->first();
+checkRetry(($duplicateTracking->response_payload['recovery']['state'] ?? null) === 'lookup_required',
+    'Unverified duplicate is held for read-only lookup before another attempt');
+
+$client->response = ['success' => false, 'error_code' => 'CONNECTION_ERROR',
+    'error' => 'Connection timed out after sending request', 'retryable' => true];
+$recoveryClient->responder = function (EisSetting $setting, string $operation, array $payload) {
+    $tracking = EisSale::where('eis_invoice_number', $payload['invoiceNumber'])->firstOrFail();
+    $saved = $tracking->request_payload;
+    return ['outcome' => 'accepted', 'response' => ['statusCode' => 1, 'data' => [
+        'invoiceHeader' => $saved['invoiceHeader'],
+        'invoiceLineItems' => $saved['invoiceLineItems'],
+        'invoiceSummary' => $saved['invoiceSummary'],
+        'validationURL' => null,
+        'dateSubmitted' => '2026-10-25T21:52:32.97',
+    ]]];
+};
+$uncertainSale = submissionFixture();
+$uncertainSubmitted = $service->submit($uncertainSale, $settings);
+checkRetry($uncertainSubmitted->status === 'submitted'
+    && ($uncertainSubmitted->response_payload['recovery']['state'] ?? null) === 'verified',
+    'Ambiguous post is reconciled after exact read-only invoice match');
+checkRetry($uncertainSubmitted->receipt_number === null && !$uncertainSale->fresh()->is_fiscalized
+    && str_starts_with($uncertainSubmitted->qr_code, 'https://eis.invalid/offline'),
+    'Verified invoice without official receipt retains offline QR and does not claim fiscal receipt');
+$submittedCount = count($client->payloads);
+$service->submit($uncertainSale, $settings);
+checkRetry(count($client->payloads) === $submittedCount,
+    'Verified invoice without a receipt is never resubmitted on a later call');
+
+$recoveryClient->responder = function (EisSetting $setting, string $operation, array $payload) {
+    return ['outcome' => 'accepted', 'response' => ['statusCode' => 1, 'data' => [
+        'invoiceHeader' => ['invoiceNumber' => $payload['invoiceNumber'], 'siteId' => 'SITE-7', 'sellerTIN' => 'FIXTURE',
+            'invoiceDateTime' => '2026-10-25T21:52:32.97'],
+        'invoiceLineItems' => [], 'invoiceSummary' => ['invoiceTotal' => 0, 'totalVAT' => 0],
+    ]]];
+};
+$mismatchSale = submissionFixture();
+$mismatchError = failSubmission($service, $mismatchSale, $settings);
+checkRetry($mismatchError->getCode() !== EisSaleException::DUPLICATE_INVOICE
+    && (EisSale::where('transaction_id', $mismatchSale->id)->value('response_payload') !== null),
+    'Ambiguous invoice with nonmatching lookup stays unresolved');
+$submittedCount = count($client->payloads);
+try { $service->submit($mismatchSale, $settings); throw new RuntimeException('Unverified invoice was resubmitted'); }
+catch (EisSaleException $e) { checkRetry(true, 'Unverified invoice is blocked before retry'); }
+checkRetry(count($client->payloads) === $submittedCount,
+    'Lookup mismatch prevents a subsequent EIS submission');
+$recoveryClient->responder = null;
 $client->response = ['success' => false, 'error' => 'Fixture offline'];
 // Interrupted pending attempt, legacy failed tracking and retry-table-only history.
 foreach (['pending', 'failed', 'retry-table'] as $history) {
