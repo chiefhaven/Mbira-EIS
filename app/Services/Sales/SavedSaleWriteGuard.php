@@ -4,14 +4,16 @@ namespace App\Services\Sales;
 
 use Illuminate\Database\Connection;
 
-/** Legacy writers have no split-aware checkout contract: fence both bills, do not
- * accept an arbitrary client fingerprint as permission to overwrite saved lines.
+/** Legacy sale writers have no split-aware checkout contract: fence both bills,
+ * do not accept client fingerprints as permission to overwrite saved lines, and
+ * scope the supported payment-only workflows separately.
  * Query-builder/bulk writers MUST call this before any graph/stock side effects.
  */
 class SavedSaleWriteGuard
 {
     private static $checkout = [];
     private static $payment = [];
+    private static $paymentLines = [];
     private static $paymentDeletion = [];
     private static $stockAllocation = [];
 
@@ -78,6 +80,48 @@ class SavedSaleWriteGuard
     public static function isCheckout(Connection $db, $id)
     {
         return isset(self::$checkout[spl_object_id($db).':'.$id]) && $db->transactionLevel() >= self::$checkout[spl_object_id($db).':'.$id];
+    }
+
+    /** Scope the POS payment-only workflow without granting sale or line writes. */
+    public static function paymentLines(Connection $db, $id, $userId, callable $work)
+    {
+        if ($db->transactionLevel() < 1) {
+            throw new SavedSplitException('payment_requires_transaction', 'Payment updates require a locked database transaction.');
+        }
+
+        $header = $db->table('transactions')->where('id', $id)->lockForUpdate()->first();
+        if (!$header || $header->type !== 'sell' || !$db->getSchemaBuilder()->hasTable('saved_sale_split_operations')) {
+            return $work(false);
+        }
+        if ($db->getSchemaBuilder()->hasTable('restaurant_bills') &&
+            $db->table('restaurant_bills')->where('transaction_id', $id)->lockForUpdate()->exists() &&
+            !RestaurantBillService::isClearing($db, $id)) {
+            throw new SavedSplitException('restaurant_write_fenced', 'Use restaurant cashier clearing for this bill.');
+        }
+
+        $split = $db->table('saved_sale_split_operations')->where('business_id', $header->business_id)
+            ->where(function ($q) use ($id) {
+                $q->where('source_id', $id)->orWhere('result_id', $id);
+            })->lockForUpdate()->first();
+        if (!$split) {
+            return $work(false);
+        }
+
+        $key = spl_object_id($db).':'.$id;
+        if (isset(self::$paymentLines[$key])) {
+            throw new SavedSplitException('payment_lines_reentrant', 'Nested split payment updates are forbidden.');
+        }
+        self::$paymentLines[$key] = [
+            'level' => $db->transactionLevel(),
+            'header' => (array) $header,
+            'user_id' => $userId,
+        ];
+
+        try {
+            return $work(true);
+        } finally {
+            unset(self::$paymentLines[$key]);
+        }
     }
 
     public static function hasSplitHistory(Connection $db, $id)
@@ -314,6 +358,12 @@ class SavedSaleWriteGuard
         return $scope && $db->transactionLevel() >= $scope['level'];
     }
 
+    private static function isPaymentLines(Connection $db, $id)
+    {
+        $scope = self::$paymentLines[spl_object_id($db).':'.$id] ?? null;
+        return $scope && $db->transactionLevel() >= $scope['level'];
+    }
+
     private static function validatePaymentModel($model, $headerModel, $id)
     {
         $db = $model->getConnection();
@@ -375,6 +425,63 @@ class SavedSaleWriteGuard
         }
     }
 
+    private static function validatePaymentLinesModel($model, $headerModel, $id)
+    {
+        $db = $model->getConnection();
+        $scope = self::$paymentLines[spl_object_id($db).':'.$id] ?? null;
+        if (!$scope || $db->transactionLevel() < $scope['level']) {
+            throw new SavedSplitException('split_write_fenced', 'Invalid split payment update scope.');
+        }
+
+        $header = $scope['header'];
+        if ($headerModel) {
+            $dirty = array_diff(array_keys($model->getDirty()), ['payment_status', 'is_suspend', 'updated_at']);
+            if (!$model instanceof \App\Transaction || !$model->exists ||
+                (string) $model->getKey() !== (string) $id ||
+                $model->getRawOriginal('type') !== 'sell' ||
+                (string) $model->getRawOriginal('business_id') !== (string) $header['business_id'] ||
+                $dirty || !in_array($model->payment_status, ['due', 'partial', 'paid'], true)) {
+                throw new SavedSplitException('split_write_fenced', 'Split payment updates may only change payment state.');
+            }
+
+            return;
+        }
+
+        if (!$model instanceof \App\TransactionPayment ||
+            (string) ($model->transaction_id ?? '') !== (string) $id ||
+            (string) ($model->business_id ?? '') !== (string) $header['business_id'] ||
+            (string) ($model->payment_for ?? '') !== (string) $header['contact_id'] ||
+            !is_numeric($model->amount ?? null) || (float) $model->amount <= 0 ||
+            empty($model->method) || !empty($model->parent_id)) {
+            throw new SavedSplitException('split_write_fenced', 'Split payment rows must remain valid payments for their saved sale.');
+        }
+
+        if ($model->exists) {
+            $original = $model->getRawOriginal();
+            $mutable = ['payment_for', 'amount', 'method', 'is_return', 'card_transaction_number', 'card_number',
+                'card_type', 'card_holder_name', 'card_month', 'card_year', 'card_security', 'cheque_number',
+                'bank_account_number', 'note', 'paid_on', 'transaction_no', 'payment_ref_no', 'account_id',
+                'document', 'updated_at'];
+            if ((string) ($original['transaction_id'] ?? '') !== (string) $id ||
+                (string) ($original['business_id'] ?? '') !== (string) $header['business_id'] ||
+                !empty($original['parent_id']) ||
+                array_diff(array_keys($model->getDirty()), $mutable)) {
+                throw new SavedSplitException('split_write_fenced', 'Only payment details for this saved sale may be changed.');
+            }
+
+            return;
+        }
+
+        $allowed = ['transaction_id', 'business_id', 'payment_for', 'created_by', 'amount', 'method', 'is_return',
+            'card_transaction_number', 'card_number', 'card_type', 'card_holder_name', 'card_month', 'card_year',
+            'card_security', 'cheque_number', 'bank_account_number', 'note', 'paid_on', 'transaction_no',
+            'payment_ref_no', 'account_id', 'document', 'created_at', 'updated_at'];
+        if ((string) ($model->created_by ?? '') !== (string) $scope['user_id'] ||
+            array_diff(array_keys($model->getAttributes()), $allowed)) {
+            throw new SavedSplitException('split_write_fenced', 'Only valid payments for this saved sale may be added.');
+        }
+    }
+
     /** Token-only initialization must not save a stale sale model or edit its graph. */
     public static function invoiceToken(Connection $db, $id, $businessId): string
     {
@@ -410,7 +517,8 @@ class SavedSaleWriteGuard
         // while this writer waited for the header lock.
         if ($db->getSchemaBuilder()->hasTable('restaurant_bills') &&
             $db->table('restaurant_bills')->where('transaction_id', $id)->lockForUpdate()->exists() &&
-            !self::isCheckout($db, $id) && !self::isPayment($db, $id) && !self::isPaymentDeletion($db, $id)) {
+            !self::isCheckout($db, $id) && !self::isPayment($db, $id) &&
+            !self::isPaymentLines($db, $id) && !self::isPaymentDeletion($db, $id)) {
             throw new SavedSplitException('restaurant_write_fenced', 'Use the audited restaurant workflow to modify this bill.');
         }
         $split = $db->table('saved_sale_split_operations')
@@ -419,6 +527,7 @@ class SavedSaleWriteGuard
                 $q->where('source_id', $id)->orWhere('result_id', $id);
             })->lockForUpdate()->first();
         if ($split && !self::isCheckout($db, $id) && !self::isPayment($db, $id) &&
+            !self::isPaymentLines($db, $id) &&
             !self::isPaymentDeletion($db, $id)) {
             throw new SavedSplitException('split_write_fenced',
                 'This saved split bill is read-only to legacy writers. Use a split-aware payment or checkout.');
@@ -498,7 +607,9 @@ class SavedSaleWriteGuard
         $ids = array_unique(array_filter($ids));
         sort($ids, SORT_NUMERIC);
         foreach ($ids as $id) {
-            if (self::isPayment($model->getConnection(), $id) ||
+            if (self::isPaymentLines($model->getConnection(), $id)) {
+                self::validatePaymentLinesModel($model, $headerModel, $id);
+            } elseif (self::isPayment($model->getConnection(), $id) ||
                 self::isPaymentDeletion($model->getConnection(), $id)) {
                 self::validatePaymentModel($model, $headerModel, $id);
             }

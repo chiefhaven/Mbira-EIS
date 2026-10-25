@@ -202,6 +202,8 @@ check($preview['source']['lines'][0]['quantity'] === '4.0000', 'saved quantities
 $request = requestFor($service, $actor, [['id' => 1, 'quantity' => '1.5000'], ['id' => 2, 'quantity' => '2.0000']]);
 $response = $service->split(1, $actor, $request);
 check($response['bill_a']['final_total'] === '30.0000' && $response['bill_b']['final_total'] === '40.0000', 'historic totals partition');
+check($response['result_id'] !== 1 && $response['bill_a']['invoice_no'] !== $response['bill_b']['invoice_no']
+    && $db->table('transactions')->count() === 2, 'split portion is a separate invoice transaction');
 check($response['bill_a']['invoice_no'] === 'DRAFT-001'
     && $response['bill_b']['invoice_no'] === date('Y').'/0001', 'draft uses normal system transaction number');
 check($db->table('transactions')->where('id', $response['result_id'])->value('transaction_date')

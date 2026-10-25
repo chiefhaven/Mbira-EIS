@@ -270,6 +270,60 @@ $deleteOperation = DB::table('saved_sale_split_operations')->where('source_id', 
 paymentCheck(json_decode($deleteOperation->allocation_json, true)['kind'] === 'payment_delete'
     && !empty($deleteOperation->response_json), 'Split payment deletion is recorded in the durable ledger');
 
+$sale = saleFixture(); trackSplit($sale);
+$paymentForEdit = null;
+DB::transaction(function () use ($sale, &$paymentForEdit) {
+    \App\Services\Sales\SavedSaleWriteGuard::paymentLines(DB::connection(), $sale->id, 1, function () use ($sale, &$paymentForEdit) {
+        \App\Services\Sales\SavedSaleWriteGuard::lock(DB::connection(), $sale->id);
+        $paymentForEdit = TransactionPayment::create([
+            'transaction_id' => $sale->id, 'business_id' => $sale->business_id, 'created_by' => 1,
+            'payment_for' => $sale->contact_id, 'amount' => 60, 'method' => 'cash', 'paid_on' => '2026-10-14',
+        ]);
+        $sale->payment_status = 'partial';
+        $sale->save();
+    });
+});
+paymentCheck($paymentForEdit && $sale->fresh()->payment_status === 'partial',
+    'POS payment-only workflow accepts a split-aware tender');
+
+DB::transaction(function () use ($sale, $paymentForEdit) {
+    \App\Services\Sales\SavedSaleWriteGuard::paymentLines(DB::connection(), $sale->id, 1, function () use ($paymentForEdit) {
+        $paymentForEdit->amount = 75;
+        $paymentForEdit->save();
+    });
+});
+paymentCheck((float) $paymentForEdit->fresh()->amount === 75.0,
+    'POS payment-only workflow can update an existing split tender');
+
+DB::beginTransaction();
+try {
+    \App\Services\Sales\SavedSaleWriteGuard::paymentLines(DB::connection(), $sale->id, 1, function () use ($sale) {
+        \App\Services\Sales\SavedSaleWriteGuard::model(
+            new \App\TransactionSellLine(['transaction_id' => $sale->id, 'quantity' => 1])
+        );
+    });
+    DB::commit();
+    throw new RuntimeException('Expected split payment-only scope to reject a sale-line write');
+} catch (\App\Services\Sales\SavedSplitException $e) {
+    DB::rollBack();
+    paymentCheck($e->errorCode === 'split_write_fenced', 'POS payment-only scope cannot change sale lines');
+}
+
+DB::beginTransaction();
+try {
+    \App\Services\Sales\SavedSaleWriteGuard::paymentLines(DB::connection(), $sale->id, 1, function () use ($sale) {
+        $sale->final_total = 1;
+        $sale->save();
+    });
+    DB::commit();
+    throw new RuntimeException('Expected split payment-only scope to reject sale repricing');
+} catch (\App\Services\Sales\SavedSplitException $e) {
+    DB::rollBack();
+    paymentCheck($e->errorCode === 'split_write_fenced', 'POS payment-only scope cannot reprice a split sale');
+}
+paymentCheck((float) $sale->fresh()->final_total === 100.0,
+    'Rejected POS sale repricing leaves the split sale unchanged');
+
 $ordinarySale = saleFixture();
 addPayment($ordinarySale, 50);
 $ordinaryPayment = TransactionPayment::where('transaction_id', $ordinarySale->id)->firstOrFail();
@@ -332,6 +386,23 @@ function restaurantPaymentFixture(string $state = 'open'): Transaction {
     DB::table('transaction_sell_lines')->insert(['transaction_id' => $sale->id, 'quantity' => '2.0000']);
     DB::table('restaurant_tickets')->insert(['transaction_id' => $sale->id, 'status' => 'received']);
     return $sale;
+}
+$restaurantSale = restaurantPaymentFixture();
+try {
+    DB::transaction(function () use ($restaurantSale) {
+        \App\Services\Sales\SavedSaleWriteGuard::paymentLines(
+            DB::connection(),
+            $restaurantSale->id,
+            1,
+            function () {
+                throw new RuntimeException('Restaurant payment-only scope must not be entered.');
+            }
+        );
+    });
+    throw new RuntimeException('Expected restaurant bill payment-only workflow to remain fenced');
+} catch (\App\Services\Sales\SavedSplitException $e) {
+    paymentCheck($e->errorCode === 'restaurant_write_fenced',
+        'POS payment-only workflow preserves audited restaurant clearing');
 }
 foreach (['open', 'ready'] as $state) {
     $sale = restaurantPaymentFixture($state);

@@ -547,6 +547,7 @@ return [
     'card_number' => 'Card No.',
     'split_bill' => 'Split Bill',
     'split_bill_success' => 'Bill split successfully!',
+    'split_bill_new_invoice_note' => 'Selected items become a separate invoice; the remaining items stay on the original invoice.',
     'select_at_least_one_product' => 'Please select at least one product to split.',
     'split_bill_details' => 'Split Bill Details',
     'select_products_to_split' => 'Select Products to Split',

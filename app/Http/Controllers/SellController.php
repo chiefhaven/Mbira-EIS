@@ -848,67 +848,34 @@ class SellController extends Controller
         $sell = Transaction::where('business_id', $business_id)
                     ->where('id', $id)
                     ->with([
-                        'contact', 
-                        'eisSale', 
+                        'contact',
                         'sell_lines' => function ($q) {
                             $q->whereNull('parent_sell_line_id');
-                        }, 
-                        'sell_lines.product', 
-                        'sell_lines.product.unit', 
-                        'sell_lines.variations', 
-                        'sell_lines.variations.product_variation', 
-                        'sell_lines.sub_unit',
-                        'sell_lines.modifiers',
-                        'tax', 
+                        },
+                        'sell_lines.product',
+                        'sell_lines.product.unit',
+                        'sell_lines.variations',
+                        'sell_lines.variations.product_variation',
                         'location'
                     ])
                     ->firstOrFail();
 
-        if ($sell->payment_status == 'paid' || $sell->sell_lines->count() <= 1) {
-            return response()->json([
-                'success' => false,
-                'msg' => __('lang_v1.cannot_split_invoice')
-            ], 400);
+        try {
+            $split_preview = (new \App\Services\Sales\SavedSaleSplitService(DB::connection()))
+                ->preview($sell->id, auth()->user());
+        } catch (\App\Services\Sales\SavedSplitException $e) {
+            return response()->json(['success' => false, 'msg' => $e->getMessage()], $e->httpStatus);
         }
 
-        // Get payment types for dropdown
-        $payment_types = $this->transactionUtil->payment_types($sell->location_id, true, $business_id);
-        
-        // Get customers for dropdown
-        $customers = Contact::customersDropdown($business_id, false);
-        
-        // Get locations for dropdown
-        $business_locations = BusinessLocation::forDropdown($business_id, false);
-        
-        // Get tax rates
-        $taxes = TaxRate::where('business_id', $business_id)->pluck('name', 'id');
-
-        // Calculate line totals for display
-        $line_taxes = [];
-        foreach ($sell->sell_lines as $key => $value) {
-            if (! empty($value->sub_unit_id)) {
-                $formated_sell_line = $this->transactionUtil->recalculateSellLineTotals($business_id, $value);
-                $sell->sell_lines[$key] = $formated_sell_line;
-            }
-
-            if (! empty($taxes[$value->tax_id])) {
-                if (isset($line_taxes[$taxes[$value->tax_id]])) {
-                    $line_taxes[$taxes[$value->tax_id]] += ($value->item_tax * $value->quantity);
-                } else {
-                    $line_taxes[$taxes[$value->tax_id]] = ($value->item_tax * $value->quantity);
-                }
-            }
+        if (!$split_preview['eligible']) {
+            return response()->json([
+                'success' => false,
+                'msg' => $split_preview['reason']['message'],
+            ], 409);
         }
 
         return view('sale_pos.split_bill')
-            ->with(compact(
-                'sell',
-                'payment_types',
-                'customers',
-                'business_locations',
-                'taxes',
-                'line_taxes'
-            ));
+            ->with(compact('sell', 'split_preview'));
     }
 
     /**
@@ -919,52 +886,40 @@ class SellController extends Controller
      */
     public function processSplitBill(Request $request)
     {
-        try {
-            $business_id = request()->session()->get('user.business_id');
-            $user_id = request()->session()->get('user.id');
+        $validated = $request->validate([
+            'transaction_id' => 'required|integer|min:1',
+        ]);
 
-            $request->validate([
-                'transaction_id' => 'required|exists:transactions,id',
-                'sell_lines' => 'required|array|min:1',
-                'customer_id' => 'required|exists:contacts,id',
-                'location_id' => 'required|exists:business_locations,id',
+        try {
+            $result = (new \App\Services\Sales\SavedSaleSplitService(DB::connection()))
+                ->split((int) $validated['transaction_id'], auth()->user(), $request->only([
+                    'operation_id', 'expected_version', 'lines',
+                ]));
+
+            return response()->json([
+                'success' => true,
+                'msg' => __('lang_v1.split_bill_success').' '.$result['bill_b']['invoice_no'],
+                'new_transaction_id' => $result['result_id'],
+                'new_invoice_no' => $result['bill_b']['invoice_no'],
+                'source_invoice_no' => $result['bill_a']['invoice_no'],
+            ]);
+        } catch (\App\Services\Sales\SavedSplitException $e) {
+            return response()->json([
+                'success' => false,
+                'code' => $e->errorCode,
+                'msg' => $e->getMessage(),
+            ], $e->httpStatus);
+        } catch (\Throwable $e) {
+            \Log::error('Saved sale split failed', [
+                'transaction_id' => $request->input('transaction_id'),
+                'message' => $e->getMessage(),
             ]);
 
-            DB::beginTransaction();
-
-            // Verify split bill can be written and register this as a split-aware checkout
-            \App\Services\Sales\SavedSaleWriteGuard::lock(DB::connection(), $request->transaction_id);
-            $split_result = \App\Services\Sales\SavedSaleWriteGuard::checkout(DB::connection(), $request->transaction_id, function () use (
-                $request, $business_id, $user_id
-            ) {
-                return $this->performSplitBillOperation($request, $business_id, $user_id);
-            });
-            
-            DB::commit();
-
-            DB::afterCommit(function () use ($split_result) {
-                if ($split_result['split_transaction']->type == 'sell' && $split_result['split_transaction']->status == 'final') {
-                    event(new SaleCompleted($split_result['split_transaction']));
-                }
-            });
-
-            $output = [
-                'success' => true,
-                'msg' => __('lang_v1.split_bill_success'),
-                'new_transaction_id' => $split_result['split_transaction']->id
-            ];
-
-        } catch (\Exception $e) {
-            DB::rollBack();
-            \Log::emergency('File:'.$e->getFile().'Line:'.$e->getLine().'Message:'.$e->getMessage());
-
-            $output = [
+            return response()->json([
                 'success' => false,
-                'msg' => $e->getMessage()
-            ];
+                'msg' => __('messages.something_went_wrong'),
+            ], 500);
         }
-
-        return $output;
     }
 
     /**

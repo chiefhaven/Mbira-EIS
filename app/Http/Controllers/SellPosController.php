@@ -1430,10 +1430,16 @@ class SellPosController extends Controller
                 //if edit pos not allowed and only edit payment allowed
                 if ($only_payment) {
                     DB::beginTransaction();
-                    \App\Services\Sales\SavedSaleWriteGuard::lock(DB::connection(), $id);
                     $transaction_before = Transaction::where('business_id', $business_id)->lockForUpdate()->findOrFail($id);
                     app(\Modules\EIS\Services\Sales\PosBuyerValidationService::class)->assertSaleUnchanged($validated_transaction, $transaction_before);
-                    $this->onlyUpdatePayment($transaction_before, $input);
+                    \App\Services\Sales\SavedSaleWriteGuard::paymentLines(
+                        DB::connection(),
+                        $id,
+                        auth()->user()->id,
+                        function () use ($transaction_before, $input) {
+                            $this->onlyUpdatePayment($transaction_before, $input);
+                        }
+                    );
                     DB::commit();
 
                     SaleSubmissionRule::initiate($transaction_before);

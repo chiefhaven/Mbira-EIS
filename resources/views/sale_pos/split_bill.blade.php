@@ -90,6 +90,9 @@
                                                     </thead>
                                                     <tbody>
                                                         @foreach($sell->sell_lines as $index => $line)
+                                                        @php
+                                                            $allow_decimal_split = !empty($line->product->unit) && $line->product->unit->allow_decimal;
+                                                        @endphp
                                                         <tr>
                                                             <td class="text-center" style="padding: 3px;">{{ $index + 1 }}</td>
                                                             <td style="padding: 3px;">{{ $line->product->name }}</td>
@@ -102,9 +105,12 @@
                                                                 <div class="input-group input-group-sm" style="width: 100px; margin: 0 auto;">
                                                                     <input type="number" class="form-control input-sm split-quantity" 
                                                                         value="{{ $line->quantity }}" 
-                                                                        min="1" max="{{ $line->quantity }}"
+                                                                        min="{{ $allow_decimal_split ? '0.0001' : '1' }}"
+                                                                        step="{{ $allow_decimal_split ? '0.0001' : '1' }}"
+                                                                        max="{{ $line->quantity }}"
                                                                         data-line-id="{{ $line->id }}"
                                                                         data-max-qty="{{ $line->quantity }}"
+                                                                        data-allow-decimal="{{ $allow_decimal_split ? '1' : '0' }}"
                                                                         style="padding: 2px 4px; font-size: 12px; height: 24px;">
                                                                     <span class="input-group-addon" style="padding: 2px 6px; font-size: 11px;">/ {{ @format_quantity($line->quantity) }}</span>
                                                                 </div>
@@ -143,12 +149,9 @@
                                 <div class="col-md-12">
                                     <div class="box box-solid" style="margin-bottom: 0;">
                                         <div class="box-body" style="padding: 8px 12px;">
-                                            <!-- Hidden Fields -->
-                                            <input type="hidden" id="split_customer" value="{{ $sell->contact_id }}">
-                                            <input type="hidden" id="split_location" value="{{ $sell->location_id }}">
-                                            <input type="hidden" id="split_payment_method" value="">
-                                            <input type="hidden" id="split_payment_status" value="due">
-                                            <input type="hidden" id="split_status" value="final">
+                                            <input type="hidden" id="split_expected_version" value="{{ $split_preview['expected_version'] }}">
+                                            <input type="hidden" id="split_operation_id" value="{{ (string) \Illuminate\Support\Str::uuid() }}">
+                                            <p class="text-muted" style="margin-bottom: 8px;">@lang('lang_v1.split_bill_new_invoice_note')</p>
                                             
                                             <!-- Split Amount Display - Compact -->
                                             <div class="row">
@@ -161,15 +164,6 @@
                                                 </div>
                                             </div>
 
-                                            <!-- Notes - Compact -->
-                                            <div class="row">
-                                                <div class="col-md-12">
-                                                    <div class="form-group" style="margin-bottom: 0;">
-                                                        <label style="font-size: 12px; margin-bottom: 2px;">@lang('sale.additional_notes')</label>
-                                                        <textarea class="form-control" id="split_notes" rows="1" placeholder="@lang('sale.add_additional_notes')" style="padding: 3px 6px; font-size: 12px; height: 28px; resize: none;"></textarea>
-                                                    </div>
-                                                </div>
-                                            </div>
                                         </div>
                                     </div>
                                 </div>
@@ -225,9 +219,10 @@ $(document).ready(function() {
     $(document).on('change', '.split-quantity', function() {
         var maxQty = parseFloat($(this).data('max-qty'));
         var val = parseFloat($(this).val()) || 0;
+        var minQty = parseFloat($(this).attr('min')) || 1;
         
-        if (val < 1) {
-            $(this).val(1);
+        if (val < minQty) {
+            $(this).val(minQty);
         } else if (val > maxQty) {
             $(this).val(maxQty);
             toastr.warning(langQuantityExceedsAvailable.replace(':available', maxQty));
@@ -263,16 +258,33 @@ $(document).ready(function() {
             var maxQty = parseFloat(row.find('.split-quantity').data('max-qty'));
             
             if ($(this).is(':checked')) {
-                var quantity = parseFloat(row.find('.split-quantity').val()) || 0;
+                var quantityInput = row.find('.split-quantity');
+                var quantity = String(quantityInput.val()).trim();
+                var quantityValue = parseFloat(quantity) || 0;
                 var lineId = $(this).val();
                 
-                if (quantity <= 0) {
+                if (/^\.\d+$/.test(quantity)) {
+                    quantity = '0' + quantity;
+                    quantityInput.val(quantity);
+                } else if (/^\d+\.$/.test(quantity)) {
+                    quantity += '0';
+                    quantityInput.val(quantity);
+                }
+
+                if (!/^\d+(?:\.\d{1,4})?$/.test(quantity) ||
+                    (quantityInput.data('allow-decimal') != 1 && quantityValue % 1 !== 0)) {
+                    toastr.error(langQuantityMustBeGreaterThanZero);
+                    hasInvalidQuantity = true;
+                    return false;
+                }
+
+                if (quantityValue <= 0) {
                     toastr.error(langQuantityMustBeGreaterThanZero);
                     hasInvalidQuantity = true;
                     return false;
                 }
                 
-                if (quantity > maxQty) {
+                if (quantityValue > maxQty) {
                     toastr.error(langQuantityExceedsAvailable.replace(':available', maxQty));
                     hasInvalidQuantity = true;
                     return false;
@@ -284,7 +296,7 @@ $(document).ready(function() {
                 });
                 
                 // Calculate remaining items for selected lines
-                totalRemainingItems += (maxQty - quantity);
+                totalRemainingItems += (maxQty - quantityValue);
             } else {
                 // Items not selected remain
                 totalRemainingItems += maxQty;
@@ -306,19 +318,11 @@ $(document).ready(function() {
             return false;
         }
 
-        // Get values from hidden fields
-        var customer = $('#split_customer').val();
-        var location = $('#split_location').val();
-
         var data = {
             transaction_id: {{ $sell->id }},
-            sell_lines: selectedLines,
-            customer_id: customer,
-            location_id: location,
-            payment_method: $('#split_payment_method').val(),
-            payment_status: $('#split_payment_status').val(),
-            status: $('#split_status').val(),
-            notes: $('#split_notes').val(),
+            operation_id: $('#split_operation_id').val(),
+            expected_version: $('#split_expected_version').val(),
+            lines: selectedLines,
             _token: '{{ csrf_token() }}'
         };
 
@@ -363,7 +367,6 @@ $(document).ready(function() {
 
     // Reset modal when hidden
     $('#splitBillModal').on('hidden.bs.modal', function() {
-        $('#split_notes').val('');
         var currencySymbol = '{{ $sell->location->currency->symbol ?? 'K' }}';
         $('#selected-total').text(currencySymbol + ' 0.00');
         $('#split-amount-display').text(currencySymbol + ' 0.00');
