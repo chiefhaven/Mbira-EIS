@@ -26,6 +26,7 @@ class SaleOutcomeRecoveryService
 
         $lookup = $this->client->send($setting, 'get-invoice-by-number', ['invoiceNumber' => $invoiceNumber]);
         $data = $lookup['response']['data'] ?? [];
+        Log::info("payload", $lookup);
         if (($lookup['outcome'] ?? null) !== 'accepted' || !$this->matches($data, $payload, $setting)) {
             throw new \UnexpectedValueException('EIS did not return an invoice that exactly matches this saved sale. No local data was changed.');
         }
