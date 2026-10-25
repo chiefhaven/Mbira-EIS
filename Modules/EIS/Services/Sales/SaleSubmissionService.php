@@ -103,6 +103,7 @@ class SaleSubmissionService
         }
 
         $payload = [];
+        $duplicateInvoice = false;
 
         try {
             // ----------------------------
@@ -132,6 +133,13 @@ class SaleSubmissionService
             // queue/manual retries are recognized and include the signature.
             if (! ($response['success'] ?? false) || ($response['data']['statusCode'] ?? null) !== 1) {
                 $eisSale->update(['response_payload' => $response]);
+                if (($response['error_code'] ?? null) === 'DUPLICATE_INVOICE') {
+                    $duplicateInvoice = true;
+                    throw new EisSaleException(
+                        'EIS reports this invoice number already exists; verify the exact invoice through the read-only lookup before any further submission.',
+                        EisSaleException::DUPLICATE_INVOICE
+                    );
+                }
                 throw new EisSaleException($response['error'] ?? $response['data']['remark'] ?? 'EIS rejected the invoice');
             }
 
@@ -185,7 +193,14 @@ class SaleSubmissionService
             // -------------------------
             // SAFE RETRY STORAGE
             // -------------------------
-            $this->storeFailedTransaction($transaction, $payload, $e->getMessage());
+            if ($duplicateInvoice) {
+                DB::table('eis_failed_transactions')
+                    ->where('business_id', $transaction->business_id)
+                    ->where('transaction_id', $transaction->id)
+                    ->delete();
+            } else {
+                $this->storeFailedTransaction($transaction, $payload, $e->getMessage());
+            }
 
             throw $e;
         }

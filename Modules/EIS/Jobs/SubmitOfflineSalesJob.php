@@ -34,6 +34,11 @@ class SubmitOfflineSalesJob implements ShouldQueue
 
     public function handle(SaleSubmissionService $submissionService): void
     {
+        if (DB::connection()->transactionLevel() > 0) {
+            $this->deferUntilCommit();
+            return;
+        }
+
         try {
             Log::info('SubmitOfflineSalesJob started', [
                 'transaction_id' => $this->transactionId,
@@ -100,6 +105,14 @@ class SubmitOfflineSalesJob implements ShouldQueue
             ]);
 
         } catch (EisSaleException $e) {
+            if ($e->getCode() === EisSaleException::DUPLICATE_INVOICE) {
+                Log::warning('EIS invoice already exists; automatic retry stopped pending read-only verification', [
+                    'transaction_id' => $this->transactionId,
+                    'business_id' => $this->businessId,
+                ]);
+                return;
+            }
+
             Log::error('EIS submission failed in job', [
                 'transaction_id' => $this->transactionId,
                 'error' => $e->getMessage(),
@@ -128,6 +141,20 @@ class SubmitOfflineSalesJob implements ShouldQueue
 
             $this->release($this->backoff * $this->attempts());
         }
+    }
+
+    protected function deferUntilCommit(): void
+    {
+        $transactionId = $this->transactionId;
+        $businessId = $this->businessId;
+        $queue = $this->queue ?? 'eis-submission';
+        DB::afterCommit(function () use ($transactionId, $businessId, $queue) {
+            self::dispatch($transactionId, $businessId)->onQueue($queue);
+        });
+        Log::info('Deferred EIS sale submission until the enclosing transaction commits', [
+            'transaction_id' => $transactionId,
+            'business_id' => $businessId,
+        ]);
     }
 
     public function failed(\Throwable $exception): void

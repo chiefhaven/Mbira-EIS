@@ -108,13 +108,23 @@ class EisSaleClient
 
                 $errorMessage = $this->parseErrorMessage($response);
                 $isRetryable = $this->isRetryableHttpStatus($status);
+                $responseBody = $response->json() ?? $body;
+                $duplicateRemark = is_array($responseBody) ? ($responseBody['remark'] ?? null) : null;
+                $isDuplicateInvoice = $status === 400
+                    && is_array($responseBody)
+                    && is_numeric($responseBody['statusCode'] ?? null)
+                    && (int) $responseBody['statusCode'] === -2
+                    && is_string($duplicateRemark)
+                    && strcasecmp(trim($duplicateRemark), 'Invoice Number already exists') === 0;
 
                 return $this->errorResult(
-                    $errorMessage ?? sprintf('EIS returned HTTP %s', $status),
-                    'HTTP_ERROR_' . $status,
+                    $isDuplicateInvoice
+                        ? 'EIS reports this invoice number already exists; verify it with a read-only invoice lookup before retrying.'
+                        : ($errorMessage ?? sprintf('EIS returned HTTP %s', $status)),
+                    $isDuplicateInvoice ? 'DUPLICATE_INVOICE' : 'HTTP_ERROR_' . $status,
                     $status,
-                    $isRetryable,
-                    $response->json() ?? $body
+                    $isDuplicateInvoice ? false : $isRetryable,
+                    $responseBody
                 );
             }
 

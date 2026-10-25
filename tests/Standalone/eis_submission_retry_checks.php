@@ -149,9 +149,9 @@ function submissionFixture(): Transaction {
     $fixture->exists = true;
     return fixtureRelations($fixture);
 }
-function failSubmission(SaleSubmissionService $service, Transaction $transaction, EisSetting $settings): void {
+function failSubmission(SaleSubmissionService $service, Transaction $transaction, EisSetting $settings): EisSaleException {
     try { $service->submit($transaction, $settings); }
-    catch (EisSaleException $e) { checkRetry(true, 'Failure propagated to queue'); return; }
+    catch (EisSaleException $e) { checkRetry(true, 'Failure propagated to queue'); return $e; }
     throw new RuntimeException('Expected failed submission');
 }
 $transaction = submissionFixture();
@@ -189,6 +189,23 @@ checkRetry($retry['offlineSignatureData'] === $storedFirstFailure['offlineSignat
 checkRetry($retry['invoiceHeader']['invoiceNumber'] === $first['invoiceHeader']['invoiceNumber'] && $service->generated === 1, 'Retry reuses generated identity');
 $failed = DB::table('eis_failed_transactions')->where('transaction_id', $transaction->id)->first();
 checkRetry($failed->attempts === 2 && json_decode($failed->payload, true) === json_decode(json_encode($retry), true), 'Failed retry stores current signed payload');
+$duplicateSale = submissionFixture();
+DB::table('eis_failed_transactions')->insert([
+    'business_id' => 7, 'transaction_id' => $duplicateSale->id, 'attempts' => 2,
+    'next_retry_at' => now(), 'created_at' => now(), 'updated_at' => now(),
+]);
+$client->response = [
+    'success' => false, 'error_code' => 'DUPLICATE_INVOICE',
+    'error' => 'EIS reports this invoice number already exists.',
+    'data' => ['statusCode' => -2, 'remark' => 'Invoice Number already exists'],
+];
+$duplicateError = failSubmission($service, $duplicateSale, $settings);
+checkRetry(EisSale::where('transaction_id', $duplicateSale->id)->value('status') === 'failed'
+    && ! DB::table('eis_failed_transactions')->where('transaction_id', $duplicateSale->id)->exists(),
+    'Duplicate invoice outcome remains failed for verification and is removed from blind automatic retries');
+checkRetry($duplicateError->getCode() === EisSaleException::DUPLICATE_INVOICE,
+    'Duplicate invoice has a distinct non-retryable exception code');
+$client->response = ['success' => false, 'error' => 'Fixture offline'];
 // Interrupted pending attempt, legacy failed tracking and retry-table-only history.
 foreach (['pending', 'failed', 'retry-table'] as $history) {
     $sale = submissionFixture();
@@ -296,6 +313,23 @@ $httpSettings = (object) ['business_id' => 7, 'jwt_token' => 'fixture', 'secret_
 $failure = (new EisSaleClient($health))->submit($first, $httpSettings);
 checkRetry($requests === 1, 'Client sends only one request per tracked attempt');
 checkRetry(! $failure['success'] && $failure['error_code'] === 'CONNECTION_ERROR', 'Transport failure returns for persisted retry');
+$requests = 0;
+$duplicateHttp = new Illuminate\Http\Client\Factory();
+$duplicateHttp->preventStrayRequests();
+$container->instance(Illuminate\Http\Client\Factory::class, $duplicateHttp);
+Illuminate\Support\Facades\Http::clearResolvedInstance(Illuminate\Http\Client\Factory::class);
+Illuminate\Support\Facades\Http::fake(function () use (&$requests) {
+    ++$requests;
+    return Illuminate\Support\Facades\Http::response(
+        ['statusCode' => -2, 'remark' => 'Invoice Number already exists', 'data' => null, 'errors' => []],
+        400
+    );
+});
+$duplicateResponse = (new EisSaleClient($health))->submit($first, $httpSettings);
+checkRetry($requests === 1 && ! $duplicateResponse['success']
+    && $duplicateResponse['error_code'] === 'DUPLICATE_INVOICE'
+    && ! $duplicateResponse['retryable'],
+    'Duplicate EIS invoice response is marked for verification, not automatic retry');
 $foreignSettings = new EisSetting();
 $foreignSettings->business_id = 8;
 $beforeGenerated = $service->generated;
@@ -335,6 +369,18 @@ checkRetry(count($client->payloads) === $beforeRequests && EisSale::count() === 
 $job->failed(new RuntimeException('Fixture mismatch'));
 checkRetry(DB::table('eis_failed_transactions')->count() === $beforeFailures,
     'Failed callback cannot create retry tracking for a foreign business transaction');
+$deferredTransaction = submissionFixture();
+$beforeRequests = count($client->payloads);
+$deferredJob = new class($deferredTransaction->id, 7) extends Modules\EIS\Jobs\SubmitOfflineSalesJob {
+    public bool $deferred = false;
+    protected function deferUntilCommit(): void { $this->deferred = true; }
+};
+DB::beginTransaction();
+$deferredJob->handle($service);
+checkRetry(count($client->payloads) === $beforeRequests,
+    'Submission job does not reach EIS inside the caller transaction');
+checkRetry($deferredJob->deferred, 'Submission job schedules its EIS work for after commit');
+DB::rollBack();
 $container->instance('db.schema', $schema);
 Illuminate\Support\Facades\Schema::clearResolvedInstance('db.schema');
 $projectionMigration = require dirname(__DIR__, 2).'\Modules\EIS\Database\Migrations\2026_10_23_211000_add_transaction_fiscal_receipt_projection.php';
