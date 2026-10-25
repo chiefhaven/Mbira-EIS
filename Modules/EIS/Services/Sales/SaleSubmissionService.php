@@ -137,6 +137,23 @@ class SaleSubmissionService
                 'eis_invoice_number' => $eisInvoiceNumber ?? null,
             ]);
 
+            if (empty($payload['invoiceSummary']['validationURL'])) {
+                try {
+                    $offlineData = $this->transformer->generateOfflineValidationData($settings, $transaction, $payload);
+                    $validationUrl = $offlineData['validationURL'] ?? null;
+                    if (!is_string($validationUrl) || trim($validationUrl) === '') {
+                        throw new \UnexpectedValueException('EIS did not produce an offline validation URL.');
+                    }
+                    $eisSale->update(['qr_code' => $validationUrl]);
+                } catch (\InvalidArgumentException|\UnexpectedValueException $qrException) {
+                    Log::error('Failed to create EIS offline receipt QR after submission failure', [
+                        'transaction_id' => $transaction->id,
+                        'eis_invoice_number' => $eisInvoiceNumber ?? null,
+                        'error' => $qrException->getMessage(),
+                    ]);
+                }
+            }
+
             $eisSale->update([
                 'status' => 'failed',
                 'error_message' => $e->getMessage(),

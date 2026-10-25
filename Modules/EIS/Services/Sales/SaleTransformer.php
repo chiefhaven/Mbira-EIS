@@ -458,7 +458,9 @@ class SaleTransformer
             
             // Prepare request data for signature
             $requestData = [
-                'transactiondate' => now()->toISOString(),
+                'transactiondate' => $transaction->transaction_date
+                    ? Carbon::parse($transaction->transaction_date)->toISOString()
+                    : now()->toISOString(),
                 'transactionCount' => $transactionCount,
                 'NumItems' => $totalItems,
                 'InvoiceTotal' => (float) ($invoiceSummary['invoiceTotal'] ?? 0),
@@ -495,6 +497,37 @@ class SaleTransformer
                 'error' => $e->getMessage()
             ];
         }
+    }
+
+    /**
+     * Generate EIS offline validation data from the exact invoice sent online.
+     */
+    public function generateOfflineValidationData(EisSetting $settings, Transaction $transaction, array $payload): array
+    {
+        $invoiceNumber = $payload['invoiceHeader']['invoiceNumber'] ?? null;
+        $invoiceSummary = $payload['invoiceSummary'] ?? null;
+        $invoiceLines = $payload['invoiceLineItems'] ?? null;
+
+        if (!is_string($invoiceNumber) || $invoiceNumber === ''
+            || !is_array($invoiceSummary) || !is_array($invoiceLines) || $invoiceLines === []) {
+            throw new \UnexpectedValueException('The submitted EIS invoice payload is incomplete; offline validation data cannot be generated.');
+        }
+
+        $totalItems = 0;
+        foreach ($invoiceLines as $line) {
+            if (!is_array($line) || !is_numeric($line['quantity'] ?? null)) {
+                throw new \UnexpectedValueException('The submitted EIS invoice lines are invalid; offline validation data cannot be generated.');
+            }
+            $totalItems += (float) $line['quantity'];
+        }
+
+        return $this->generateOfflineSignature(
+            $settings,
+            $transaction,
+            $invoiceNumber,
+            $invoiceSummary,
+            (int) $totalItems
+        );
     }
 
     /**

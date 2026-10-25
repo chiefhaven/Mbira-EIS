@@ -54,6 +54,8 @@ Settings -> MRA EIS -> **EIS Sales** provides the Sales endpoints in the [offici
 
 The console requires `business_settings.access`, the authenticated business and permitted locations. Sending notes additionally requires full `access_sell_return` permission. Retrieval verifies the response site/TIN, requested invoice number and local terminal ownership; a mismatching or unlinked upstream invoice is withheld. Locally pending/failed tracked invoice numbers can be retrieved for investigation without resending or silently changing their fiscal status. Receipt cancellation and void retrieval remain available under **EIS Utilities**, where Swagger tags them.
 
+When an online sale submission fails, the application generates the EIS offline signature and validation URL from the exact submitted invoice payload and persists that URL as the sale's QR data. The failed online request remains unchanged; retries use the signed offline payload and keep the same EIS invoice identity.
+
 ### POS return/accounting integration
 
 Both the web and Connector POS return paths call the shared `TransactionUtil::addSellReturn`. For fiscal sales, the original sale must already be submitted with exact terminal/location routing. The user must have return permission and location access. Saving a return and its EIS request occurs in the same InnoDB transaction as the existing customer return/refund ledger, stock increase and purchase-allocation release. Preparation makes **no HTTP request**. The return response directs the operator to EIS Sales for review.

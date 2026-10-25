@@ -82,8 +82,13 @@ DB::table('eis_settings')->insert(['business_id' => 7, 'tpin' => 'FIXTURE', 'bra
 $settings = EisSetting::first();
 $transformer = new class(new EisTaxRate(), new OfflineSignatureService(), new InvoiceNumberGenerator()) extends SaleTransformer {
     public int $signatures = 0;
+    public int $offlineQrGenerations = 0;
     protected function generateOfflineSignature(EisSetting $settings, Transaction $transaction, string $eisInvoiceNumber, array $invoiceSummary, int $totalItems): array {
         ++$this->signatures;
+        return ['offlineDataSignature' => 'fixture-signature', 'validationURL' => 'https://eis.invalid/offline'];
+    }
+    public function generateOfflineValidationData(EisSetting $settings, Transaction $transaction, array $payload): array {
+        ++$this->offlineQrGenerations;
         return ['offlineDataSignature' => 'fixture-signature', 'validationURL' => 'https://eis.invalid/offline'];
     }
 };
@@ -160,6 +165,15 @@ checkRetry(! isset($first['offlineSignatureData']) && ! isset($first['invoiceSum
 checkRetry($transformer->signatures === 0, 'First attempt does not generate offline signature');
 $tracking = EisSale::where('transaction_id', $transaction->id)->firstOrFail();
 checkRetry($tracking->status === 'failed' && $tracking->fiscal_invoice_number === 'GENERATED-1', 'Failed invoice persists generated fiscal number');
+checkRetry($tracking->qr_code === 'https://eis.invalid/offline'
+    && $transformer->offlineQrGenerations === 1,
+    'Failed initial submission generates and saves the EIS offline validation QR URL');
+$settings->secret_key = 'fixture-secret';
+$realOfflineTransformer = new SaleTransformer(new EisTaxRate(), new OfflineSignatureService(), new InvoiceNumberGenerator());
+$offlineValidation = $realOfflineTransformer->generateOfflineValidationData($settings, $transaction, $first);
+checkRetry(str_starts_with($offlineValidation['validationURL'], 'https://dev-eis-portal.mra.mw/ReceiptValidation/Validate/?')
+    && str_contains($offlineValidation['validationURL'], '&S='),
+    'Offline QR validation URL follows the EIS receipt signature format');
 checkRetry($tracking->invoice_number === 'POS-ORIGINAL' && ! $transaction->fresh()->is_fiscalized, 'Failure preserves POS identity without fiscalizing');
 failSubmission($service, $transaction, $settings);
 $retry = $client->payloads[1];
