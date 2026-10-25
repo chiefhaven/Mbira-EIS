@@ -40,13 +40,7 @@ class SaleOutcomeRecoveryService
         $url = $data['validationURL'] ?? $data['invoiceSummary']['validationURL'] ?? null;
         $url = is_string($url) && $url !== '' ? $url : null;
         $receiptNumber = $this->receiptNumber($url) ?? $this->explicitReceiptNumber($data);
-        $receiptSignature = null;
-        if ($url !== null) {
-            parse_str(parse_url($url, PHP_URL_QUERY) ?? '', $urlParameters);
-            $receiptSignature = isset($urlParameters['S']) && is_string($urlParameters['S'])
-                ? $urlParameters['S']
-                : null;
-        }
+        $receiptSignature = $this->receiptSignature($url);
 
         return $sale->getConnection()->transaction(function () use (
             $sale,
@@ -70,13 +64,7 @@ class SaleOutcomeRecoveryService
             $updates = [
                 'status' => 'submitted',
                 'fiscal_invoice_number' => $invoiceNumber,
-                'response_payload' => array_merge($current->response_payload ?? [], [
-                    'manual_sync' => [
-                        'method' => 'get-invoice-by-number',
-                        'verified_at' => now()->toIso8601String(),
-                        'response' => $lookup['response'],
-                    ],
-                ]),
+                'response_payload' => $lookup['response'],
                 'error_message' => null,
                 'submitted_at' => isset($data['dateSubmitted'])
                     ? Carbon::parse($data['dateSubmitted'])
@@ -84,23 +72,14 @@ class SaleOutcomeRecoveryService
             ];
             if ($receiptNumber !== null) {
                 $updates['receipt_number'] = $receiptNumber;
-                $updates['is_fiscalized'] = true;
-                $updates['fiscalized_at'] = $current->fiscalized_at ?? now();
-            }
-            if ($receiptSignature !== null) {
-                $updates['receipt_signature'] = $receiptSignature;
             }
             if ($url !== null) {
                 $updates['qr_code'] = $url;
             }
-            $current->update($updates);
-
-            if ($receiptNumber !== null) {
-                \App\Services\Sales\SavedSaleWriteGuard::recordFiscalReceipt(
-                    $current->getConnection(),
-                    $current->transaction_id
-                );
+            if ($receiptSignature !== null) {
+                $updates['receipt_signature'] = $receiptSignature;
             }
+            $current->update($updates);
 
             return [
                 'id' => $current->id,
@@ -137,8 +116,10 @@ class SaleOutcomeRecoveryService
         $data = $lookup['response']['data'] ?? [];
         if ($lookup['outcome'] === 'accepted' && $this->matches($data, $payload, $setting)) {
             $url = $data['validationURL'] ?? $data['invoiceSummary']['validationURL'] ?? null;
+            $url = is_string($url) && $url !== '' ? $url : null;
             $receiptNumber = $this->receiptNumber(is_string($url) ? $url : null)
                 ?? $this->explicitReceiptNumber($data);
+            $receiptSignature = $this->receiptSignature($url);
             $updates = [
                 'status' => 'submitted',
                 'response_payload' => [
@@ -158,11 +139,10 @@ class SaleOutcomeRecoveryService
             if ($receiptNumber !== null) {
                 $updates['receipt_number'] = $receiptNumber;
             }
-            $sale->update($updates);
-
-            if ($receiptNumber !== null) {
-                \App\Services\Sales\SavedSaleWriteGuard::recordFiscalReceipt($sale->getConnection(), $sale->transaction_id);
+            if ($receiptSignature !== null) {
+                $updates['receipt_signature'] = $receiptSignature;
             }
+            $sale->update($updates);
 
             Log::info('EIS ambiguous sale outcome reconciled by exact invoice lookup', [
                 'transaction_id' => $sale->transaction_id,
@@ -231,23 +211,24 @@ class SaleOutcomeRecoveryService
             if (!is_array($line)) {
                 return [];
             }
-            foreach (['productCode', 'quantity', 'unitPrice', 'discount', 'total', 'totalVAT', 'taxRateId'] as $field) {
+            foreach (['productCode', 'quantity', 'unitPrice', 'discount', 'total', 'taxRateId', 'isProduct'] as $field) {
                 if (!array_key_exists($field, $line)) {
                     return [];
                 }
             }
             if (!is_numeric($line['quantity']) || !is_numeric($line['unitPrice'])
-                || !is_numeric($line['discount']) || !is_numeric($line['total']) || !is_numeric($line['totalVAT'])) {
+                || ($line['discount'] !== null && !is_numeric($line['discount']))
+                || !is_numeric($line['total']) || !is_bool($line['isProduct'])) {
                 return [];
             }
             $normalized[] = [
                 'productCode' => (string) $line['productCode'],
                 'quantity' => number_format((float) $line['quantity'], 2, '.', ''),
                 'unitPrice' => number_format((float) $line['unitPrice'], 2, '.', ''),
-                'discount' => number_format((float) $line['discount'], 2, '.', ''),
+                'discount' => number_format((float) ($line['discount'] ?? 0), 2, '.', ''),
                 'total' => number_format((float) $line['total'], 2, '.', ''),
-                'totalVAT' => number_format((float) $line['totalVAT'], 2, '.', ''),
                 'taxRateId' => (string) $line['taxRateId'],
+                'isProduct' => $line['isProduct'],
             ];
         }
         usort($normalized, fn ($left, $right) => $left <=> $right);
@@ -260,7 +241,13 @@ class SaleOutcomeRecoveryService
             return false;
         }
         try {
-            return Carbon::parse($actual)->timestamp === Carbon::parse($expected)->timestamp;
+            $actualHasTimezone = preg_match('/(?:Z|[+-]\d{2}:\d{2})$/i', $actual) === 1;
+            $expectedHasTimezone = preg_match('/(?:Z|[+-]\d{2}:\d{2})$/i', $expected) === 1;
+            if ($actualHasTimezone && $expectedHasTimezone) {
+                return Carbon::parse($actual)->timestamp === Carbon::parse($expected)->timestamp;
+            }
+            return Carbon::parse($actual)->format('Y-m-d H:i:s')
+                === Carbon::parse($expected)->format('Y-m-d H:i:s');
         } catch (\Throwable) {
             return false;
         }
@@ -303,6 +290,20 @@ class SaleOutcomeRecoveryService
         return isset($parameters['vc']) && is_string($parameters['vc']) && $parameters['vc'] !== ''
             ? $parameters['vc']
             : null;
+    }
+
+    private function receiptSignature(?string $url): ?string
+    {
+        if (!$url) {
+            return null;
+        }
+        parse_str(parse_url($url, PHP_URL_QUERY) ?? '', $parameters);
+        foreach (['S', 'c'] as $key) {
+            if (isset($parameters[$key]) && is_string($parameters[$key]) && $parameters[$key] !== '') {
+                return $parameters[$key];
+            }
+        }
+        return null;
     }
 
     private function explicitReceiptNumber(array $data): ?string
