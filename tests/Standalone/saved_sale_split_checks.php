@@ -90,7 +90,7 @@ function fixture()
         'purchase_lines' => ['quantity_sold', 'transaction_id', 'product_id', 'variation_id', 'quantity', 'quantity_adjusted', 'quantity_returned', 'mfg_quantity_used'], 'account_transactions' => ['transaction_id', 'transfer_transaction_id'],
         'cash_register_transactions' => ['transaction_id'], 'eis_sales' => ['business_id', 'transaction_id', 'status', 'fiscal_invoice_number', 'request_payload'],
         'eis_failed_transactions' => ['transaction_id'], 'sell_line_warranties' => ['sell_line_id', 'warranty_id'],
-        'business' => ['transaction_edit_days', 'pos_settings', 'enable_rp', 'enable_product_expiry', 'accounting_method', 'ref_no_prefixes'],
+        'business' => ['transaction_edit_days', 'pos_settings', 'enable_rp', 'enable_product_expiry', 'enable_inline_tax', 'accounting_method', 'ref_no_prefixes'],
         'business_locations' => ['business_id', 'default_payment_accounts', 'invoice_scheme_id', 'default_eis_setting_id'], 'users' => ['business_id'],
         'contacts' => ['business_id', 'type', 'balance', 'deleted_at'],
         'products' => ['business_id', 'type', 'unit_id', 'enable_stock', 'deleted_at', 'tax', 'not_for_selling', 'is_inactive'],
@@ -114,7 +114,7 @@ function fixture()
             'expected_version', 'allocation_json', 'response_json', 'created_at', 'updated_at'] as $c) { $t->text($c)->nullable(); }
         $t->unique(['business_id', 'operation_id']);
     });
-    $db->table('business')->insert(['id' => 1, 'transaction_edit_days' => '30', 'accounting_method' => 'fifo']);
+    $db->table('business')->insert(['id' => 1, 'transaction_edit_days' => '30', 'enable_inline_tax' => 1, 'accounting_method' => 'fifo']);
     $db->table('invoice_schemes')->insert(['business_id' => 1, 'is_default' => 1, 'scheme_type' => 'blank',
         'prefix' => 'INV-', 'number_type' => 'sequential', 'start_number' => 1, 'invoice_count' => 0, 'total_digits' => 5]);
     $db->table('eis_settings')->insert(['business_id' => 1, 'tpin' => 'TEST', 'location_id' => 2, 'status' => 1]);
@@ -1294,6 +1294,14 @@ foreach (['16.5' => '1.6500', '0' => '0.0000', '2.125' => '0.2125'] as $rate => 
     check($line->item_tax === $expectedTax, 'SQL float tax converted to decimal string, rate='.$rate);
     check($line->unit_price_inc_tax === bcadd('10', $expectedTax, 4), 'converted tax keeps exact gross price');
 }
+[$db, $service, $actor] = checkoutFixture();
+addNewProduct($db);
+$db->table('business')->update(['enable_inline_tax' => 0]);
+$response = $service->addItems(1, $actor, additionsRequest($service, $actor, 1, '1.0000', 9));
+$line = $db->table('transaction_sell_lines')->where('id', $response['added_line_ids'][0])->first();
+check($line->tax_id === null && $line->item_tax === '0.0000' && $line->unit_price_inc_tax === '10.0000' &&
+    $response['bill']['final_total'] === '82.0000',
+    'restaurant item additions omit product tax and preserve the untaxed line total when inline tax is disabled');
 [$db, $service, $actor] = checkoutFixture(true);
 $request = additionsRequest($service, $actor, 1, '1.00001');
 $before = snapshot($db);

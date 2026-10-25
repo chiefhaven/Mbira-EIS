@@ -732,6 +732,8 @@ class SavedSaleSplitService
             $this->fail('restaurant_forbidden', 'Backend sell.create permission is required.', 403);
         }
         $now = date('Y-m-d H:i:s');
+        $inlineTaxEnabled = (int) $this->db->table('business')->where('id', $user->business_id)
+            ->value('enable_inline_tax') === 1;
         $header = ['business_id' => $user->business_id, 'location_id' => $locationId, 'type' => 'sell',
             'status' => 'final', 'payment_status' => 'due', 'contact_id' => $contactId, 'created_by' => $user->id,
             'transaction_date' => $now, 'invoice_token' => Str::random(32), 'source' => 'desktop_pos',
@@ -740,7 +742,7 @@ class SavedSaleSplitService
             'created_at' => $now, 'updated_at' => $now];
         $lines = [];
         foreach ($items as $variationId => $quantity) {
-            $lines[] = $this->newRestaurantLine($header, (int) $variationId, $quantity, $now);
+            $lines[] = $this->newRestaurantLine($header, (int) $variationId, $quantity, $now, $inlineTaxEnabled);
         }
         $header['total_before_tax'] = $header['final_total'] = self::decimal($this->total($lines));
         if (bccomp($header['final_total'], '0', 4) <= 0) {
@@ -772,7 +774,7 @@ class SavedSaleSplitService
         return $id;
     }
 
-    private function newRestaurantLine(array $h, int $variationId, string $quantity, string $now)
+    private function newRestaurantLine(array $h, int $variationId, string $quantity, string $now, bool $inlineTaxEnabled)
     {
         $variation = $this->db->table('variations')->where('id', $variationId)->whereNull('deleted_at')->lockForUpdate()->first();
         $product = $variation ? $this->db->table('products')->where('id', $variation->product_id)
@@ -788,7 +790,7 @@ class SavedSaleSplitService
         }
         $price = self::decimal($variation->default_sell_price);
         $rate = '0.0000';
-        if (!self::zero($product->tax ?? null)) {
+        if ($inlineTaxEnabled && !self::zero($product->tax ?? null)) {
             $tax = $this->db->table('tax_rates')->where('id', $product->tax)->where('business_id', $h['business_id'])
                 ->select('tax_rates.*')->selectRaw('CAST(CAST(amount AS DECIMAL(22,4)) AS CHAR) AS decimal_amount')->first();
             if (!$tax || !empty($tax->is_tax_group)) {
@@ -802,7 +804,8 @@ class SavedSaleSplitService
         $taxAmount = self::round4(bcdiv(bcmul($price, $rate, 8), '100', 8));
         return ['product_id' => $product->id, 'variation_id' => $variationId, 'quantity' => $quantity,
             'unit_price_before_discount' => $price, 'unit_price' => $price, 'item_tax' => $taxAmount,
-            'unit_price_inc_tax' => bcadd($price, $taxAmount, 4), 'tax_id' => $product->tax ?? null,
+            'unit_price_inc_tax' => bcadd($price, $taxAmount, 4),
+            'tax_id' => $inlineTaxEnabled ? ($product->tax ?? null) : null,
             'children_type' => '', 'created_at' => $now, 'updated_at' => $now];
     }
 
@@ -852,6 +855,7 @@ class SavedSaleSplitService
                     $this->fail('restaurant_workflow_required', 'Use the restaurant bill editor for this order.');
                 }
                 $business = $this->additionsEligible($g);
+                $inlineTaxEnabled = (int) ($business->enable_inline_tax ?? 0) === 1;
                 $tableChanged = array_key_exists('table_id', $input) &&
                     ($input['table_id'] ?? 0) !== (int) ($g['header']['res_table_id'] ?? 0);
                 if ($tableChanged && $input['table_id'] !== null) {
@@ -966,7 +970,7 @@ class SavedSaleSplitService
                     unset($savedLine);
                     if ($matched) { continue; }
                     $newIds[] = $this->db->table('transaction_sell_lines')->insertGetId(
-                        ['transaction_id' => $id] + $this->newRestaurantLine($h, $variationId, $quantity, $now));
+                        ['transaction_id' => $id] + $this->newRestaurantLine($h, $variationId, $quantity, $now, $inlineTaxEnabled));
                 }
                 $newLines = $this->db->table('transaction_sell_lines')->whereIn('id', $newIds)->orderBy('id')
                     ->get()->map(fn ($line) => (array) $line)->all();

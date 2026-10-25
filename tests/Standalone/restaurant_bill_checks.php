@@ -267,6 +267,29 @@ foreach ($invalids as $items) {
     check(snapshot($db) === $before, 'malformed quantities never mutate inventory or workflow');
 }
 
+foreach ([true, false] as $inlineTaxEnabled) {
+    [$db, $service, $waiter] = restaurantFixture();
+    $db->table('business')->update(['enable_inline_tax' => $inlineTaxEnabled ? 1 : 0]);
+    $db->table('products')->where('id', 4)->update(['tax' => 6]);
+    $db->table('res_tables')->insert(['id' => 2, 'business_id' => 1, 'location_id' => 2, 'name' => 'Table 2']);
+    $result = $service->create($waiter, [
+        'operation_id' => (string) Illuminate\Support\Str::uuid(),
+        'location_id' => 2,
+        'table_id' => 2,
+        'contact_id' => 3,
+        'items' => [['variation_id' => 5, 'quantity' => '2.0000']],
+    ]);
+    $line = (array) $db->table('transaction_sell_lines')->where('transaction_id', $result['id'])->first();
+    $expectedTax = $inlineTaxEnabled ? '2.0000' : '0.0000';
+    $expectedUnitTotal = $inlineTaxEnabled ? '12.0000' : '10.0000';
+    $expectedBillTotal = $inlineTaxEnabled ? '24.0000' : '20.0000';
+    check($line['tax_id'] == ($inlineTaxEnabled ? 6 : null) &&
+        $line['item_tax'] === $expectedTax && $line['unit_price_inc_tax'] === $expectedUnitTotal,
+        'restaurant line follows enable_inline_tax for tax ID, tax amount and tax-inclusive unit price');
+    check($db->table('transactions')->where('id', $result['id'])->value('final_total') === $expectedBillTotal,
+        'restaurant bill total follows enable_inline_tax');
+}
+
 [$db, $service, $waiter] = restaurantFixture();
 $waiter->permissions[] = 'sell.payments';
 $db->table('cash_registers')->insert(['user_id' => 7, 'business_id' => 1, 'location_id' => 2, 'status' => 'open']);
