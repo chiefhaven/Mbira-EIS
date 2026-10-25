@@ -36,7 +36,13 @@ class SaleTransformer
      * @return array
      * @throws \InvalidArgumentException
      */
-    public function transform(Transaction $transaction, EisSetting $settings, string $eisInvoiceNumber, bool $includeOfflineSignature = false): array
+    public function transform(
+        Transaction $transaction,
+        EisSetting $settings,
+        string $eisInvoiceNumber,
+        bool $includeOfflineSignature = false,
+        ?array $storedOfflineSignatureData = null
+    ): array
     {
         \Modules\EIS\Services\Terminal\TerminalContext::assertBusiness($settings, (int) $transaction->business_id);
         $this->validateTransaction($transaction);
@@ -131,14 +137,17 @@ class SaleTransformer
             $totalVat
         );
 
-        // A fresh online submission must not carry offline signature fields.
-        $offlineSignatureData = $includeOfflineSignature ? $this->generateOfflineSignature(
-            $settings,
-            $transaction,
-            $eisInvoiceNumber,
-            $invoiceSummary,
-            $totalItems
-        ) : [];
+        // Keep a new online submission unsigned; retries may reuse their persisted signature.
+        $offlineSignatureData = [];
+        if ($includeOfflineSignature) {
+            $offlineSignatureData = $storedOfflineSignatureData ?? $this->generateOfflineSignature(
+                $settings,
+                $transaction,
+                $eisInvoiceNumber,
+                $invoiceSummary,
+                $totalItems
+            );
+        }
 
         if ($includeOfflineSignature) {
             $invoiceSummary['offlineSignature'] = $offlineSignatureData['offlineDataSignature'] ?? '';

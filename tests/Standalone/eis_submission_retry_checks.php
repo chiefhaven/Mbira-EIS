@@ -168,6 +168,11 @@ checkRetry($tracking->status === 'failed' && $tracking->fiscal_invoice_number ==
 checkRetry($tracking->qr_code === 'https://eis.invalid/offline'
     && $transformer->offlineQrGenerations === 1,
     'Failed initial submission generates and saves the EIS offline validation QR URL');
+$storedFirstFailure = $tracking->request_payload;
+checkRetry(($storedFirstFailure['offlineSignatureData']['offlineDataSignature'] ?? null) === 'fixture-signature'
+    && ($storedFirstFailure['invoiceSummary']['offlineSignature'] ?? null) === 'fixture-signature'
+    && ($storedFirstFailure['invoiceSummary']['validationURL'] ?? null) === 'https://eis.invalid/offline',
+    'First failure persists its exact offline signature in the retry payload');
 $settings->secret_key = 'fixture-secret';
 $realOfflineTransformer = new SaleTransformer(new EisTaxRate(), new OfflineSignatureService(), new InvoiceNumberGenerator());
 $offlineValidation = $realOfflineTransformer->generateOfflineValidationData($settings, $transaction, $first);
@@ -178,6 +183,9 @@ checkRetry($tracking->invoice_number === 'POS-ORIGINAL' && ! $transaction->fresh
 failSubmission($service, $transaction, $settings);
 $retry = $client->payloads[1];
 checkRetry($retry['invoiceSummary']['offlineSignature'] === 'fixture-signature', 'Retry includes offline signature');
+checkRetry($retry['offlineSignatureData'] === $storedFirstFailure['offlineSignatureData']
+    && $transformer->offlineQrGenerations === 1 && $transformer->signatures === 0,
+    'Retry reuses the first-failure offline signature without generating another');
 checkRetry($retry['invoiceHeader']['invoiceNumber'] === $first['invoiceHeader']['invoiceNumber'] && $service->generated === 1, 'Retry reuses generated identity');
 $failed = DB::table('eis_failed_transactions')->where('transaction_id', $transaction->id)->first();
 checkRetry($failed->attempts === 2 && json_decode($failed->payload, true) === json_decode(json_encode($retry), true), 'Failed retry stores current signed payload');

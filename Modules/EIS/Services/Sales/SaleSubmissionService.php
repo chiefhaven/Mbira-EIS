@@ -73,9 +73,16 @@ class SaleSubmissionService
         // GENERATE EIS Number
         // ----------------------------
         // Inspect history before resetting tracking; pending may have reached EIS.
-        $includeOfflineSignature = $existing && ($existing->status === 'failed' || !empty($existing->request_payload));
-        $includeOfflineSignature = $includeOfflineSignature || DB::table('eis_failed_transactions')
-            ->where('business_id', $transaction->business_id)->where('transaction_id', $transaction->id)->exists();
+        $failedTransaction = DB::table('eis_failed_transactions')
+            ->where('business_id', $transaction->business_id)
+            ->where('transaction_id', $transaction->id)
+            ->first();
+        $storedOfflineSignatureData = $this->storedOfflineSignatureData(
+            is_array($existing?->request_payload) ? $existing->request_payload : null
+        )
+            ?? $this->storedFailedPayloadSignature($failedTransaction?->payload);
+        $includeOfflineSignature = ($existing && ($existing->status === 'failed' || !empty($existing->request_payload)))
+            || $failedTransaction !== null;
         // Split fiscal guards require a top-level transaction; lock allocation without enclosing their model saves.
         [$eisSale, $eisInvoiceNumber] = Cache::lock('eis-invoice-terminal-'.$eisSetting->id, 60)->block(10, function () use ($transaction, $eisSetting) {
             $tracking = EisSale::where('transaction_id', $transaction->id)->first();
@@ -101,7 +108,13 @@ class SaleSubmissionService
             // ----------------------------
             // TRANSFORM WITH EIS Number
             // ----------------------------
-            $payload = $this->transformer->transform($transaction, $settings, $eisInvoiceNumber, $includeOfflineSignature);
+            $payload = $this->transformer->transform(
+                $transaction,
+                $settings,
+                $eisInvoiceNumber,
+                $includeOfflineSignature,
+                $storedOfflineSignatureData
+            );
 
             $validationUrl = $payload['invoiceSummary']['validationURL'] ?? null;
 
@@ -144,7 +157,17 @@ class SaleSubmissionService
                     if (!is_string($validationUrl) || trim($validationUrl) === '') {
                         throw new \UnexpectedValueException('EIS did not produce an offline validation URL.');
                     }
-                    $eisSale->update(['qr_code' => $validationUrl]);
+                    $offlineSignature = $offlineData['offlineDataSignature'] ?? null;
+                    if (!is_string($offlineSignature) || trim($offlineSignature) === '') {
+                        throw new \UnexpectedValueException('EIS did not produce an offline signature.');
+                    }
+                    $payload['offlineSignatureData'] = $offlineData;
+                    $payload['invoiceSummary']['offlineSignature'] = $offlineSignature;
+                    $payload['invoiceSummary']['validationURL'] = $validationUrl;
+                    $eisSale->update([
+                        'qr_code' => $validationUrl,
+                        'request_payload' => $payload,
+                    ]);
                 } catch (\InvalidArgumentException|\UnexpectedValueException $qrException) {
                     Log::error('Failed to create EIS offline receipt QR after submission failure', [
                         'transaction_id' => $transaction->id,
@@ -166,6 +189,38 @@ class SaleSubmissionService
 
             throw $e;
         }
+    }
+
+    private function storedOfflineSignatureData(?array $payload): ?array
+    {
+        if (!is_array($payload)) {
+            return null;
+        }
+
+        $summary = is_array($payload['invoiceSummary'] ?? null) ? $payload['invoiceSummary'] : [];
+        $signatureData = $payload['offlineSignatureData'] ?? [
+            'offlineDataSignature' => $summary['offlineSignature'] ?? null,
+            'validationURL' => $summary['validationURL'] ?? null,
+        ];
+        if (!is_array($signatureData)) {
+            return null;
+        }
+        $signature = $signatureData['offlineDataSignature'] ?? null;
+        $validationUrl = $signatureData['validationURL'] ?? null;
+
+        if (!is_string($signature) || trim($signature) === ''
+            || !is_string($validationUrl) || trim($validationUrl) === '') {
+            return null;
+        }
+
+        return $signatureData;
+    }
+
+    private function storedFailedPayloadSignature(?string $payload): ?array
+    {
+        $decodedPayload = $payload !== null ? json_decode($payload, true) : null;
+
+        return $this->storedOfflineSignatureData(is_array($decodedPayload) ? $decodedPayload : null);
     }
 
     /**
