@@ -167,7 +167,7 @@ class Product extends Model
 
     public function scopeWithStockLocationDetails($query, $businessId, $locationId, $permittedLocations)
     {
-        $locations = \App\BusinessLocation::where('business_id', $businessId);
+        $locations = \App\BusinessLocation::where('business_id', $businessId)->active();
         if ($permittedLocations !== 'all') {
             $locations->whereIn('id', $permittedLocations);
         }
