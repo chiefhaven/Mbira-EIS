@@ -1806,6 +1806,8 @@ class ProductUtil extends Util
                   ->leftjoin('categories as c', 'p.category_id', '=', 'c.id')
                   ->join('product_variations as pv', 'variations.product_variation_id', '=', 'pv.id')
                   ->where('p.business_id', $business_id)
+                  ->whereNull('p.deleted_at')
+                  ->whereNull('variations.deleted_at')
                   ->whereIn('p.type', ['single', 'variable']);
 
         $permitted_locations = auth()->user()->permitted_locations();
