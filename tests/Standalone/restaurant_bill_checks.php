@@ -445,6 +445,9 @@ check(snapshot($db) === $before, 'failed kitchen dispatch rolls back bill, invoi
 // Exercise the Connector formatter without booting Laravel or any live configuration.
 [$db, $service, $waiter] = restaurantFixture();
 $controllerClass = new ReflectionClass(Modules\Connector\Http\Controllers\Api\SellController::class);
+$sellControllerSource = file_get_contents(dirname(__DIR__, 2).'/Modules/Connector/Http/Controllers/Api/SellController.php');
+check(str_contains($sellControllerSource, "'desktop_pos' ? null : $transaction->final_total"),
+    'desktop API payment status uses the persisted invoice total rather than the raw pre-storage float');
 $controller = $controllerClass->newInstanceWithoutConstructor();
 $contactUtil = new class extends App\Utils\ContactUtil {
     public function getCustomerGroup($business_id, $contact_id) { return null; }

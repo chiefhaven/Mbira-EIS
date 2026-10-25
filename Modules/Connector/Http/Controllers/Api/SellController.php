@@ -980,7 +980,10 @@ class SellController extends ApiController
                         }
 
                         //Update payment status
-                        $this->transactionUtil->updatePaymentStatus($transaction->id, $transaction->final_total);
+                        $this->transactionUtil->updatePaymentStatus(
+                            $transaction->id,
+                            ($input['source'] ?? null) === 'desktop_pos' ? null : $transaction->final_total
+                        );
 
                         if ($business->enable_rp == 1) {
                             $redeemed = ! empty($input['rp_redeemed']) ? $input['rp_redeemed'] : 0;
