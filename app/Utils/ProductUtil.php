@@ -1802,13 +1802,19 @@ class ProductUtil extends Util
         $query = Variation::join('products as p', 'p.id', '=', 'variations.product_id')
                   ->join('units', 'p.unit_id', '=', 'units.id')
                   ->join('variation_location_details as vld', 'variations.id', '=', 'vld.variation_id')
-                  ->leftjoin('business_locations as l', 'vld.location_id', '=', 'l.id')
+                  ->join('business_locations as l', 'vld.location_id', '=', 'l.id')
                   ->leftjoin('categories as c', 'p.category_id', '=', 'c.id')
                   ->join('product_variations as pv', 'variations.product_variation_id', '=', 'pv.id')
                   ->where('p.business_id', $business_id)
                   ->whereNull('p.deleted_at')
                   ->whereNull('variations.deleted_at')
-                  ->whereIn('p.type', ['single', 'variable']);
+                  ->whereIn('p.type', ['single', 'variable'])
+                  ->whereExists(function ($locationQuery) {
+                      $locationQuery->select(DB::raw(1))
+                          ->from('product_locations as pl')
+                          ->whereColumn('pl.product_id', 'p.id')
+                          ->whereColumn('pl.location_id', 'vld.location_id');
+                  });
 
         $permitted_locations = auth()->user()->permitted_locations();
         $location_filter = '';
@@ -1827,11 +1833,6 @@ class ProductUtil extends Util
 
             $location_filter .= "AND transactions.location_id=$location_id";
 
-            //If filter by location then hide products not available in that location
-            $query->join('product_locations as pl', 'pl.product_id', '=', 'p.id')
-                  ->where(function ($q) use ($location_id) {
-                      $q->where('pl.location_id', $location_id);
-                  });
         }
 
         if (! empty($filters['category_id'])) {
