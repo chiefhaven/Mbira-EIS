@@ -226,19 +226,41 @@ rejects(function () use ($service, $actor, $collision) { $service->split(1, $act
 $actor->admin = true; $actor->id = 8;
 rejects(function () use ($service, $actor, $request) { $service->split(1, $actor, $request); }, 'operation_collision');
 $actor->id = 7; $actor->admin = false;
-foreach ([1, $response['result_id']] as $id) {
-    rejects(function () use ($db, $id) { $db->transaction(function () use ($db, $id) { SavedSaleWriteGuard::lock($db, $id); }); }, 'split_write_fenced');
-    rejects(function () use ($db, $id) {
-        $db->transaction(function () use ($id) { $m = App\Transaction::find($id); $m->status = 'final'; $m->save(); });
-    }, 'split_write_fenced');
-    rejects(function () use ($db, $id) {
-        $db->transaction(function () use ($id) { App\TransactionPayment::create(['transaction_id' => $id, 'amount' => '1.0000']); });
-    }, 'split_write_fenced');
+check(SavedSaleWriteGuard::hasSplitHistory($db, 1), 'source retains split history');
+check(!SavedSaleWriteGuard::hasSplitHistory($db, $response['result_id']), 'new invoice has normal sale history semantics');
+rejects(function () use ($db) {
+    $db->transaction(function () use ($db) { SavedSaleWriteGuard::lock($db, 1); });
+}, 'split_write_fenced');
+$db->beginTransaction();
+try {
+    $db->transaction(function () use ($db, $response) {
+        SavedSaleWriteGuard::lock($db, $response['result_id']);
+        $sale = App\Transaction::find($response['result_id']);
+        $sale->status = 'final';
+        $sale->payment_status = 'paid';
+        $sale->save();
+        App\TransactionPayment::create(['transaction_id' => $response['result_id'], 'amount' => '1.0000']);
+        SavedSaleWriteGuard::fiscal($db, $response['result_id']);
+    });
+} finally {
+    $db->rollBack();
 }
 rejects(function () use ($db) {
     $db->transaction(function () { $m = App\TransactionSellLine::find(1); $m->quantity = '99'; $m->save(); });
 }, 'split_write_fenced');
-check(snapshot($db) === $after, 'legacy model rejections rollback without side effects');
+check(snapshot($db) === $after, 'independent bill writes rollback cleanly in test');
+$childPreview = $service->preview($response['result_id'], $actor);
+$childLineId = $response['line_allocations'][0]['bill_b_line_id'];
+$resplit = $service->split($response['result_id'], $actor, [
+    'operation_id' => (string) Illuminate\Support\Str::uuid(),
+    'expected_version' => $childPreview['expected_version'],
+    'lines' => [['id' => $childLineId, 'quantity' => '0.5000']],
+]);
+check(SavedSaleWriteGuard::hasSplitHistory($db, $response['result_id']), 're-split source is protected again');
+rejects(function () use ($db, $response) {
+    $db->transaction(function () use ($db, $response) { SavedSaleWriteGuard::lock($db, $response['result_id']); });
+}, 'split_write_fenced');
+check(!SavedSaleWriteGuard::hasSplitHistory($db, $resplit['result_id']), 're-split result is another independent invoice');
 
 [$db, $service, $actor] = fixture();
 $staleHeader = App\Transaction::find(1); $staleLine = App\TransactionSellLine::find(1);
@@ -552,7 +574,17 @@ foreach (['purchase_lines', 'variation_location_details', 'transaction_payments'
 }
 $after = snapshot($db);
 check($service->split(1, $actor, $req) === $r && snapshot($db) === $after, 'final durable replay unchanged');
-rejects(function () use ($db) { $db->transaction(function () { $m = App\TransactionSellLinesPurchaseLines::first(); $m->quantity = '99'; $m->save(); }); }, 'split_write_fenced');
+rejects(function () use ($db) { $db->transaction(function () { $m = App\TransactionSellLinesPurchaseLines::where('sell_line_id', 1)->first(); $m->quantity = '99'; $m->save(); }); }, 'split_write_fenced');
+$db->beginTransaction();
+try {
+    $db->transaction(function () use ($db, $newLine) {
+        $mapping = App\TransactionSellLinesPurchaseLines::where('sell_line_id', $newLine)->first();
+        $mapping->quantity = '99';
+        $mapping->save();
+    });
+} finally {
+    $db->rollBack();
+}
 foreach (['0.0000', '5.0000'] as $quantity) {
     [$db, $service, $actor] = allocatedFixture();
     $db->table('transaction_sell_lines_purchase_lines')->where('id', 1)->update(['quantity' => $quantity]);
@@ -822,10 +854,9 @@ foreach (['purchase', 'purchase_transfer', 'opening_stock', 'production_purchase
         if ($mixed) { check(allocationLedger($db)[1] === $initial[1], 'old real purchase allocation remains invariant'); }
         $after = snapshot($db); reconcileReceipt($db, $receipt);
         check(snapshot($db) === $after, 'complete receipt replay inert');
-        foreach ([1, $split['result_id']] as $id) {
-            rejects(function () use ($db, $id) { $db->transaction(function () use ($db, $id) { SavedSaleWriteGuard::lock($db, $id); }); }, 'split_write_fenced');
-        }
-        rejects(function () use ($db) { $db->transaction(function () { $m = App\TransactionSellLinesPurchaseLines::first(); $m->quantity = '99'; $m->save(); }); }, 'split_write_fenced');
+        rejects(function () use ($db) { $db->transaction(function () use ($db) { SavedSaleWriteGuard::lock($db, 1); }); }, 'split_write_fenced');
+        $db->transaction(function () use ($db, $split) { SavedSaleWriteGuard::lock($db, $split['result_id']); });
+        rejects(function () use ($db) { $db->transaction(function () { $m = App\TransactionSellLinesPurchaseLines::where('sell_line_id', 1)->first(); $m->quantity = '99'; $m->save(); }); }, 'split_write_fenced');
     }
 }
 // Multiple receipt lines for the same variant must refresh residual debt ids.
@@ -872,7 +903,7 @@ foreach (['allocation', 'consumption', 'protected_header', 'stock'] as $failure)
     catch (SavedSplitException $e) { check($e->errorCode === 'stock_reconciliation_invalid', 'protected invariant detects corruption'); }
     catch (Illuminate\Database\QueryException $e) { check(str_contains($e->getMessage(), 'reconciliation failure'), 'late allocation/consumption injected failure'); }
     check(snapshot($db) === $before, 'complete reconciliation rollback '.$failure);
-    rejects(function () use ($db) { $db->transaction(function () { $m = App\TransactionSellLinesPurchaseLines::first(); $m->quantity = '99'; $m->save(); }); }, 'split_write_fenced');
+    rejects(function () use ($db) { $db->transaction(function () { $m = App\TransactionSellLinesPurchaseLines::where('sell_line_id', 1)->first(); $m->quantity = '99'; $m->save(); }); }, 'split_write_fenced');
 }
 foreach (['business', 'location', 'product', 'status', 'overconsumed'] as $invalid) {
     [$db, $service, $actor] = sentinelFixture();

@@ -130,6 +130,9 @@ HTTP 200 response: `{ "data": { "operation_id": UUID, "source_id": integer,
 "bill_b": Bill, "line_allocations": [{ "source_line_id": integer,
 "bill_b_line_id": integer, "quantity": decimal-string }],
 "legacy_writes_blocked": true } }`.
+`legacy_writes_blocked` describes Bill A, which remains protected as the source
+partition. Bill B is a separate invoice and follows the normal sale, payment, and
+fiscal workflows.
 
 `Bill` has: `id`, `invoice_no`, `status`, `payment_status`, `total_before_tax`,
 `tax_amount`, `final_total`, `version`, and `lines`. Each line contains saved `id`,
@@ -200,14 +203,14 @@ lock and reread before mutation. Connector shipping and restaurant bulk updates
 also call the guard. EIS model saving rejects draft/split tracking before touching
 MyISAM. Public gateway payment refuses drafts before contacting a gateway.
 
-**Both saved split bills are READ-ONLY to legacy mutations**, even if a caller
-supplies a fresh version. Legacy payloads can contain stale quantities/line IDs and
-are not a safe edit/split protocol. Legacy edit, finalize, delete, return and
-shipping stay blocked. Payment is the exception: the standard web Add Payment
-workflow now runs inside a narrow split-payment scope that permits only a new
-payment and the corresponding payment-status update, with the normal accounting
-and fiscal side effects. The new split API may partition either bill again with a
-new preview/version and UUID.
+**Bill A, the source remainder, remains protected against legacy sale mutations**,
+even if a caller supplies a fresh version. Legacy payloads can contain stale
+quantities/line IDs and are not a safe edit/split protocol. Legacy edit, finalize,
+delete, return and shipping stay blocked for Bill A; payment uses the guarded
+split-payment workflow. Bill B is a separate invoice and is no longer treated as
+a split participant for normal sale edits, payments, or fiscal tracking. Restaurant
+bills remain subject to their audited cashier workflow. The new split API may
+partition either bill again with a new preview/version and UUID.
 
 Once the ledger migration is installed, an existing unsplit draft writer must hold
 an explicit DB transaction before the shared guard/model mutation. Previously

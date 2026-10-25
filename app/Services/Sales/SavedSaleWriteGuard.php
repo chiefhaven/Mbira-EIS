@@ -4,9 +4,8 @@ namespace App\Services\Sales;
 
 use Illuminate\Database\Connection;
 
-/** Legacy sale writers have no split-aware checkout contract: fence both bills,
- * do not accept client fingerprints as permission to overwrite saved lines, and
- * scope the supported payment-only workflows separately.
+/** Legacy writers cannot mutate a split source with stale payloads. A completed
+ * result invoice is independent; supported source payment/checkout paths stay scoped.
  * Query-builder/bulk writers MUST call this before any graph/stock side effects.
  */
 class SavedSaleWriteGuard
@@ -134,11 +133,47 @@ class SavedSaleWriteGuard
         if (!$header || $header->type !== 'sell') {
             return false;
         }
+        if (self::isIndependentSplitResult($db, $header->business_id, $id)) {
+            return false;
+        }
 
         return $db->table('saved_sale_split_operations')->where('business_id', $header->business_id)
             ->where(function ($q) use ($id) {
                 $q->where('source_id', $id)->orWhere('result_id', $id);
             })->exists();
+    }
+
+    private static function isIndependentSplitResult(Connection $db, $businessId, $id): bool
+    {
+        if (!$id || !$db->getSchemaBuilder()->hasTable('saved_sale_split_operations')) {
+            return false;
+        }
+
+        $sourceOperations = $db->table('saved_sale_split_operations')->where('business_id', $businessId)
+            ->where('source_id', $id)->where(function ($query) use ($id) {
+                $query->whereNull('result_id')->orWhere('result_id', '<>', $id);
+            })->get(['allocation_json']);
+        foreach ($sourceOperations as $operation) {
+            $allocation = json_decode($operation->allocation_json, true);
+            if (!is_array($allocation) || array_key_exists('bill_b_quantities', $allocation)) {
+                return false;
+            }
+        }
+
+        $operations = $db->table('saved_sale_split_operations')->where('business_id', $businessId)
+            ->where('result_id', $id)->where('source_id', '<>', $id)->whereNotNull('response_json')
+            ->get(['allocation_json', 'response_json']);
+        foreach ($operations as $operation) {
+            $allocation = json_decode($operation->allocation_json, true);
+            $response = json_decode($operation->response_json, true);
+            if (is_array($allocation) && array_key_exists('bill_b_quantities', $allocation) &&
+                is_array($response) && (int) ($response['result_id'] ?? 0) === (int) $id &&
+                isset($response['bill_a'], $response['bill_b'])) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -154,6 +189,9 @@ class SavedSaleWriteGuard
         $header = $db->table('transactions')->where('id', $id)->where('business_id', $businessId)
             ->lockForUpdate()->first();
         if (!$header || $header->type !== 'sell' || !$db->getSchemaBuilder()->hasTable('saved_sale_split_operations')) {
+            return $work(false);
+        }
+        if (self::isIndependentSplitResult($db, $businessId, $id)) {
             return $work(false);
         }
         if ($db->getSchemaBuilder()->hasTable('restaurant_bills') &&
@@ -259,6 +297,9 @@ class SavedSaleWriteGuard
         $header = $db->table('transactions')->where('id', $id)->where('business_id', $businessId)
             ->lockForUpdate()->first();
         if (!$header || $header->type !== 'sell' || !$db->getSchemaBuilder()->hasTable('saved_sale_split_operations')) {
+            return $work(false);
+        }
+        if (self::isIndependentSplitResult($db, $businessId, $id)) {
             return $work(false);
         }
         if ($db->getSchemaBuilder()->hasTable('restaurant_bills') &&
@@ -504,7 +545,7 @@ class SavedSaleWriteGuard
         });
     }
 
-    public static function lock(Connection $db, $id)
+    public static function lock(Connection $db, $id, $allowIndependentResult = true)
     {
         if (!$id || !$db->getSchemaBuilder()->hasTable('saved_sale_split_operations')) {
             return null; // Feature cannot split anything before its migration.
@@ -526,11 +567,13 @@ class SavedSaleWriteGuard
             ->where(function ($q) use ($id) {
                 $q->where('source_id', $id)->orWhere('result_id', $id);
             })->lockForUpdate()->first();
-        if ($split && !self::isCheckout($db, $id) && !self::isPayment($db, $id) &&
+        $independentResult = self::isIndependentSplitResult($db, $header->business_id, $id);
+        if ($split && (!$independentResult || !$allowIndependentResult || self::$stockAllocation) &&
+            !self::isCheckout($db, $id) && !self::isPayment($db, $id) &&
             !self::isPaymentLines($db, $id) &&
             !self::isPaymentDeletion($db, $id)) {
             throw new SavedSplitException('split_write_fenced',
-                'This saved split bill is read-only to legacy writers. Use a split-aware payment or checkout.');
+                'This saved split source bill is read-only to legacy writers. Use a split-aware payment or checkout.');
         }
         if (in_array($header->status, ['draft', 'final'], true) && $db->transactionLevel() < 1) {
             throw new SavedSplitException('draft_write_requires_transaction',
@@ -552,7 +595,7 @@ class SavedSaleWriteGuard
                 $rows = $db->table('saved_sale_split_operations')->where('business_id', $h->business_id)
                     ->where(function ($q) use ($id) { $q->where('source_id', $id)->orWhere('result_id', $id); })
                     ->lockForUpdate()->get();
-                if ($rows->count()) {
+                if ($rows->count() && !self::isIndependentSplitResult($db, $h->business_id, $id)) {
                     $completed = $rows->contains(function ($r) use ($db, $id) {
                         $allocation = json_decode($r->allocation_json, true);
                         if (empty($r->response_json)) {

@@ -3918,7 +3918,7 @@ class TransactionUtil extends Util
             ->whereIn('m.purchase_line_id', $purchase_ids)->distinct()->orderBy('l.transaction_id')
             ->pluck('l.transaction_id');
         foreach ($sale_ids as $sale_id) {
-            \App\Services\Sales\SavedSaleWriteGuard::lock(DB::connection(), $sale_id);
+            \App\Services\Sales\SavedSaleWriteGuard::lock(DB::connection(), $sale_id, false);
         }
 
         //All sell lines & Stock adjustment lines.
