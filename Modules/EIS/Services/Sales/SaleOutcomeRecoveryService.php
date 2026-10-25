@@ -15,7 +15,7 @@ class SaleOutcomeRecoveryService
     public function sync(EisSale $sale, EisSetting $setting): array
     {
         $payload = $sale->request_payload;
-        $invoiceNumber = $sale->getRawOriginal('eis_invoice_number');
+        $invoiceNumber = $sale->getRawOriginal('fiscal_invoice_number');
         if (!is_array($payload) || !is_string($invoiceNumber) || trim($invoiceNumber) === ''
             || ($payload['invoiceHeader']['invoiceNumber'] ?? null) !== $invoiceNumber
             || (int) $sale->business_id !== (int) $setting->business_id

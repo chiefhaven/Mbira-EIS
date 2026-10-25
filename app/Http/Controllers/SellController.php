@@ -369,7 +369,7 @@ class SellController extends Controller
 
                             if (auth()->user()->can('business_settings.access')) {
                                 $fiscalSale = $row->relationLoaded('eisSale') ? $row->eisSale : null;
-                                $eisInvoiceNumber = $fiscalSale ? $fiscalSale->eis_invoice_number : null;
+                                $eisInvoiceNumber = $fiscalSale ? $fiscalSale->getRawOriginal('fiscal_invoice_number') : null;
                                 if ($fiscalSale && in_array($fiscalSale->status, ['pending', 'failed', 'submitted'], true)
                                     && $eisInvoiceNumber && $fiscalSale->eis_setting_id) {
                                     $html .= '<li><a href="#" class="eis-sale-sync" data-sync-url="'

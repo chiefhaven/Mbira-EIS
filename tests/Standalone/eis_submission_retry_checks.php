@@ -267,9 +267,10 @@ $recoveryClient->responder = function (EisSetting $setting, string $operation, a
 };
 $syncResult = $recovery->sync($uncertainSubmitted, $settings);
 checkRetry(end($recoveryClient->requests)['payload']['invoiceNumber']
-    === $uncertainSubmitted->getRawOriginal('eis_invoice_number')
+    === $uncertainSubmitted->getRawOriginal('fiscal_invoice_number')
+    && $uncertainSubmitted->getRawOriginal('fiscal_invoice_number') === $uncertainSubmitted->request_payload['invoiceHeader']['invoiceNumber']
     && end($recoveryClient->requests)['payload']['invoiceNumber'] !== $uncertainSale->invoice_no,
-    'Individual sync looks up the eis_sales invoice number, not the POS transaction number');
+    'Individual sync looks up eis_sales.fiscal_invoice_number, not the POS transaction number');
 checkRetry($syncResult['receipt_available'] && $syncResult['receipt_number'] === 'SYNC-RECEIPT'
     && $uncertainSubmitted->fresh()->fiscal_invoice_number === $uncertainSubmitted->eis_invoice_number
     && $uncertainSubmitted->fresh()->receipt_signature === 'SYNC-SIGNATURE',
