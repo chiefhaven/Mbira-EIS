@@ -14,7 +14,7 @@ $('#sell_list_filter_date_range').on('cancel.daterangepicker', function(ev, pick
     sell_table.ajax.reload();
 });
 
-$(document).on('change', '#sell_list_filter_location_id, #sell_list_filter_customer_id, #sell_list_filter_payment_status, #created_by, #sales_cmsn_agnt, #service_staffs, #shipping_status',  function() {
+$(document).on('change', '#sell_list_filter_location_id, #sell_list_filter_customer_id, #sell_list_filter_payment_status, #sell_list_filter_eis_void_status, #created_by, #sales_cmsn_agnt, #service_staffs, #shipping_status',  function() {
     sell_table.ajax.reload();
 });
 
@@ -48,6 +48,9 @@ sell_table = $('#sell_table').DataTable({
                 if($('#sell_list_filter_payment_status').length) {
                     d.payment_status = $('#sell_list_filter_payment_status').val();
                 }
+                if($('#sell_list_filter_eis_void_status').length) {
+                    d.eis_void_status = $('#sell_list_filter_eis_void_status').val();
+                }
                 if($('#created_by').length) {
                     d.created_by = $('#created_by').val();
                 }
@@ -76,6 +79,7 @@ sell_table = $('#sell_table').DataTable({
             { data: 'added_by', name: 'u.first_name'},
             { data: 'payment_status', name: 'payment_status'},
             { data: 'eis_status', name: 'eis_status'},
+            { data: 'eis_void_status', name: 'eis_void_status', orderable: false, searchable: false},
             { data: 'payment_methods', orderable: false, "searchable": false},
             { data: 'final_total', name: 'final_total'},
             { data: 'total_paid', name: 'total_paid', "searchable": false},
@@ -119,7 +123,7 @@ sell_table = $('#sell_table').DataTable({
             $('.payment_method_count').html(__count_status(data, 'payment_methods'));
         },
         createdRow: function( row, data, dataIndex ) {
-            $( row ).find('td:eq(6)').attr('class', 'clickable_td');
+            $( row ).find('td:eq(7)').attr('class', 'clickable_td');
         }
     });
     

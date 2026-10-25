@@ -43,8 +43,10 @@ class EisSale extends Model
     protected $casts = [
         'request_payload' => 'array',
         'response_payload' => 'array',
+        'void_response_payload' => 'array',
         'submitted_at' => 'datetime',
         'fiscalized_at' => 'datetime',
+        'void_synced_at' => 'datetime',
         'is_fiscalized' => 'boolean',
     ];
 

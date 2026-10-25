@@ -32,7 +32,6 @@ use Modules\EIS\Events\SaleCompleted;
 use Spatie\Activitylog\Models\Activity;
 use Yajra\DataTables\Facades\DataTables;
 use Modules\EIS\Jobs\DispatchAllUnsubmittedSalesJob;
-use Modules\EIS\Models\EisSetting;
 
 class SellController extends Controller
 {
@@ -102,6 +101,9 @@ class SellController extends Controller
         if (request()->ajax()) {
             $payment_types = $this->transactionUtil->payment_types(null, true, $business_id);
             $with = [];
+            if (DB::getSchemaBuilder()->hasTable('eis_sales')) {
+                $with[] = 'eisSale';
+            }
             $shipping_statuses = $this->transactionUtil->shipping_statuses();
 
             $sale_type = ! empty(request()->input('sale_type')) ? request()->input('sale_type') : 'sell';
@@ -132,6 +134,7 @@ class SellController extends Controller
                 'sub_type' => request()->input('sub_type'),
                 'status' => request()->input('status'),
                 'eis_status' => request()->input('eis_status'),
+                'eis_void_status' => request()->input('eis_void_status'),
                 'sales_cmsn_agnt' => request()->input('sales_cmsn_agnt'),
                 'service_staffs' => request()->input('service_staffs'),
                 'only_pending_shipments' => request()->input('only_pending_shipments'),
@@ -364,6 +367,17 @@ class SellController extends Controller
                                 }
                             }
 
+                            if (auth()->user()->can('business_settings.access')) {
+                                $fiscalSale = $row->relationLoaded('eisSale') ? $row->eisSale : null;
+                                $eisInvoiceNumber = $fiscalSale ? ($fiscalSale->eis_invoice_number
+                                    ?: ($fiscalSale->fiscal_invoice_number ?: $fiscalSale->receipt_number)) : null;
+                                if ($fiscalSale && $fiscalSale->status === 'submitted' && $eisInvoiceNumber && $fiscalSale->eis_setting_id) {
+                                    $html .= '<li><a href="#" class="eis-void-sync" data-terminal-id="'.(int) $fiscalSale->eis_setting_id
+                                        .'" data-invoice-number="'.e($eisInvoiceNumber).'">'
+                                        .'<i class="fas fa-sync"></i> Sync EIS void status</a></li>';
+                                }
+                            }
+
                             $html .= '<li><a href="#" data-href="'.action([\App\Http\Controllers\NotificationController::class, 'getTemplate'], ['transaction_id' => $row->id, 'template_for' => 'new_sale']).'" class="btn-modal" data-container=".view_modal"><i class="fa fa-envelope" aria-hidden="true"></i>'.__('lang_v1.new_sale_notification').'</a></li>';
                         } else {
                             $html .= '<li><a href="#" data-href="'.action([\App\Http\Controllers\SellController::class, 'viewMedia'], ['model_id' => $row->id, 'model_type' => \App\Transaction::class, 'model_media_type' => 'shipping_document']).'" class="btn-modal" data-container=".view_modal"><i class="fas fa-paperclip" aria-hidden="true"></i>'.__('lang_v1.shipping_documents').'</a></li>';
@@ -489,6 +503,17 @@ class SellController extends Controller
                     $status = optional($row->eisSale)->status;
                     return $status ? ($eis_status[$status] ?? $status) : '';
                 })
+                ->addColumn('eis_void_status', function ($row) {
+                    $sale = $row->eisSale;
+                    if (!$sale || !$sale->void_synced_at) {
+                        return '';
+                    }
+                    if ($sale->void_status === 'void') {
+                        return '<span class="label label-danger">Void</span>';
+                    }
+                    return $sale->void_approval_status
+                        ? '<span class="label label-default">'.e($sale->void_approval_status).'</span>' : '';
+                })
                 ->editColumn('status', function ($row) use ($sales_order_statuses, $is_admin) {
                     $status = '';
 
@@ -538,7 +563,7 @@ class SellController extends Controller
                         }
                     }, ]);
 
-            $rawColumns = ['final_total', 'action', 'total_paid', 'total_remaining', 'payment_status', 'invoice_no', 'discount_amount', 'tax_amount', 'total_before_tax', 'shipping_status', 'types_of_service_name', 'payment_methods', 'return_due', 'conatct_name', 'status', 'zatca_status'];
+            $rawColumns = ['final_total', 'action', 'total_paid', 'total_remaining', 'payment_status', 'invoice_no', 'discount_amount', 'tax_amount', 'total_before_tax', 'shipping_status', 'types_of_service_name', 'payment_methods', 'return_due', 'conatct_name', 'status', 'zatca_status', 'eis_void_status'];
 
             return $datatable->rawColumns($rawColumns)
                       ->skipTotalRecords()
@@ -571,8 +596,6 @@ class SellController extends Controller
         }
 
         $payment_types = $this->transactionUtil->payment_types(null, true, $business_id);
-
-
         return view('sell.index')
         ->with(compact('business_locations', 'customers', 'is_woocommerce', 'sales_representative', 'is_cmsn_agent_enabled', 'commission_agents', 'service_staffs', 'is_tables_enabled', 'is_service_staff_enabled', 'is_types_service_enabled', 'shipping_statuses', 'sources', 'payment_types'));
     }
@@ -2521,6 +2544,30 @@ class SellController extends Controller
         }
         if (! empty(request()->input('status'))) {
             $query->where('transactions.status', request()->input('status'));
+        }
+
+        $voidFilter = request()->input('eis_void_status');
+        if (in_array($voidFilter, ['void', 'not_void'], true)) {
+            if (!DB::getSchemaBuilder()->hasTable('eis_sales') ||
+                !DB::getSchemaBuilder()->hasColumn('eis_sales', 'void_status')) {
+                if ($voidFilter === 'void') {
+                    $query->whereRaw('1 = 0');
+                }
+            } elseif ($voidFilter === 'void') {
+                $query->whereExists(function ($subquery) use ($business_id) {
+                    $subquery->select(DB::raw(1))->from('eis_sales as void_sales')
+                        ->whereColumn('void_sales.transaction_id', 'transactions.id')
+                        ->where('void_sales.business_id', $business_id)
+                        ->where('void_sales.void_status', 'void');
+                });
+            } else {
+                $query->whereNotExists(function ($subquery) use ($business_id) {
+                    $subquery->select(DB::raw(1))->from('eis_sales as void_sales')
+                        ->whereColumn('void_sales.transaction_id', 'transactions.id')
+                        ->where('void_sales.business_id', $business_id)
+                        ->where('void_sales.void_status', 'void');
+                });
+            }
         }
 
         // Commission agent filters

@@ -73,6 +73,7 @@
                             <th>@lang('lang_v1.contact_no')</th>
                             <th>@lang('sale.location')</th>
                             <th>@lang('sale.payment_status')</th>
+                            <th>EIS void status</th>
                             <th>@lang('lang_v1.payment_method')</th>
                             <th>@lang('sale.total_amount')</th>
                             <th>@lang('sale.total_paid')</th>
@@ -100,6 +101,7 @@
                         <tr class="bg-gray font-17 footer-total text-center">
                             <td colspan="6"><strong>@lang('sale.total'):</strong></td>
                             <td class="footer_payment_status_count"></td>
+                            <td></td>
                             <td class="payment_method_count"></td>
                             <td class="footer_sale_total"></td>
                             <td class="footer_total_paid"></td>
@@ -107,7 +109,7 @@
                             <td class="footer_total_sell_return_due"></td>
                             <td colspan="2"></td>
                             <td class="service_type_count"></td>
-                            <td colspan="7"></td>
+                            <td colspan="11"></td>
                         </tr>
                     </tfoot>
                 </table>
@@ -184,6 +186,7 @@
                         d.location_id = $('#sell_list_filter_location_id').val();
                         d.customer_id = $('#sell_list_filter_customer_id').val();
                         d.payment_status = $('#sell_list_filter_payment_status').val();
+                        d.eis_void_status = $('#sell_list_filter_eis_void_status').val();
                         d.created_by = $('#created_by').val();
                         d.sales_cmsn_agnt = $('#sales_cmsn_agnt').val();
                         d.service_staffs = $('#service_staffs').val();
@@ -239,6 +242,12 @@
                     {
                         data: 'payment_status',
                         name: 'payment_status'
+                    },
+                    {
+                        data: 'eis_void_status',
+                        name: 'eis_void_status',
+                        orderable: false,
+                        searchable: false
                     },
                     {
                         data: 'payment_methods',
@@ -381,7 +390,7 @@
             });
 
             $(document).on('change',
-                '#sell_list_filter_location_id, #sell_list_filter_customer_id, #sell_list_filter_payment_status, #created_by, #sales_cmsn_agnt, #service_staffs, #shipping_status, #sell_list_filter_source, #payment_method',
+                '#sell_list_filter_location_id, #sell_list_filter_customer_id, #sell_list_filter_payment_status, #sell_list_filter_eis_void_status, #created_by, #sales_cmsn_agnt, #service_staffs, #shipping_status, #sell_list_filter_source, #payment_method',
                 function() {
                     sell_table.ajax.reload();
                 });
@@ -391,5 +400,6 @@
             });
         });
     </script>
+    @include('sell.partials.eis_void_tools_javascript')
     <script src="{{ asset('js/payment.js?v=' . $asset_v) }}"></script>
 @endsection

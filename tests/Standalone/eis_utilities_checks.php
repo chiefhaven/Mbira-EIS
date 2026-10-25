@@ -25,11 +25,19 @@ $schema->create('eis_sales', function ($table) {
     foreach (['receipt_number', 'fiscal_invoice_number', 'eis_invoice_number', 'status'] as $field) { $table->string($field)->nullable(); }
 });
 DB::table('transactions')->insert(['id' => 800, 'business_id' => 7, 'location_id' => 1, 'type' => 'sell']);
+DB::table('transactions')->insert(['id' => 801, 'business_id' => 7, 'location_id' => 1, 'type' => 'sell']);
 DB::table('eis_sales')->insert([
     'business_id' => 7, 'location_id' => 1, 'eis_setting_id' => 1, 'transaction_id' => 800,
     'receipt_number' => 'RECEIPT-800', 'fiscal_invoice_number' => 'RECEIPT-800',
     'eis_invoice_number' => 'INVOICE-800', 'status' => 'submitted',
 ]);
+DB::table('eis_sales')->insert([
+    'business_id' => 7, 'location_id' => 1, 'eis_setting_id' => 1, 'transaction_id' => 801,
+    'receipt_number' => 'RECEIPT-801', 'fiscal_invoice_number' => 'RECEIPT-801',
+    'eis_invoice_number' => 'INVOICE-801', 'status' => 'submitted',
+]);
+$voidMigration = require dirname(__DIR__, 2).'\Modules\EIS\Database\Migrations\2026_10_25_140000_add_eis_void_receipt_sync.php';
+$voidMigration->up();
 $utilityChecks = 0;
 function utilityCheck(bool $condition, string $message): void {
     global $utilityChecks;
@@ -266,6 +274,64 @@ $scopedVoid = $controller->execute(utilityRequest([
 utilityCheck($scopedVoid->getStatusCode() === 502 && !str_contains($scopedVoid->getContent(), 'FOREIGN-RECEIPT'),
     'A remote void list ignoring the invoice filter cannot expose another receipt');
 $user->locations = 'all';
+$responseBody = ['statusCode' => 1, 'data' => [
+    'items' => [['invoiceNumber' => 'INVOICE-800', 'approvalStatus' => 'Approved']],
+    'totalCount' => 1,
+]];
+$transactionStatusBeforeVoidSync = DB::table('transactions')->where('id', 800)->value('status');
+$voidSync = $controller->execute(utilityRequest([
+    'terminal_id' => 1, 'operation' => 'get-void-receipts',
+    'payload' => '{"invoiceNumber":"INVOICE-800","page":1,"pageSize":200}',
+]), $client, $service)->getData(true);
+utilityCheck($voidSync['success'] && $voidSync['data']['sync']['voided'] === 1
+    && DB::table('eis_sales')->where('transaction_id', 800)->value('void_status') === 'void',
+    'Approved EIS void receipt sync marks the matching local fiscal invoice void');
+utilityCheck(DB::table('transactions')->where('id', 800)->value('status') === $transactionStatusBeforeVoidSync,
+    'Void receipt sync preserves the transaction status and local sale history');
+$responseBody['data']['items'][0]['approvalStatus'] = 'Pending';
+$pendingSync = $controller->execute(utilityRequest([
+    'terminal_id' => 1, 'operation' => 'get-void-receipts',
+    'payload' => '{"invoiceNumber":"INVOICE-800","page":1,"pageSize":200}',
+]), $client, $service)->getData(true);
+utilityCheck($pendingSync['data']['sync']['voided'] === 1,
+    'Previously approved void marker is not downgraded by a later pending result');
+utilityCheck(DB::table('eis_sales')->where('transaction_id', 800)->value('void_approval_status') === 'Approved',
+    'Previously approved status remains authoritative after a later pending response');
+$responseBody['data']['items'] = [['invoiceNumber' => 'INVOICE-801', 'approvalStatus' => 'Pending']];
+$pendingOnlySync = $controller->execute(utilityRequest([
+    'terminal_id' => 1, 'operation' => 'get-void-receipts',
+    'payload' => '{"invoiceNumber":"INVOICE-801","page":1,"pageSize":200}',
+]), $client, $service)->getData(true);
+utilityCheck($pendingOnlySync['data']['sync']['synced'] === 1
+    && DB::table('eis_sales')->where('transaction_id', 801)->value('void_status') === null,
+    'A pending receipt status is stored without marking the local invoice void');
+$responseBody['data']['items'][0]['approvalStatus'] = 'approved';
+$lowercaseSync = $controller->execute(utilityRequest([
+    'terminal_id' => 1, 'operation' => 'get-void-receipts',
+    'payload' => '{"invoiceNumber":"INVOICE-801","page":1,"pageSize":200}',
+]), $client, $service)->getData(true);
+utilityCheck($lowercaseSync['data']['sync']['voided'] === 0
+    && DB::table('eis_sales')->where('transaction_id', 801)->value('void_status') === null,
+    'Only the exact Approved status marks an invoice void');
+$responseBody['data']['items'] = [
+    ['invoiceNumber' => 'INVOICE-801', 'approvalStatus' => 'Approved'],
+    ['invoiceNumber' => 'INCOMPLETE-RECEIPT'],
+];
+$malformedSync = $controller->execute(utilityRequest([
+    'terminal_id' => 1, 'operation' => 'get-void-receipts',
+    'payload' => '{"invoiceNumber":"INVOICE-801","page":1,"pageSize":200}',
+]), $client, $service);
+utilityCheck($malformedSync->getStatusCode() === 502
+    && DB::table('eis_sales')->where('transaction_id', 801)->value('void_status') === null,
+    'Malformed receipt lists are rejected before any local invoice is updated');
+$responseBody['data']['items'] = [['invoiceNumber' => 'UNMATCHED-RECEIPT', 'approvalStatus' => 'Approved']];
+$unmatchedSync = $controller->execute(utilityRequest([
+    'terminal_id' => 1, 'operation' => 'get-void-receipts',
+    'payload' => '{"invoiceNumber":"UNMATCHED-RECEIPT","page":1,"pageSize":200}',
+]), $client, $service)->getData(true);
+utilityCheck($unmatchedSync['data']['sync']['unmatched'] === 1
+    && DB::table('eis_sales')->where('transaction_id', 801)->value('void_status') === null,
+    'Unmatched remote receipts are reported without changing a local invoice');
 DB::table('eis_utility_requests')->delete();
 $before = count($requests);
 $prepared = $controller->execute(utilityRequest([

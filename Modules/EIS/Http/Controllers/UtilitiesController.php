@@ -12,6 +12,7 @@ use Modules\EIS\Services\Terminal\TerminalContext;
 use Modules\EIS\Services\Utilities\EisUtilitiesClient;
 use Modules\EIS\Services\Utilities\UtilityOperations;
 use Modules\EIS\Services\Utilities\UtilityRequestService;
+use Modules\EIS\Services\Utilities\VoidReceiptSynchronizer;
 
 class UtilitiesController extends Controller
 {
@@ -48,6 +49,14 @@ class UtilitiesController extends Controller
         $payload = UtilityOperations::payload($setting, $input['operation'],
             json_decode($input['payload'], true, 64, JSON_THROW_ON_ERROR));
         $this->authorizeOperation($request, $setting, $input['operation'], $payload);
+        if ($input['operation'] === 'get-void-receipts') {
+            $schema = DB::getSchemaBuilder();
+            if (!$schema->hasTable('eis_sales')
+                || collect(['void_status', 'void_approval_status', 'void_synced_at', 'void_response_payload'])
+                    ->contains(fn ($column) => !$schema->hasColumn('eis_sales', $column))) {
+                return response()->json(['success' => false, 'message' => 'Run the EIS migrations before syncing void receipts.'], 503);
+            }
+        }
         if (in_array($input['operation'], UtilityOperations::MUTATIONS, true)) {
             try {
                 $row = $mutations->prepare($setting, $input['operation'], $payload, (int) $request->user()->id);
@@ -73,6 +82,23 @@ class UtilitiesController extends Controller
                 Log::warning('EIS void lookup did not respect the authorized receipt filter', ['terminal_id' => $setting->id]);
                 return response()->json(['success' => false,
                     'message' => 'EIS did not return a verifiable receipt-scoped result. Ask an all-location administrator to check.'], 502);
+            }
+        }
+        if ($input['operation'] === 'get-void-receipts' && $result['outcome'] === 'accepted') {
+            $items = $result['response']['data']['items'] ?? null;
+            if (!is_array($items) || !array_is_list($items)) {
+                Log::warning('EIS void lookup returned an invalid item list', ['terminal_id' => $setting->id]);
+                return response()->json(['success' => false,
+                    'message' => 'EIS returned an invalid void receipt list. No local invoices were changed.'], 502);
+            }
+            try {
+                $result['sync'] = app(VoidReceiptSynchronizer::class)->sync($setting, $items);
+            } catch (\UnexpectedValueException $exception) {
+                Log::warning('EIS void receipt sync rejected invalid data', [
+                    'terminal_id' => $setting->id, 'reason' => $exception->getMessage(),
+                ]);
+                return response()->json(['success' => false,
+                    'message' => 'EIS returned incomplete void receipt data. No local invoices were changed.'], 502);
             }
         }
         $success = $result['outcome'] === 'accepted';
