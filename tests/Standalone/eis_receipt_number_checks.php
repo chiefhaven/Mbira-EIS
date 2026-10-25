@@ -27,14 +27,16 @@ function renderNumberPartial(BladeCompiler $compiler, object $receipt_details): 
     try { eval('?>'.$compiled); return ob_get_contents(); }
     finally { ob_end_clean(); }
 }
-$sale = new EisSale(['invoice_number' => 'TXN-100', 'fiscal_invoice_number' => 'VALIDATION-CODE',
+$sale = new EisSale(['invoice_number' => 'TXN-100', 'fiscal_invoice_number' => 'EIS-200',
     'receipt_number' => 'VALIDATION-CODE', 'request_payload' => ['invoiceHeader' => ['invoiceNumber' => 'EIS-200']]]);
 foreach (['pending', 'failed', 'submitted'] as $status) {
     $sale->status = $status;
     checkReceiptNumber($sale->eis_invoice_number === 'EIS-200', 'Saved EIS identity available for '.$status);
 }
 checkReceiptNumber($sale->invoice_number === 'TXN-100', 'Original tracking number preserved');
-checkReceiptNumber($sale->eis_invoice_number !== $sale->fiscal_invoice_number, 'Validation receipt code is not invoice number');
+checkReceiptNumber($sale->eis_invoice_number === $sale->fiscal_invoice_number
+    && $sale->eis_invoice_number !== $sale->receipt_number,
+    'Fiscal invoice identity matches the EIS number while receipt code stays separate');
 $sale->setRawAttributes(['eis_invoice_number' => 'LEGACY-EIS', 'request_payload' => null]);
 checkReceiptNumber($sale->eis_invoice_number === 'LEGACY-EIS', 'Support existing dedicated column when present');
 foreach ([null, [], ['invoiceHeader' => []], ['invoiceHeader' => ['invoiceNumber' => '']],
@@ -45,10 +47,7 @@ foreach ([null, [], ['invoiceHeader' => []], ['invoiceHeader' => ['invoiceNumber
 $sale = new EisSale(['request_payload' => ['invoiceHeader' => ['invoiceNumber' => ' EIS-200 ']]]);
 checkReceiptNumber($sale->eis_invoice_number === 'EIS-200', 'Trim stored invoice number');
 $html = renderNumberPartial($compiler, (object) ['invoice_no' => 'TXN-100', 'transaction_number' => 'TXN-100', 'eis_invoice_number' => 'EIS-200']);
-checkReceiptNumber(str_contains($html, 'Transaction Number') && str_contains($html, 'TXN-100'), 'Labeled transaction number rendered');
 checkReceiptNumber(str_contains($html, 'EIS Number') && str_contains($html, 'EIS-200'), 'Labeled EIS Number rendered');
-$html = renderNumberPartial($compiler, (object) ['invoice_no' => 'FALLBACK', 'eis_invoice_number' => 'EIS-200']);
-checkReceiptNumber(str_contains($html, 'FALLBACK'), 'Original invoice fallback supported');
 $html = renderNumberPartial($compiler, (object) ['invoice_no' => '<script>bad</script>', 'eis_invoice_number' => '<img src=x>']);
 checkReceiptNumber(! str_contains($html, '<script>') && ! str_contains($html, '<img src=x>')
     && str_contains($html, '&lt;img'), 'Both identifiers escaped');

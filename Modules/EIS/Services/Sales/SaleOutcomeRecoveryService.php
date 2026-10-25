@@ -15,9 +15,9 @@ class SaleOutcomeRecoveryService
     public function sync(EisSale $sale, EisSetting $setting): array
     {
         $payload = $sale->request_payload;
-        $invoiceNumber = $payload['invoiceHeader']['invoiceNumber'] ?? null;
-        if (!is_array($payload) || !is_string($invoiceNumber) || $invoiceNumber === ''
-            || $sale->eis_invoice_number !== $invoiceNumber
+        $invoiceNumber = $sale->getRawOriginal('eis_invoice_number');
+        if (!is_array($payload) || !is_string($invoiceNumber) || trim($invoiceNumber) === ''
+            || ($payload['invoiceHeader']['invoiceNumber'] ?? null) !== $invoiceNumber
             || (int) $sale->business_id !== (int) $setting->business_id
             || (int) $sale->location_id !== (int) $setting->location_id
             || (int) $sale->eis_setting_id !== (int) $setting->id) {
@@ -62,6 +62,7 @@ class SaleOutcomeRecoveryService
 
             $updates = [
                 'status' => 'submitted',
+                'fiscal_invoice_number' => $invoiceNumber,
                 'response_payload' => array_merge($current->response_payload ?? [], [
                     'manual_sync' => [
                         'method' => 'get-invoice-by-number',
@@ -75,7 +76,6 @@ class SaleOutcomeRecoveryService
                     : ($current->submitted_at ?? now()),
             ];
             if ($receiptNumber !== null) {
-                $updates['fiscal_invoice_number'] = $receiptNumber;
                 $updates['receipt_number'] = $receiptNumber;
                 $updates['is_fiscalized'] = true;
                 $updates['fiscalized_at'] = $current->fiscalized_at ?? now();
@@ -132,7 +132,7 @@ class SaleOutcomeRecoveryService
             $url = $data['validationURL'] ?? $data['invoiceSummary']['validationURL'] ?? null;
             $receiptNumber = $this->receiptNumber(is_string($url) ? $url : null)
                 ?? $this->explicitReceiptNumber($data);
-            $sale->update([
+            $updates = [
                 'status' => 'submitted',
                 'response_payload' => [
                     'submission_attempt' => $submissionResponse,
@@ -143,12 +143,15 @@ class SaleOutcomeRecoveryService
                         'receipt_available' => $receiptNumber !== null,
                     ],
                 ],
-                'fiscal_invoice_number' => $receiptNumber,
-                'receipt_number' => $receiptNumber,
+                'fiscal_invoice_number' => $invoiceNumber,
                 'qr_code' => is_string($url) && $url !== '' ? $url : $sale->qr_code,
                 'error_message' => null,
                 'submitted_at' => isset($data['dateSubmitted']) ? Carbon::parse($data['dateSubmitted']) : now(),
-            ]);
+            ];
+            if ($receiptNumber !== null) {
+                $updates['receipt_number'] = $receiptNumber;
+            }
+            $sale->update($updates);
 
             if ($receiptNumber !== null) {
                 \App\Services\Sales\SavedSaleWriteGuard::recordFiscalReceipt($sale->getConnection(), $sale->transaction_id);

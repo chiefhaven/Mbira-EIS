@@ -45,8 +45,9 @@ class SaleResponseService
         $eisSale->update([
             'status' => 'submitted',
             'response_payload' => $response,
-            'fiscal_invoice_number' => $receiptNumber,
-            'receipt_number' => $receiptNumber,
+            'fiscal_invoice_number' => $eisSale->eis_invoice_number
+                ?: $eisSale->getRawOriginal('fiscal_invoice_number'),
+            'receipt_number' => $receiptNumber ?: $eisSale->receipt_number,
             'qr_code' => $validationUrl,
             'submitted_at' => now(),
         ]);

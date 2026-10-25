@@ -106,11 +106,13 @@ $client = new class extends EisSaleClient {
 };
 $recoveryClient = new class extends SalesApiClient {
     public array $responses = [];
+    public array $requests = [];
     public $responder = null;
     public int $calls = 0;
     public function __construct() {}
     public function send(EisSetting $setting, string $operation, array $payload = []): array {
         ++$this->calls;
+        $this->requests[] = ['operation' => $operation, 'payload' => $payload];
         return $this->responder ? ($this->responder)($setting, $operation, $payload)
             : (array_shift($this->responses) ?? ['outcome' => 'unknown', 'response' => []]);
     }
@@ -180,6 +182,8 @@ checkRetry(! isset($first['offlineSignatureData']) && ! isset($first['invoiceSum
 checkRetry($transformer->signatures === 0, 'First attempt does not generate offline signature');
 $tracking = EisSale::where('transaction_id', $transaction->id)->firstOrFail();
 checkRetry($tracking->status === 'failed' && $tracking->fiscal_invoice_number === 'GENERATED-1', 'Failed invoice persists generated fiscal number');
+checkRetry(($tracking->request_payload['invoiceHeader']['invoiceNumber'] ?? null) === 'GENERATED-1',
+    'First request payload stores the EIS invoice identity used for submission');
 checkRetry($tracking->qr_code === 'https://eis.invalid/offline'
     && $transformer->offlineQrGenerations === 1,
     'Failed initial submission generates and saves the EIS offline validation QR URL');
@@ -242,7 +246,8 @@ $uncertainSubmitted = $service->submit($uncertainSale, $settings);
 checkRetry($uncertainSubmitted->status === 'submitted'
     && ($uncertainSubmitted->response_payload['recovery']['state'] ?? null) === 'verified',
     'Ambiguous post is reconciled after exact read-only invoice match');
-checkRetry($uncertainSubmitted->receipt_number === null && !$uncertainSale->fresh()->is_fiscalized
+checkRetry($uncertainSubmitted->fiscal_invoice_number === $uncertainSubmitted->eis_invoice_number
+    && $uncertainSubmitted->receipt_number === null && !$uncertainSale->fresh()->is_fiscalized
     && str_starts_with($uncertainSubmitted->qr_code, 'https://eis.invalid/offline'),
     'Verified invoice without official receipt retains offline QR and does not claim fiscal receipt');
 $submittedCount = count($client->payloads);
@@ -261,7 +266,12 @@ $recoveryClient->responder = function (EisSetting $setting, string $operation, a
     ]]];
 };
 $syncResult = $recovery->sync($uncertainSubmitted, $settings);
+checkRetry(end($recoveryClient->requests)['payload']['invoiceNumber']
+    === $uncertainSubmitted->getRawOriginal('eis_invoice_number')
+    && end($recoveryClient->requests)['payload']['invoiceNumber'] !== $uncertainSale->invoice_no,
+    'Individual sync looks up the eis_sales invoice number, not the POS transaction number');
 checkRetry($syncResult['receipt_available'] && $syncResult['receipt_number'] === 'SYNC-RECEIPT'
+    && $uncertainSubmitted->fresh()->fiscal_invoice_number === $uncertainSubmitted->eis_invoice_number
     && $uncertainSubmitted->fresh()->receipt_signature === 'SYNC-SIGNATURE',
     'Individual sync saves the official EIS receipt number and signature');
 checkRetry($uncertainSubmitted->fresh()->response_payload['manual_sync']['method'] === 'get-invoice-by-number'
@@ -308,8 +318,12 @@ checkRetry(! isset(end($client->payloads)['invoiceSummary']['offlineSignature'])
 checkRetry(EisSale::where('transaction_id', $fresh->id)->first()->fiscal_invoice_number === 'RESERVED-1', 'Reserved generated fiscal identity retained');
 $client->response = ['success' => true, 'data' => ['statusCode' => 1, 'data' => ['validationURL' => 'https://eis.invalid/validate?vc=FISCAL-RECEIPT']]];
 $submitted = $service->submit($transaction, $settings);
-checkRetry($submitted->status === 'submitted' && $submitted->fiscal_invoice_number === 'FISCAL-RECEIPT', 'Success replaces provisional number with confirmed fiscal receipt');
-checkRetry($submitted->eis_invoice_number === 'GENERATED-1' && $transaction->fresh()->is_fiscalized, 'Generated invoice identity survives success');
+checkRetry($submitted->status === 'submitted' && $submitted->fiscal_invoice_number === 'GENERATED-1'
+    && $submitted->receipt_number === 'FISCAL-RECEIPT',
+    'Success preserves the EIS invoice identity and stores the official receipt separately');
+checkRetry($submitted->eis_invoice_number === 'GENERATED-1' && $transaction->fresh()->is_fiscalized
+    && $transaction->fresh()->fiscal_invoice_number === 'GENERATED-1',
+    'Generated invoice identity is projected to POS separately from the receipt');
 $count = count($client->payloads);
 DB::table('transactions')->where('id', $transaction->id)->update([
     'is_fiscalized' => false, 'fiscal_invoice_number' => null, 'receipt_number' => null,
@@ -532,7 +546,8 @@ try {
     checkRetry($generator->parseInvoiceNumber($issued->eis_invoice_number)['count'] === 3
         && str_starts_with($issued->eis_invoice_number, $todayPrefix),
         'Real submission changes only the final component to this terminal daily count plus one');
-    checkRetry($issued->fiscal_invoice_number === 'DAILY-RECEIPT'
+    checkRetry($issued->fiscal_invoice_number === $issued->eis_invoice_number
+        && $issued->receipt_number === 'DAILY-RECEIPT'
         && $generator->getDailyCount(7, 1) === 3 && $nextCount->invoke($service, 7) === 4,
         'Confirmed receipts remain included in daily invoice allocation');
     Carbon\Carbon::setTestNow(Carbon\Carbon::parse('2026-10-24 00:00:00'));
