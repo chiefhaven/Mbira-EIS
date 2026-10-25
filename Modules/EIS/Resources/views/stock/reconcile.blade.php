@@ -4,8 +4,8 @@
 <section class="content-header"><h1>EIS stock reconciliation</h1></section>
 <section class="content">
     <div class="box box-primary"><div class="box-body">
-        <p>EIS is authoritative. Compare stock at a terminal's assigned site, then apply audited increases/decreases locally. This does not submit another adjustment to EIS.</p>
-        <p class="text-warning">Finish all outstanding fiscal sales and stock submissions first. Unmapped/ambiguous products and inconsistent purchase allocations must be repaired before reconciliation. Missing products are not treated as zero.</p>
+        <p>EIS is authoritative. Product Listing syncs the catalog at every active EIS site. Users with stock-adjustment permission also trigger automatic reconciliation, which records audited local movements without submitting stock adjustments back to EIS. This page remains available for manual comparisons.</p>
+        <p class="text-warning">Automatic reconciliation is blocked at any site with outstanding fiscal sales or stock submissions. Unmapped/ambiguous products and inconsistent purchase allocations must also be repaired first. Missing products are never treated as zero. The <code>eis-products</code> queue must be running for Product Listing syncs to complete.</p>
         <div id="eis-stock-message" role="status" aria-live="polite"></div>
         <div class="form-group">
             <label for="eis-stock-terminal">Location / terminal</label>

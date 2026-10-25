@@ -104,7 +104,14 @@ class ProductController extends Controller
         $is_woocommerce = $this->moduleUtil->isModuleInstalled('Woocommerce');
 
         try {
-            dispatch(new \Modules\EIS\Jobs\SyncProductsJob($business_id))
+            $can_reconcile_stock = auth()->user()->can('stock_adjustment.create');
+            dispatch(new \Modules\EIS\Jobs\SyncProductsJob(
+                $business_id,
+                null,
+                $can_reconcile_stock,
+                $can_reconcile_stock ? (int) auth()->id() : null,
+                true
+            ))
                 ->onQueue('eis-products');
         } catch (\Exception $e) {
             Log::error('EIS SyncProductsJob failed: ' . $e->getMessage());

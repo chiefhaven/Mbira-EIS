@@ -3,8 +3,16 @@
 require __DIR__.'\eis_opening_stock_checks.php';
 
 use Illuminate\Database\Schema\Blueprint;
+use Modules\EIS\Jobs\SyncProductsJob;
 use Modules\EIS\Services\Stock\StockInventoryClient;
 use Modules\EIS\Services\Stock\StockReconciliationService;
+
+$catalogSync = new SyncProductsJob(1, null, false, null, true);
+$automaticSync = new SyncProductsJob(1, null, true, 7, true);
+verify($catalogSync->uniqueId() === '1:all:all-catalog'
+    && $automaticSync->uniqueId() === '1:all:catalog-and-stock'
+    && $catalogSync->uniqueId() !== $automaticSync->uniqueId(),
+    'Product-listing syncs coalesce by business while catalog-only and stock-reconciling work stay separate');
 
 [$db, $upserter] = openingFixture();
 $schema = $db->getSchemaBuilder();
