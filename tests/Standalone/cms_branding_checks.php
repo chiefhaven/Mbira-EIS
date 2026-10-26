@@ -260,6 +260,12 @@ try {
     brandingCheck($business->name === 'Business name' && $business->logo === 'receipt-logo.png',
         'Business names and receipt logos are unchanged');
 
+    $loginLayout = $files->get($root.'/resources/views/layouts/auth2.blade.php');
+    brandingCheck(str_contains($loginLayout, 'width: 128px;') && str_contains($loginLayout, 'width: 192px;')
+        && str_contains($loginLayout, 'login-brand-page'), 'Login logo has larger responsive dimensions and reserved header space');
+    $sidebar = $files->get($root.'/resources/views/layouts/partials/sidebar.blade.php');
+    brandingCheck(!str_contains($sidebar, "config('branding.compact_logo')")
+        && str_contains($sidebar, "Session::get('business.name')"), 'Authenticated sidebar retains business name without compact logo');
     $blade = new Illuminate\View\Compilers\BladeCompiler($files, $temporary);
     foreach ([
         'Modules/Superadmin/Resources/views/superadmin_settings/general.blade.php',

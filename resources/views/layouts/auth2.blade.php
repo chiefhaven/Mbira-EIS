@@ -34,7 +34,7 @@
     @endif
     <div class="container-fluid">
         <div class="row eq-height-row">
-            <div class="col-md-12 col-sm-12 col-xs-12 right-col tw-pt-20 tw-pb-10 tw-px-5">
+            <div class="col-md-12 col-sm-12 col-xs-12 right-col tw-pb-10 tw-px-5 @if($request->segment(1) == 'login') login-brand-page @else tw-pt-20 @endif">
                 <div class="row">
                     {{-- <div
                         class="lg:tw-w-16 md:tw-h-16 tw-w-12 tw-h-12 tw-flex tw-items-center tw-justify-center tw-mx-auto tw-overflow-hidden tw-bg-white tw-rounded-full tw-p-0.5 tw-mb-4">
@@ -45,7 +45,7 @@
                         style="text-align: left">
                         <a href="{{ url('/') }}">
                             <div
-                                class="lg:tw-w-16 md:tw-h-16 tw-w-12 tw-h-12 tw-flex tw-items-center tw-justify-center tw-mx-auto tw-overflow-hidden tw-p-0.5 tw-mb-4">
+                                class="@if($request->segment(1) == 'login') login-brand-logo @else lg:tw-w-16 md:tw-h-16 tw-w-12 tw-h-12 @endif tw-flex tw-items-center tw-justify-center tw-mx-auto tw-overflow-hidden tw-p-0.5 tw-mb-4">
                                 <img src="{{ config('branding.logo') ?: asset('img/logo-small.png') }}" alt="{{ config('app.name') }}" style="max-width: 100%; max-height: 100%; object-fit: contain;" />
                             </div>
                         </a>
@@ -122,6 +122,22 @@
         });
     </script>
     <style>
+        .login-brand-logo {
+            width: 128px;
+            height: 72px;
+        }
+        .login-brand-page {
+            padding-top: 112px;
+        }
+        @media (min-width: 768px) {
+            .login-brand-logo {
+                width: 192px;
+                height: 96px;
+            }
+            .login-brand-page {
+                padding-top: 152px;
+            }
+        }
         .wizard>.content {
             background-color: white !important;
         }
