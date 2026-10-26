@@ -1302,6 +1302,20 @@ $line = $db->table('transaction_sell_lines')->where('id', $response['added_line_
 check($line->tax_id === null && $line->item_tax === '0.0000' && $line->unit_price_inc_tax === '10.0000' &&
     $response['bill']['final_total'] === '82.0000',
     'restaurant item additions omit product tax and preserve the untaxed line total when inline tax is disabled');
+[$db, $service, $actor] = checkoutFixture();
+addNewProduct($db);
+$db->getSchemaBuilder()->table('variations', function (Illuminate\Database\Schema\Blueprint $t) { $t->text('sell_price_inc_tax')->nullable(); });
+$db->table('variations')->where('id', 9)->update(['default_sell_price' => '17021.2800', 'sell_price_inc_tax' => '20000.0000']);
+$db->table('tax_rates')->where('id', 6)->update(['amount' => '17.5']);
+$response = $service->addItems(1, $actor, additionsRequest($service, $actor, 1, '2.0000', 9));
+$line = $db->table('transaction_sell_lines')->where('id', $response['added_line_ids'][0])->first();
+check($line->unit_price === '17021.2800' && $line->item_tax === '2978.7200' && $line->unit_price_inc_tax === '20000.0000' &&
+    $response['bill']['final_total'] === '40072.0000',
+    'restaurant lines use the catalog tax-inclusive price like web POS, without recomputed fractional-tax drift');
+$db->table('business')->update(['enable_inline_tax' => 0]);
+$response = $service->addItems(1, $actor, additionsRequest($service, $actor, 1, '1.0000', 9));
+check($db->table('transaction_sell_lines')->where('variation_id', 9)->value('unit_price_inc_tax') === '20000.0000',
+    'existing restaurant catalog-priced line keeps its saved price on later additions');
 [$db, $service, $actor] = checkoutFixture(true);
 $request = additionsRequest($service, $actor, 1, '1.00001');
 $before = snapshot($db);

@@ -801,10 +801,19 @@ class SavedSaleSplitService
         if (bccomp($price, '0', 4) < 0 || bccomp($rate, '0', 4) < 0) {
             $this->fail('invalid_add_product', 'Product price and tax must be nonnegative.', 422);
         }
-        $taxAmount = self::round4(bcdiv(bcmul($price, $rate, 8), '100', 8));
+        // Match web /pos/create and desktop retail: the catalog tax-inclusive price is authoritative and
+        // the line tax is its difference from the net price, so totals never drift from catalog prices.
+        $catalogInclusive = isset($variation->sell_price_inc_tax) ? self::decimal($variation->sell_price_inc_tax) : null;
+        if (bccomp($rate, '0', 4) > 0 && $catalogInclusive !== null && bccomp($catalogInclusive, $price, 4) >= 0) {
+            $grossPrice = $catalogInclusive;
+            $taxAmount = bcsub($catalogInclusive, $price, 4);
+        } else {
+            $taxAmount = self::round4(bcdiv(bcmul($price, $rate, 8), '100', 8));
+            $grossPrice = bcadd($price, $taxAmount, 4);
+        }
         return ['product_id' => $product->id, 'variation_id' => $variationId, 'quantity' => $quantity,
             'unit_price_before_discount' => $price, 'unit_price' => $price, 'item_tax' => $taxAmount,
-            'unit_price_inc_tax' => bcadd($price, $taxAmount, 4),
+            'unit_price_inc_tax' => $grossPrice,
             'tax_id' => $inlineTaxEnabled ? ($product->tax ?? null) : null,
             'children_type' => '', 'created_at' => $now, 'updated_at' => $now];
     }
