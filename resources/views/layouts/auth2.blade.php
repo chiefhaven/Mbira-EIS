@@ -179,6 +179,40 @@
                 margin-top: 8px;
             }
         }
+        @media (max-height: 500px) {
+            .login-brand-logo {
+                width: 96px;
+                height: 48px;
+            }
+            .login-brand-page {
+                padding-top: 72px;
+                padding-bottom: 4px;
+            }
+            .login-brand-page .login-shell {
+                padding: 4px 0;
+            }
+            .login-brand-page .login-card {
+                padding: 10px 16px;
+            }
+            .login-brand-page .form-group,
+            .login-brand-page .login-header-block {
+                margin-bottom: 6px;
+            }
+            .login-brand-page .tw-dw-label {
+                padding-top: 4px;
+                padding-bottom: 4px;
+            }
+            .login-brand-page input,
+            .login-brand-page button[type="submit"] {
+                height: 32px;
+            }
+            .login-brand-page #show_hide_icon {
+                top: 30px !important;
+            }
+            .login-brand-page .login-header-block h1 {
+                font-size: 20px;
+            }
+        }
         .wizard>.content {
             background-color: white !important;
         }
