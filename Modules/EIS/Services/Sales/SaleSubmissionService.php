@@ -38,6 +38,55 @@ class SaleSubmissionService
             ->block(10, fn () => $this->submitLocked($transaction, $settings));
     }
 
+    public function prepare(Transaction $transaction): EisSale
+    {
+        return Cache::lock('eis-sale-'.$transaction->business_id.'-'.$transaction->id, 300)
+            ->block(10, function () use ($transaction) {
+                \App\Services\Sales\SavedSaleWriteGuard::fiscal($transaction->getConnection(), $transaction->id);
+                $transaction->refresh();
+                if (!SaleSubmissionRule::qualifies($transaction)) {
+                    throw new EisSaleException('Only a final, fully paid sale can be queued for EIS submission.');
+                }
+
+                $existing = EisSale::where('transaction_id', $transaction->id)->first();
+                if ($existing && (int) $existing->business_id !== (int) $transaction->business_id) {
+                    throw new EisSaleException('EIS sale tracking belongs to a different business terminal.');
+                }
+
+                $settings = \Modules\EIS\Services\Terminal\TerminalContext::forSale($transaction);
+                $this->assertSaleLocation($transaction, $settings);
+
+                return $existing ?? $this->reserveTracking($transaction, $settings);
+            });
+    }
+
+    private function assertSaleLocation(Transaction $transaction, EisSetting $settings): void
+    {
+        if ($transaction->location_id) {
+            $location = \App\BusinessLocation::where('business_id', $transaction->business_id)->find($transaction->location_id);
+            if (!$location || (string) $location->eis_site_id !== \Modules\EIS\Services\Terminal\TerminalContext::site($settings)) {
+                throw new EisSaleException('Sale location does not match the business terminal site.');
+            }
+        }
+    }
+
+    private function reserveTracking(Transaction $transaction, EisSetting $settings): EisSale
+    {
+        // Share terminal allocation with bulk submission without enclosing fiscal model saves in a DB transaction.
+        return Cache::lock('eis-invoice-terminal-'.$settings->id, 60)->block(10, function () use ($transaction, $settings) {
+            $tracking = EisSale::where('transaction_id', $transaction->id)->first();
+            $number = $tracking?->eis_invoice_number ?? $tracking?->fiscal_invoice_number
+                ?? $this->generateEISInvoiceNumber($transaction, $settings);
+
+            return EisSale::updateOrCreate(['transaction_id' => $transaction->id], [
+                'business_id' => $transaction->business_id, 'invoice_number' => $transaction->invoice_no,
+                'fiscal_invoice_number' => $number, 'status' => 'pending',
+                'eis_invoice_number' => $number,
+                'location_id' => $transaction->location_id, 'eis_setting_id' => $settings->id,
+            ]);
+        });
+    }
+
     private function submitLocked(Transaction $transaction, object $settings): EisSale
     {
         \Modules\EIS\Services\Terminal\TerminalContext::assertBusiness($settings, (int) $transaction->business_id);
@@ -68,12 +117,7 @@ class SaleSubmissionService
         // ----------------------------
         $eisSetting = \Modules\EIS\Services\Terminal\TerminalContext::forSale($transaction);
         $settings = $eisSetting;
-        if ($transaction->location_id) {
-            $location = \App\BusinessLocation::where('business_id', $transaction->business_id)->find($transaction->location_id);
-            if (!$location || (string) $location->eis_site_id !== \Modules\EIS\Services\Terminal\TerminalContext::site($settings)) {
-                throw new EisSaleException('Sale location does not match the business terminal site.');
-            }
-        }
+        $this->assertSaleLocation($transaction, $eisSetting);
 
         $recovery = $existing?->response_payload['recovery'] ?? [];
         if (in_array($recovery['state'] ?? null, ['lookup_required', 'confirmed_absent'], true)) {
@@ -110,19 +154,8 @@ class SaleSubmissionService
             ?? $this->storedFailedPayloadSignature($failedTransaction?->payload);
         $includeOfflineSignature = ($existing && ($existing->status === 'failed' || !empty($existing->request_payload)))
             || $failedTransaction !== null;
-        // Split fiscal guards require a top-level transaction; lock allocation without enclosing their model saves.
-        [$eisSale, $eisInvoiceNumber] = Cache::lock('eis-invoice-terminal-'.$eisSetting->id, 60)->block(10, function () use ($transaction, $eisSetting) {
-            $tracking = EisSale::where('transaction_id', $transaction->id)->first();
-            $number = $tracking?->eis_invoice_number ?? $tracking?->fiscal_invoice_number
-                ?? $this->generateEISInvoiceNumber($transaction, $eisSetting);
-            $sale = EisSale::updateOrCreate(['transaction_id' => $transaction->id], [
-                'business_id' => $transaction->business_id, 'invoice_number' => $transaction->invoice_no,
-                'fiscal_invoice_number' => $number, 'status' => 'pending',
-                'eis_invoice_number' => $number,
-                'location_id' => $transaction->location_id, 'eis_setting_id' => $eisSetting->id,
-            ]);
-            return [$sale, $number];
-        });
+        $eisSale = $this->reserveTracking($transaction, $eisSetting);
+        $eisInvoiceNumber = $eisSale->eis_invoice_number;
 
         // Only a sale paid in full is submitted (see SaleSubmissionRule).
         if (! SaleSubmissionRule::isPaid($transaction)) {
