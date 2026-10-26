@@ -766,11 +766,22 @@
 	margin-bottom: 2px;
 }
 .ticket .tax-id { display: inline-block; margin: 0 3px; color: var(--receipt-ink); }
+.ticket .eis-legal-marker {
+	display: block;
+	margin: 0 0 6px;
+	color: var(--receipt-ink);
+	font-size: 10px !important;
+	font-weight: 700 !important;
+	letter-spacing: .12em;
+	line-height: 1.4 !important;
+	text-align: center;
+	text-transform: uppercase;
+	white-space: nowrap;
+}
+.ticket .eis-legal-marker + br { display: none; }
+.ticket .receipt-footer-text .eis-legal-marker { margin: 8px 0 0; }
 .ticket .receipt-title {
 	margin: 10px 0 8px;
-	padding: 5px 0;
-	border-top: 2px solid var(--receipt-ink);
-	border-bottom: 2px solid var(--receipt-ink);
 	text-align: center;
 	font-size: 13px;
 	font-weight: 800;
@@ -803,8 +814,6 @@
 .ticket .receipt-customer {
 	display: block;
 	margin-top: 6px;
-	padding-top: 6px;
-	border-top: 1px dashed var(--receipt-ink);
 }
 .ticket .receipt-customer strong { color: var(--receipt-muted); font-weight: 600; }
 
@@ -813,7 +822,6 @@
 .ticket .receipt-items { margin: 10px 0 6px; border-bottom: 1px dashed var(--receipt-ink); }
 .ticket .receipt-items thead th {
 	padding: 5px 2px;
-	border-top: 1px dashed var(--receipt-ink);
 	border-bottom: 1px dashed var(--receipt-ink);
 	font-size: 10px !important;
 	font-weight: 700;
@@ -823,7 +831,6 @@
 }
 .ticket .receipt-items thead th.text-right { text-align: right; }
 .ticket .receipt-items tbody td { padding: 4px 2px; vertical-align: top; }
-.ticket .receipt-items tbody tr + tr td { border-top: 1px dotted #999; }
 .ticket .receipt-items td.description { font-weight: 600; }
 .ticket .receipt-items td.description small,
 .ticket .receipt-items td.description .f-8 { font-weight: 400; color: var(--receipt-muted); }
@@ -845,12 +852,7 @@
 .ticket .flex-box p { width: 50%; margin: 0; white-space: nowrap; }
 .ticket .flex-box p:first-child { color: var(--receipt-muted); }
 .ticket .flex-box p:last-child { font-weight: 600; color: var(--receipt-ink); }
-.ticket .flex-box.grand-total {
-	margin: 6px 0;
-	padding: 7px 6px;
-	border: 2px solid var(--receipt-ink);
-	border-radius: 4px;
-}
+.ticket .flex-box.grand-total { margin: 4px 0 6px; }
 .ticket .flex-box.grand-total p {
 	color: var(--receipt-ink);
 	font-size: 16px !important;
@@ -859,7 +861,7 @@
 }
 
 /* Tax summary */
-.ticket .receipt-tax-summary { margin: 8px 0; border-top: 1px dashed var(--receipt-ink); border-bottom: 1px dashed var(--receipt-ink); }
+.ticket .receipt-tax-summary { margin: 8px 0; }
 .ticket .receipt-tax-summary th { padding: 4px 2px; font-size: 10px !important; letter-spacing: .06em; text-transform: uppercase; }
 .ticket .receipt-tax-summary td { padding: 2px; }
 .ticket .receipt-tax-summary td.right { text-align: right; font-weight: 600; }
@@ -868,8 +870,6 @@
 .ticket .receipt-notes { margin: 8px 0; color: var(--receipt-muted); font-size: 11px; }
 .ticket .receipt-footer {
 	margin-top: 10px;
-	padding-top: 8px;
-	border-top: 1px dashed var(--receipt-ink);
 	text-align: center;
 }
 .ticket .receipt-footer img { display: block; margin: 6px auto; }
@@ -894,7 +894,6 @@
 		print-color-adjust: exact;
 	}
 	.ticket, .ticket * { font-family: Arial, "Helvetica Neue", Helvetica, sans-serif; }
-	.ticket .receipt-items tbody tr + tr td { border-top-color: #000; }
 	.ticket tr, .ticket .flex-box, .ticket .receipt-footer img { page-break-inside: avoid; break-inside: avoid; }
 	.hidden-print, .hidden-print * { display: none !important; }
 }

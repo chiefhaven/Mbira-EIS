@@ -1002,7 +1002,7 @@ class TransactionUtil extends Util
             && ! empty($transaction->eisSale->eis_invoice_number);
 
         $output = [
-            'header_text' => ($is_eis_receipt ? '<span style="font-size:12px; font-weight:normal; line-height:1.4;">****Start of Legal Receipt****</span>'."\n<br>" : '').($il->header_text ?? ''),
+            'header_text' => ($is_eis_receipt ? '<span class="eis-legal-marker" style="font-size:12px; font-weight:normal; line-height:1.4;">****Start of Legal Receipt****</span>'."\n<br>" : '').($il->header_text ?? ''),
             'business_name' => ($il->show_business_name == 1) ? $business_details->name : '',
             'location_name' => ($il->show_location_name == 1) ? $location_details->name : '',
             'sub_heading_line1' => trim($il->sub_heading_line1),
@@ -1644,7 +1644,7 @@ class TransactionUtil extends Util
                 <strong>HavenPlus Technologies Ltd.</strong><br>
                 Contact: +265 882 547 343
             </small>'.
-            ($is_eis_receipt ? "<br>\n".'<span style="font-size:12px; font-weight:normal; line-height:1.4;">****End of Legal Receipt****</span>' : '');
+            ($is_eis_receipt ? "<br>\n".'<span class="eis-legal-marker" style="font-size:12px; font-weight:normal; line-height:1.4;">****End of Legal Receipt****</span>' : '');
 
         //Barcode related information.
         $output['show_barcode'] = ! empty($il->show_barcode) ? true : false;

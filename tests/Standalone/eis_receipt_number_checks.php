@@ -106,8 +106,8 @@ foreach (['due', 'partial', 'paid'] as $paymentStatus) {
         checkReceiptNumber(str_contains($legalHeader, '****Start of Legal Receipt****') === (bool) $expected, 'Legal start only on EIS receipts');
         checkReceiptNumber(str_contains($output['footer_text'], '****End of Legal Receipt****') === (bool) $expected, 'Legal end only on EIS receipts');
         if ($expected) {
-            preg_match('/<span style="([^"]+)">\*\*\*\*Start/', $legalHeader, $startStyle);
-            preg_match('/<span style="([^"]+)">\*\*\*\*End/', $output['footer_text'], $endStyle);
+            preg_match('/<span[^>]* style="([^"]+)">\*\*\*\*Start/', $legalHeader, $startStyle);
+            preg_match('/<span[^>]* style="([^"]+)">\*\*\*\*End/', $output['footer_text'], $endStyle);
             checkReceiptNumber(isset($startStyle[1], $endStyle[1]) && $startStyle[1] === $endStyle[1]
                 && str_contains($startStyle[1], 'font-size:12px;'), 'Legal markers use identical explicit font sizes');
         }
