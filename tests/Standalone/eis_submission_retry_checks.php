@@ -301,6 +301,62 @@ checkRetry($afterManualSync->receipt_signature !== $beforeManualSync->receipt_si
     && !$uncertainSale->fresh()->is_fiscalized,
     'Individual sync leaves fiscalization flags and transactions unchanged');
 
+$uncertainSubmitted->update([
+    'receipt_number' => 'STALE-RECEIPT',
+    'receipt_signature' => 'STALE-SIGNATURE',
+    'qr_code' => 'https://eis.invalid/stale',
+]);
+$recoveryClient->responder = function (EisSetting $setting, string $operation, array $payload) {
+    $tracking = EisSale::where('eis_invoice_number', $payload['invoiceNumber'])->firstOrFail();
+    $saved = $tracking->request_payload;
+    return ['outcome' => 'accepted', 'response' => ['statusCode' => 1, 'data' => [
+        'invoiceHeader' => $saved['invoiceHeader'],
+        'invoiceLineItems' => $saved['invoiceLineItems'],
+        'invoiceSummary' => $saved['invoiceSummary'],
+        'validationURL' => null,
+        'dateSubmitted' => '2026-10-25T21:52:32.97',
+    ]]];
+};
+$noReceiptSync = $recovery->sync($uncertainSubmitted->fresh(), $settings);
+$afterNoReceiptSync = $uncertainSubmitted->fresh();
+checkRetry(!$noReceiptSync['receipt_available']
+    && $afterNoReceiptSync->receipt_number === null
+    && $afterNoReceiptSync->receipt_signature === null
+    && $afterNoReceiptSync->qr_code === null
+    && $afterNoReceiptSync->response_payload === $noReceiptSync['response'],
+    'Individual sync refreshes every EIS invoice and receipt field, clearing stale receipt data absent from EIS');
+
+$validSyncResponder = $recoveryClient->responder;
+$beforeMismatchSync = $afterNoReceiptSync->getRawOriginal();
+$recoveryClient->responder = function (EisSetting $setting, string $operation, array $payload) use ($validSyncResponder) {
+    $lookup = $validSyncResponder($setting, $operation, $payload);
+    $lookup['response']['data']['invoiceSummary']['invoiceTotal']++;
+    return $lookup;
+};
+try {
+    $recovery->sync($afterNoReceiptSync, $settings);
+    throw new RuntimeException('Mismatched invoice was synchronized');
+} catch (\UnexpectedValueException $exception) {
+    checkRetry($afterNoReceiptSync->fresh()->getRawOriginal() === $beforeMismatchSync,
+        'Individual sync rejects mismatched totals without changing any saved field');
+}
+$recoveryClient->responder = function (EisSetting $setting, string $operation, array $payload) use ($validSyncResponder, $afterNoReceiptSync) {
+    $lookup = $validSyncResponder($setting, $operation, $payload);
+    DB::table('eis_sales')->where('id', $afterNoReceiptSync->id)
+        ->update(['fiscal_invoice_number' => 'CHANGED-DURING-LOOKUP']);
+    return $lookup;
+};
+try {
+    $recovery->sync($afterNoReceiptSync, $settings);
+    throw new RuntimeException('Concurrent invoice identity change was overwritten');
+} catch (\UnexpectedValueException $exception) {
+    checkRetry($afterNoReceiptSync->fresh()->getRawOriginal('fiscal_invoice_number') === 'CHANGED-DURING-LOOKUP'
+        && $afterNoReceiptSync->fresh()->response_payload === $afterNoReceiptSync->response_payload,
+        'Individual sync refuses to overwrite an invoice identity changed during lookup');
+}
+DB::table('eis_sales')->where('id', $afterNoReceiptSync->id)
+    ->update(['fiscal_invoice_number' => $beforeMismatchSync['fiscal_invoice_number']]);
+
 $recoveryClient->responder = function (EisSetting $setting, string $operation, array $payload) {
     return ['outcome' => 'accepted', 'response' => ['statusCode' => 1, 'data' => [
         'invoiceHeader' => ['invoiceNumber' => $payload['invoiceNumber'], 'siteId' => 'SITE-7', 'sellerTIN' => 'FIXTURE',
