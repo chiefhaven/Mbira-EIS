@@ -37,7 +37,9 @@ class SaleOutcomeRecoveryService
             throw new \UnexpectedValueException('EIS did not return an invoice that exactly matches this saved sale. No local data was changed.');
         }
 
-        $url = $data['validationURL'] ?? $data['invoiceSummary']['validationURL'] ?? null;
+        $url = array_key_exists('validationURL', $data)
+            ? $data['validationURL']
+            : ($data['invoiceSummary']['validationURL'] ?? null);
         $url = is_string($url) && $url !== '' ? $url : null;
         $receiptNumber = $this->receiptNumber($url) ?? $this->explicitReceiptNumber($data);
         $receiptSignature = $this->receiptSignature($url);
@@ -57,28 +59,23 @@ class SaleOutcomeRecoveryService
                 ->whereKey($sale->id)->lockForUpdate()->firstOrFail();
             if ((int) $current->eis_setting_id !== (int) $setting->id
                 || (int) $current->location_id !== (int) $setting->location_id
+                || $current->getRawOriginal('fiscal_invoice_number') !== $invoiceNumber
                 || $current->request_payload !== $payload) {
-                throw new \RuntimeException('The saved sale changed during EIS lookup. No local data was synchronized.');
+                throw new \UnexpectedValueException('The saved sale changed during EIS lookup. No local data was synchronized.');
             }
 
             $updates = [
                 'status' => 'submitted',
                 'fiscal_invoice_number' => $invoiceNumber,
+                'receipt_number' => $receiptNumber,
+                'receipt_signature' => $receiptSignature,
+                'qr_code' => $url,
                 'response_payload' => $lookup['response'],
                 'error_message' => null,
                 'submitted_at' => isset($data['dateSubmitted'])
                     ? Carbon::parse($data['dateSubmitted'])
                     : ($current->submitted_at ?? now()),
             ];
-            if ($receiptNumber !== null) {
-                $updates['receipt_number'] = $receiptNumber;
-            }
-            if ($url !== null) {
-                $updates['qr_code'] = $url;
-            }
-            if ($receiptSignature !== null) {
-                $updates['receipt_signature'] = $receiptSignature;
-            }
             $current->update($updates);
 
             return [
