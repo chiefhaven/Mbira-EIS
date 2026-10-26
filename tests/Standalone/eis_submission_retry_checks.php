@@ -679,7 +679,6 @@ $transactions = new Illuminate\Database\DatabaseTransactionsManager();
 $db->setTransactionManager($transactions);
 $container->instance('db.transactions', $transactions);
 $container->instance('events', new Illuminate\Events\Dispatcher($container));
-$container->instance(SaleSubmissionService::class, $service);
 $container['events']->listen(Modules\EIS\Events\SaleCompleted::class, Modules\EIS\Listeners\DispatchEisSaleJob::class);
 $connections = [];
 $bus = new Illuminate\Bus\Dispatcher($container, function ($connection) use ($container, $db, &$connections) {
@@ -696,7 +695,6 @@ $bus = new Illuminate\Bus\Dispatcher($container, function ($connection) use ($co
 $container->instance(Illuminate\Contracts\Bus\Dispatcher::class, $bus);
 $directTransaction = submissionFixture();
 $httpCalls = count($client->payloads);
-$generated = $service->generated;
 foreach (['sync' => 'database', 'null' => 'database', 'database' => 'database', 'background' => 'background'] as $default => $expected) {
     $container['config']->set('queue.default', $default);
     $before = DB::table('jobs')->count();
@@ -709,16 +707,9 @@ foreach (['sync' => 'database', 'null' => 'database', 'database' => 'database', 
         && $queued->afterCommit === true,
         "Checkout persists a background submission job with default connection {$default}");
 }
-$prepared = EisSale::where('transaction_id', $directTransaction->id)->firstOrFail();
 checkRetry(count($client->payloads) === $httpCalls
-    && $prepared->status === 'pending' && $prepared->request_payload === null
-    && $prepared->eis_invoice_number === $prepared->fiscal_invoice_number
-    && (int) $prepared->eis_setting_id === 1 && (int) $prepared->location_id === 3
-    && $prepared->invoice_number === $directTransaction->invoice_no,
-    'Checkout creates complete pending tracking and reserves its invoice without EIS HTTP');
-checkRetry($service->generated === $generated + 1
-    && EisSale::where('transaction_id', $directTransaction->id)->count() === 1,
-    'Repeated checkout events reuse tracking and do not allocate another fiscal invoice');
+    && !EisSale::where('transaction_id', $directTransaction->id)->exists(),
+    'Checkout never performs fiscal submission or waits for EIS');
 $container['config']->set('queue.default', 'sync');
 $before = DB::table('jobs')->count();
 foreach ([
@@ -741,56 +732,14 @@ $nextTransaction = submissionFixture();
 Modules\EIS\Services\Sales\SaleSubmissionRule::initiate($nextTransaction);
 checkRetry(DB::table('jobs')->count() === $before + 2 && count($client->payloads) === $httpCalls,
     'The next checkout queues independently without processing the previous submission');
-checkRetry(EisSale::where('transaction_id', $nextTransaction->id)->where('status', 'pending')->exists(),
-    'Each subsequent checkout creates its own pending tracking before the worker runs');
 $before = DB::table('jobs')->count();
-$rollbackTransaction = submissionFixture();
 $db->beginTransaction();
-Modules\EIS\Services\Sales\SaleSubmissionRule::initiate($rollbackTransaction);
+Modules\EIS\Services\Sales\SaleSubmissionRule::initiate($nextTransaction);
 $db->rollBack();
-checkRetry(DB::table('jobs')->count() === $before
-    && !EisSale::where('transaction_id', $rollbackTransaction->id)->exists(),
-    'Rolled-back checkout leaves neither tracking nor a submission job');
+checkRetry(DB::table('jobs')->count() === $before, 'Rolled-back checkout does not leave a submission job');
 $db->beginTransaction();
-(new Modules\EIS\Listeners\DispatchEisSaleJob())->handle(new Modules\EIS\Events\SaleCompleted($rollbackTransaction));
-checkRetry(DB::table('jobs')->count() === $before
-    && !EisSale::where('transaction_id', $rollbackTransaction->id)->exists(),
-    'Direct event dispatch defers both tracking and the queued job until commit');
+(new Modules\EIS\Listeners\DispatchEisSaleJob())->handle(new Modules\EIS\Events\SaleCompleted($nextTransaction));
+checkRetry(DB::table('jobs')->count() === $before, 'Direct event dispatch also defers the queued job until commit');
 $db->rollBack();
 checkRetry(DB::table('jobs')->count() === $before, 'Direct event rollback discards its deferred job');
-$client->response = ['success' => true, 'data' => ['statusCode' => 1,
-    'data' => ['validationURL' => 'https://eis.invalid/validate?vc=QUEUED-RECEIPT']]];
-$issued = $service->submit($directTransaction, $settings);
-$sent = end($client->payloads);
-checkRetry($issued->id === $prepared->id && $issued->status === 'submitted'
-    && $sent['invoiceHeader']['invoiceNumber'] === $prepared->eis_invoice_number
-    && !isset($sent['invoiceSummary']['offlineSignature']) && !isset($sent['offlineSignatureData']),
-    'Background submission reuses checkout tracking and sends an unsigned first attempt');
-$before = DB::table('jobs')->count();
-(new Modules\EIS\Listeners\DispatchEisSaleJob())->handle(new Modules\EIS\Events\SaleCompleted($directTransaction));
-checkRetry(DB::table('jobs')->count() === $before && $issued->fresh()->status === 'submitted',
-    'Checkout does not reset or requeue an already submitted sale');
-$failed = EisSale::where('transaction_id', $nextTransaction->id)->firstOrFail();
-$failed->update(['status' => 'failed', 'error_message' => 'Saved failure',
-    'request_payload' => ['invoiceHeader' => ['invoiceNumber' => $failed->eis_invoice_number]]]);
-(new Modules\EIS\Listeners\DispatchEisSaleJob())->handle(new Modules\EIS\Events\SaleCompleted($nextTransaction));
-checkRetry($failed->fresh()->status === 'failed' && $failed->fresh()->error_message === 'Saved failure'
-    && $failed->fresh()->request_payload === $failed->request_payload
-    && DB::table('jobs')->count() === $before + 1,
-    'Requeuing preserves failed tracking and payload so retry detection remains intact');
-$queueFailureTransaction = submissionFixture();
-$container->instance(Illuminate\Contracts\Bus\Dispatcher::class,
-    new Illuminate\Bus\Dispatcher($container, function () {
-        throw new RuntimeException('Fixture queue unavailable');
-    }));
-try {
-    (new Modules\EIS\Listeners\DispatchEisSaleJob())->handle(new Modules\EIS\Events\SaleCompleted($queueFailureTransaction));
-    throw new RuntimeException('Queue failure was not surfaced');
-} catch (RuntimeException $exception) {
-    checkRetry($exception->getMessage() === 'Fixture queue unavailable'
-        && EisSale::where('transaction_id', $queueFailureTransaction->id)->where('status', 'pending')->exists(),
-        'Queue failures surface explicitly and retain pending tracking for later recovery');
-} finally {
-    $container->instance(Illuminate\Contracts\Bus\Dispatcher::class, $bus);
-}
 echo "PASS: {$checks} EIS submission retry checks (isolated database, no network).\n";

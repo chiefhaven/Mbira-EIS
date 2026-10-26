@@ -92,12 +92,8 @@ returns and draft sales do not initiate submission; rollback discards callbacks.
 The EIS queue worker must be running. The hourly unsubmitted-sales job remains
 the fallback. Existing fiscal submission deduplication and retry behavior applies.
 
-Direct checkout on `/pos/create` and the connector/desktop API creates the
-pending `eis_sales` record and reserves its fiscal invoice number locally after
-commit, then queues `SubmitOfflineSalesJob` and returns without submitting to EIS
-inline. The worker reuses that record and invoice number; a pending record with
-no request payload is still a first attempt, not a retry. Existing failed or
-submitted tracking is not reset by checkout. Configured
+Direct checkout on `/pos/create` and the connector/desktop API always queues
+`SubmitOfflineSalesJob` and returns without submitting to EIS inline. Configured
 asynchronous queue connections are preserved; `sync` and `null` defaults use the
 `database` connection for checkout submissions instead. This does not change bulk
 submission or other jobs' queue connections.
