@@ -990,7 +990,7 @@ class SellController extends ApiController
                         }
 
                         //Update payment status
-                        $this->transactionUtil->updatePaymentStatus(
+                        $transaction->payment_status = $this->transactionUtil->updatePaymentStatus(
                             $transaction->id,
                             ($input['source'] ?? null) === 'desktop_pos' ? null : $transaction->final_total
                         );

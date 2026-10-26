@@ -97,10 +97,14 @@ $transformer = new class(new EisTaxRate(), new OfflineSignatureService(), new In
 };
 $client = new class extends EisSaleClient {
     public array $payloads = [];
+    public $beforeResponse = null;
     public array $response = ['success' => false, 'error' => 'Fixture offline'];
     public function __construct() {}
     public function submit(array $payload, object $settings): array {
         $this->payloads[] = $payload;
+        if ($this->beforeResponse !== null) {
+            ($this->beforeResponse)($payload);
+        }
         return $this->response;
     }
 };
@@ -172,7 +176,18 @@ function failSubmission(SaleSubmissionService $service, Transaction $transaction
     throw new RuntimeException('Expected failed submission');
 }
 $transaction = submissionFixture();
+$client->beforeResponse = function (array $payload) use ($transaction) {
+    $pending = EisSale::where('transaction_id', $transaction->id)->firstOrFail();
+    checkRetry($pending->status === 'pending'
+        && $pending->qr_code === 'https://eis.invalid/offline'
+        && ($pending->request_payload['invoiceSummary']['offlineSignature'] ?? null) === 'fixture-signature'
+        && ($pending->request_payload['offlineSignatureData']['validationURL'] ?? null) === $pending->qr_code,
+        'Pending submission persists signature and validation URL before receiving any HTTP response');
+    checkRetry(!isset($payload['offlineSignatureData']) && !isset($payload['invoiceSummary']['validationURL']),
+        'Locally prepared pending retry data is not sent on the first online attempt');
+};
 failSubmission($service, $transaction, $settings);
+$client->beforeResponse = null;
 $first = $client->payloads[0];
 checkRetry(array_column($first['invoiceLineItems'], 'totalVAT') === [2.5, 2.25], 'Inline item VAT includes quantity');
 checkRetry($first['invoiceSummary']['totalVAT'] === array_sum(array_column($first['invoiceLineItems'], 'totalVAT')),
@@ -678,4 +693,33 @@ checkRetry(count($dispatched) === 1
     && $dispatched[0] instanceof Modules\EIS\Jobs\SubmitOfflineSalesJob
     && $dispatched[0]->onQueue('eis-submission') === $dispatched[0],
     'Checkout queues EIS submission in the background for a paid final sale');
+$interrupted = submissionFixture();
+$client->beforeResponse = function () {
+    throw new RuntimeException('Fixture interrupted before EIS response');
+};
+try {
+    $service->submit($interrupted, $settings);
+    throw new RuntimeException('Expected interrupted submission');
+} catch (RuntimeException $exception) {
+    checkRetry($exception->getMessage() === 'Fixture interrupted before EIS response',
+        'Unexpected interruption remains visible to the caller');
+} finally {
+    $client->beforeResponse = null;
+}
+$pending = EisSale::where('transaction_id', $interrupted->id)->firstOrFail();
+$pendingPayload = $pending->request_payload;
+$generationCount = $transformer->offlineQrGenerations;
+checkRetry($pending->status === 'pending' && $pending->qr_code === 'https://eis.invalid/offline'
+    && !empty($pendingPayload['offlineSignatureData']['offlineDataSignature']),
+    'Interrupted attempt leaves a pending invoice with complete offline retry metadata');
+$client->response = ['success' => false, 'error' => 'Fixture offline'];
+failSubmission($service, $interrupted, $settings);
+$retriedPayload = end($client->payloads);
+checkRetry($retriedPayload['offlineSignatureData'] === $pendingPayload['offlineSignatureData']
+    && $retriedPayload['invoiceHeader']['invoiceNumber'] === $pendingPayload['invoiceHeader']['invoiceNumber']
+    && $transformer->offlineQrGenerations === $generationCount,
+    'Interrupted pending retry reuses the saved invoice, signature and URL without regeneration');
+checkRetry(json_decode(DB::table('eis_failed_transactions')->where('transaction_id', $interrupted->id)->value('payload'), true)['offlineSignatureData']
+    === $pendingPayload['offlineSignatureData'],
+    'Failure history preserves the pending invoice offline metadata for future retries');
 echo "PASS: {$checks} EIS submission retry checks (isolated database, no network).\n";

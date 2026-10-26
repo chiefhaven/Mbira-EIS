@@ -30,13 +30,15 @@ class SaleSubmissionRule
      */
     public static function initiate(Transaction $transaction): void
     {
-        if (! static::isFinalSell($transaction)) {
-            return;
-        }
-
         DB::afterCommit(function () use ($transaction) {
             try {
-                event(new SaleCompleted($transaction));
+                // Payment utilities save a separate model; the caller may still hold an unpaid snapshot.
+                $committed = $transaction->newQuery()
+                    ->where('business_id', $transaction->business_id)
+                    ->findOrFail($transaction->id);
+                if (static::qualifies($committed)) {
+                    event(new SaleCompleted($committed));
+                }
             } catch (\Throwable $e) {
                 Log::error('EIS submission failed after sale commit', [
                     'transaction_id' => $transaction->id,

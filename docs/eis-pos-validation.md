@@ -92,6 +92,14 @@ returns and draft sales do not initiate submission; rollback discards callbacks.
 The EIS queue worker must be running. The hourly unsubmitted-sales job remains
 the fallback. Existing fiscal submission deduplication and retry behavior applies.
 
+Web POS and desktop POS (Connector API) both initiate submission for final sales
+paid in full, regardless of payment method. The shared submission rule reloads
+the business-scoped sale after the outer transaction commits: a stale unpaid
+model must not skip a committed paid sale, and a stale paid model must not submit
+a sale that is now unpaid or draft. Desktop sale creation also returns the
+calculated payment status rather than its pre-payment snapshot. Existing queue
+configuration, direct/synchronous behavior and fiscal retry handling are unchanged.
+
 `tests/Standalone/eis_added_payment_checks.php` executes 52 isolated checks of
 the real add/edit payment controllers, customer-due allocation, after-commit
 timing, paid retries, partial exclusions and rollback safety. No EIS HTTP calls
@@ -101,6 +109,11 @@ or live payments are made by this fixture.
 
 - First submission omits `invoiceSummary.offlineSignature`, the offline validation
   URL and `offlineSignatureData` entirely (not empty strings or nulls).
+- Before the HTTP request, pending tracking saves an offline-ready copy of the
+  exact invoice, including `offlineSignatureData`, the summary signature and
+  validation URL, and `qr_code`. This local copy does not change the first online
+  request. Interrupted pending attempts and failed submissions retain those values
+  for future retries; retries reuse them rather than generating a new signature.
 - Retries include offline signature data. Existing failed tracking, a saved
   request from an interrupted pending attempt, or failed-transaction history
   identify a retry. A pending record without prior request/history is still new.

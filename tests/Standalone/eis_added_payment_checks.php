@@ -342,6 +342,51 @@ paymentCheck($session->get('status')['success'] === true && array_slice($submitt
 $controller->update($request, $payment->id);
 paymentCheck(count($submitted) === $before + 1, 'Editing already paid sale does not repeat submission');
 
+// Desktop creation and web conversion may retain the model loaded before payment calculation.
+foreach (['cash', 'card', 'bank_transfer'] as $method) {
+    $sale = saleFixture();
+    DB::beginTransaction();
+    TransactionPayment::create(['transaction_id' => $sale->id, 'business_id' => 7,
+        'amount' => 100, 'method' => $method, 'paid_on' => '2026-10-14']);
+    $before = count($submitted);
+    $util->updatePaymentStatus($sale->id, $sale->final_total);
+    paymentCheck($sale->payment_status === 'due', 'Caller retains pre-payment snapshot for '.$method);
+    \Modules\EIS\Services\Sales\SaleSubmissionRule::initiate($sale);
+    paymentCheck(count($submitted) === $before, 'Stale-model submission waits for commit');
+    DB::commit();
+    paymentCheck(array_slice($submitted, $before) === [$sale->id],
+        'Committed fully paid sale initiates EIS despite stale caller for '.$method);
+}
+$sale = saleFixture();
+$sale->payment_status = 'paid';
+$before = count($submitted);
+\Modules\EIS\Services\Sales\SaleSubmissionRule::initiate($sale);
+paymentCheck(count($submitted) === $before, 'Unsaved paid snapshot cannot submit a committed unpaid sale');
+$sale = saleFixture();
+DB::beginTransaction();
+TransactionPayment::create(['transaction_id' => $sale->id, 'business_id' => 7,
+    'amount' => 100, 'method' => 'cash', 'paid_on' => '2026-10-14']);
+$before = count($submitted);
+$util->updatePaymentStatus($sale->id, $sale->final_total);
+\Modules\EIS\Services\Sales\SaleSubmissionRule::initiate($sale);
+DB::rollBack();
+paymentCheck(count($submitted) === $before && $sale->fresh()->payment_status === 'due',
+    'Rolled-back full payment never initiates EIS from a stale snapshot');
+
+$sale = saleFixture();
+$before = count($submitted);
+DB::beginTransaction();
+DB::table('transactions')->where('id', $sale->id)->update(['payment_status' => 'paid']);
+\Modules\EIS\Services\Sales\SaleSubmissionRule::initiate($sale);
+DB::table('transactions')->where('id', $sale->id)->update(['payment_status' => 'partial']);
+DB::commit();
+paymentCheck(count($submitted) === $before, 'Final committed balance wins over an earlier full-payment state');
+$sale = saleFixture('sell', 'draft');
+$sale->status = 'final';
+$sale->payment_status = 'paid';
+\Modules\EIS\Services\Sales\SaleSubmissionRule::initiate($sale);
+paymentCheck(count($submitted) === $before, 'Unsaved final/paid snapshot cannot submit a committed draft');
+
 // Contact-due distribution pays two invoices and only partly pays the third.
 DB::table('transactions')->update(['contact_id' => 99]);
 $first = saleFixture(); $second = saleFixture(); $third = saleFixture();

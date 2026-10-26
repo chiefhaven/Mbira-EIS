@@ -144,12 +144,8 @@ class SaleSubmissionService
                 $storedOfflineSignatureData
             );
 
-            $validationUrl = $payload['invoiceSummary']['validationURL'] ?? null;
-
-            $eisSale->update([
-                'qr_code' => $validationUrl,
-                'request_payload' => $payload,
-            ]);
+            // Persist retry metadata before HTTP, without adding it to the first online request.
+            $this->prepareOfflineValidationData($transaction, $settings, $eisSale, $payload);
 
             // ----------------------------
             // SUBMIT (OUTSIDE DB TRANSACTION)
@@ -235,11 +231,14 @@ class SaleSubmissionService
         EisSale $sale,
         array $payload
     ): array {
-        if (!empty($payload['invoiceSummary']['validationURL'])) {
-            return $payload;
-        }
         try {
-            $offlineData = $this->transformer->generateOfflineValidationData($settings, $transaction, $payload);
+            $offlineData = $this->storedOfflineSignatureData($payload);
+            $storedPayload = $sale->request_payload;
+            if ($offlineData === null && is_array($storedPayload)
+                && ($storedPayload['invoiceHeader']['invoiceNumber'] ?? null) === ($payload['invoiceHeader']['invoiceNumber'] ?? null)) {
+                $offlineData = $this->storedOfflineSignatureData($storedPayload);
+            }
+            $offlineData ??= $this->transformer->generateOfflineValidationData($settings, $transaction, $payload);
             $validationUrl = $offlineData['validationURL'] ?? null;
             $offlineSignature = $offlineData['offlineDataSignature'] ?? null;
             if (!is_string($validationUrl) || trim($validationUrl) === ''
@@ -251,11 +250,12 @@ class SaleSubmissionService
             $payload['invoiceSummary']['validationURL'] = $validationUrl;
             $sale->update(['qr_code' => $validationUrl, 'request_payload' => $payload]);
         } catch (\InvalidArgumentException|\UnexpectedValueException $exception) {
-            Log::error('Failed to create EIS offline receipt QR after submission failure', [
+            Log::error('Failed to create EIS offline receipt retry data', [
                 'transaction_id' => $transaction->id,
                 'eis_invoice_number' => $payload['invoiceHeader']['invoiceNumber'] ?? null,
                 'error' => $exception->getMessage(),
             ]);
+            $sale->update(['request_payload' => $payload]);
         }
         return $payload;
     }
