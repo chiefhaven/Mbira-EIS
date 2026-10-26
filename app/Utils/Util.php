@@ -774,7 +774,20 @@ class Util
                 ->role($service_staff_roles);
 
             if (! empty($location_id)) {
-                $waiters->permission(['location.'.$location_id, 'access_all_locations']);
+                $permissionNames = ['location.'.$location_id, 'access_all_locations'];
+                $permissionClass = (new User())->getPermissionClass();
+                $permissions = $permissionClass::where('guard_name', 'web')
+                    ->whereIn('name', $permissionNames)->get();
+                $missing = array_values(array_diff($permissionNames, $permissions->pluck('name')->all()));
+                if ($missing !== []) {
+                    \Illuminate\Support\Facades\Log::warning('Service staff location permission definitions are missing', [
+                        'business_id' => $business_id,
+                        'location_id' => $location_id,
+                        'permissions' => $missing,
+                        'guard_name' => 'web',
+                    ]);
+                }
+                $waiters->permission($permissions);
             }
 
             if ($for_dropdown) {
