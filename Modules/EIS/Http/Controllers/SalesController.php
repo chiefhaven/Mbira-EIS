@@ -109,7 +109,7 @@ class SalesController extends Controller
         return response()->json(['success' => true, 'data' => $result,
             'message' => $result['receipt_available']
                 ? 'Invoice and official receipt details synchronized from EIS.'
-                : 'Invoice confirmed by EIS. No official receipt number was returned; existing receipt details were preserved.']);
+                : 'Invoice synchronized from EIS. No official receipt number was returned; receipt fields now reflect the EIS response.']);
     }
 
     public function submit(Request $request, int $id, SaleAdjustmentService $service)
