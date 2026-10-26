@@ -530,9 +530,12 @@ class SaleTransformer
             $totalItems += (float) $line['quantity'];
         }
 
+        $fiscalTransaction = clone $transaction;
+        $fiscalTransaction->transaction_date = $payload['invoiceHeader']['invoiceDateTime']
+            ?? $transaction->transaction_date;
         return $this->generateOfflineSignature(
             $settings,
-            $transaction,
+            $fiscalTransaction,
             $invoiceNumber,
             $invoiceSummary,
             (int) $totalItems

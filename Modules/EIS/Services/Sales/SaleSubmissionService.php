@@ -32,13 +32,13 @@ class SaleSubmissionService
      * @return EisSale
      * @throws EisSaleException
      */
-    public function submit(Transaction $transaction, object $settings): EisSale
+    public function submit(Transaction $transaction, object $settings, bool $forceOffline = false): EisSale
     {
         return Cache::lock('eis-sale-'.$transaction->business_id.'-'.$transaction->id, 300)
-            ->block(10, fn () => $this->submitLocked($transaction, $settings));
+            ->block(10, fn () => $this->submitLocked($transaction, $settings, $forceOffline));
     }
 
-    private function submitLocked(Transaction $transaction, object $settings): EisSale
+    private function submitLocked(Transaction $transaction, object $settings, bool $forceOffline): EisSale
     {
         \Modules\EIS\Services\Terminal\TerminalContext::assertBusiness($settings, (int) $transaction->business_id);
         // Fence before invoice counters, tracking or any external call.
@@ -108,7 +108,7 @@ class SaleSubmissionService
             is_array($existing?->request_payload) ? $existing->request_payload : null
         )
             ?? $this->storedFailedPayloadSignature($failedTransaction?->payload);
-        $includeOfflineSignature = ($existing && ($existing->status === 'failed' || !empty($existing->request_payload)))
+        $includeOfflineSignature = $forceOffline || ($existing && ($existing->status === 'failed' || !empty($existing->request_payload)))
             || $failedTransaction !== null;
         // Split fiscal guards require a top-level transaction; lock allocation without enclosing their model saves.
         [$eisSale, $eisInvoiceNumber] = Cache::lock('eis-invoice-terminal-'.$eisSetting->id, 60)->block(10, function () use ($transaction, $eisSetting) {
@@ -136,8 +136,12 @@ class SaleSubmissionService
             // ----------------------------
             // TRANSFORM WITH EIS Number
             // ----------------------------
+            // Fiscal creation has its own date; retries retain the invoice date already sent.
+            $fiscalTransaction = clone $transaction;
+            $fiscalTransaction->transaction_date = $existing?->request_payload['invoiceHeader']['invoiceDateTime']
+                ?? $eisSale->created_at->toIso8601String();
             $payload = $this->transformer->transform(
-                $transaction,
+                $fiscalTransaction,
                 $settings,
                 $eisInvoiceNumber,
                 $includeOfflineSignature,
@@ -146,6 +150,9 @@ class SaleSubmissionService
 
             // Persist retry metadata before HTTP, without adding it to the first online request.
             $this->prepareOfflineValidationData($transaction, $settings, $eisSale, $payload);
+            if ($includeOfflineSignature && $this->storedOfflineSignatureData($payload) === null) {
+                throw new EisSaleException('A complete offline signature and validation URL are required for deferred EIS submission.');
+            }
 
             // ----------------------------
             // SUBMIT (OUTSIDE DB TRANSACTION)
@@ -496,7 +503,7 @@ class SaleSubmissionService
             }
 
             // Retry submission
-            $result = $this->submit($transaction, $settings);
+            $result = $this->submit($transaction, $settings, true);
             if ($result->status !== 'submitted') {
                 throw new EisSaleException($result->error_message ?: 'Sale has not been submitted; retry record retained.');
             }

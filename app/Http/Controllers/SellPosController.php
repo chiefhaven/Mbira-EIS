@@ -667,7 +667,7 @@ class SellPosController extends Controller
                 /**
                  * A final sell paid in full initiates the EIS submission (see SaleSubmissionRule).
                  */
-                SaleSubmissionRule::initiate($transaction);
+                SaleSubmissionRule::initiate($transaction, true);
 
                 Log::info('Sale committed and EIS event queued', [
                     'transaction_id' => $transaction->id

@@ -25,11 +25,13 @@ class SubmitOfflineSalesJob implements ShouldQueue
 
     protected $transactionId;
     protected $businessId;
+    protected bool $originalCheckout = false;
 
-    public function __construct(int $transactionId, int $businessId)
+    public function __construct(int $transactionId, int $businessId, bool $originalCheckout = false)
     {
         $this->transactionId = $transactionId;
         $this->businessId = $businessId;
+        $this->originalCheckout = $originalCheckout;
     }
 
     public function handle(SaleSubmissionService $submissionService): void
@@ -96,7 +98,7 @@ class SubmitOfflineSalesJob implements ShouldQueue
                 'invoice_no' => $transaction->invoice_no
             ]);
 
-            $result = $submissionService->submit($transaction, $settings);
+            $result = $submissionService->submit($transaction, $settings, $this->requiresOfflineSubmission());
 
             Log::info('SubmitOfflineSalesJob completed successfully', [
                 'transaction_id' => $this->transactionId,
@@ -141,6 +143,13 @@ class SubmitOfflineSalesJob implements ShouldQueue
 
             $this->release($this->backoff * $this->attempts());
         }
+    }
+
+    private function requiresOfflineSubmission(): bool
+    {
+        return !$this->originalCheckout
+            || !$this->job instanceof \Illuminate\Queue\Jobs\SyncJob
+            || $this->attempts() !== 1;
     }
 
     protected function deferUntilCommit(): void

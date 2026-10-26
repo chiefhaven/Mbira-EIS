@@ -45,7 +45,7 @@ class SubmitSaleJob implements ShouldQueue
         }
 
         try {
-            $service->submit($transaction, $settings);
+            $service->submit($transaction, $settings, true);
 
         } catch (\Throwable $e) {
 

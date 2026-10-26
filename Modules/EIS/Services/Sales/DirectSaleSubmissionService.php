@@ -25,7 +25,7 @@ class DirectSaleSubmissionService
             }
 
             $settings = TerminalContext::forSale($transaction);
-            $sale = $this->submission->submit($transaction, $settings);
+            $sale = $this->submission->submit($transaction, $settings, true);
 
             return [
                 'status' => $sale->status,

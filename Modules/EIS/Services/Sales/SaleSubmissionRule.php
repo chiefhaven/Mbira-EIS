@@ -28,16 +28,16 @@ class SaleSubmissionRule
      *
      * A failure is retained in EIS sale tracking. It does not undo the already-saved sale.
      */
-    public static function initiate(Transaction $transaction): void
+    public static function initiate(Transaction $transaction, bool $originalCheckout = false): void
     {
-        DB::afterCommit(function () use ($transaction) {
+        DB::afterCommit(function () use ($transaction, $originalCheckout) {
             try {
                 // Payment utilities save a separate model; the caller may still hold an unpaid snapshot.
                 $committed = $transaction->newQuery()
                     ->where('business_id', $transaction->business_id)
                     ->findOrFail($transaction->id);
                 if (static::qualifies($committed)) {
-                    event(new SaleCompleted($committed));
+                    event(new SaleCompleted($committed, $originalCheckout));
                 }
             } catch (\Throwable $e) {
                 Log::error('EIS submission failed after sale commit', [

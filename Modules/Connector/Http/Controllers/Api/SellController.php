@@ -1029,7 +1029,7 @@ class SellController extends ApiController
                     // A final sell paid in full initiates the EIS submission (see SaleSubmissionRule).
                     // The sale is already committed: an EIS failure must not turn it into an error response.
                     // Failed submissions are stored by EIS (eis_sales / eis_failed_transactions) and retried by the scheduler.
-                    SaleSubmissionRule::initiate($transaction);
+                    SaleSubmissionRule::initiate($transaction, true);
 
                     $output[] = $transaction;
                 } catch (ModelNotFoundException $e) {

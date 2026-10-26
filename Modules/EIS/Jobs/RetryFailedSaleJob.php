@@ -55,7 +55,7 @@ class RetryFailedSaleJob implements ShouldQueue
                     continue;
                 }
 
-                $result = $service->submit($transaction, $settings);
+                $result = $service->submit($transaction, $settings, true);
                 if ($result->status !== 'submitted') {
                     throw new \RuntimeException($result->error_message ?: 'Sale has not been submitted; retry record retained.');
                 }

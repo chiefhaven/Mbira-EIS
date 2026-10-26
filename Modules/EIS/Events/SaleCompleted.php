@@ -11,6 +11,7 @@ class SaleCompleted
     use Dispatchable, SerializesModels;
 
     public function __construct(
-        public Transaction $transaction
+        public Transaction $transaction,
+        public bool $originalCheckout = false
     ) {}
 }

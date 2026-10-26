@@ -20,7 +20,8 @@ class DispatchEisSaleJob
 
         SubmitOfflineSalesJob::dispatch(
             (int) $event->transaction->id,
-            (int) $event->transaction->business_id
+            (int) $event->transaction->business_id,
+            $event->originalCheckout
         )->onQueue('eis-submission');
         Log::info('EIS sale submission queued after transaction commit.', [
             'transaction_id' => $event->transaction->id,

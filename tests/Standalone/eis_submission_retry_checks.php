@@ -42,6 +42,7 @@ $schema = $capsule->getConnection()->getSchemaBuilder();
 $schema->create('transactions', function (Blueprint $t) {
     $t->increments('id'); $t->integer('business_id'); $t->string('invoice_no');
     $t->string('type'); $t->string('status'); $t->string('payment_status');
+    $t->string('transaction_date')->nullable();
     $t->integer('location_id')->default(3);
     $t->boolean('is_fiscalized')->default(false);
     $t->string('fiscal_invoice_number')->nullable(); $t->string('receipt_number')->nullable();
@@ -86,12 +87,15 @@ $settings = EisSetting::first();
 $transformer = new class(new EisTaxRate(), new OfflineSignatureService(), new InvoiceNumberGenerator()) extends SaleTransformer {
     public int $signatures = 0;
     public int $offlineQrGenerations = 0;
+    public array $signatureDates = [];
     protected function generateOfflineSignature(EisSetting $settings, Transaction $transaction, string $eisInvoiceNumber, array $invoiceSummary, int $totalItems): array {
         ++$this->signatures;
+        $this->signatureDates[] = $transaction->transaction_date;
         return ['offlineDataSignature' => 'fixture-signature', 'validationURL' => 'https://eis.invalid/offline'];
     }
     public function generateOfflineValidationData(EisSetting $settings, Transaction $transaction, array $payload): array {
         ++$this->offlineQrGenerations;
+        $this->signatureDates[] = $payload['invoiceHeader']['invoiceDateTime'] ?? null;
         return ['offlineDataSignature' => 'fixture-signature', 'validationURL' => 'https://eis.invalid/offline'];
     }
 };
@@ -734,4 +738,58 @@ checkRetry($nullReceiptResult->status === 'submitted'
     && $nullReceiptResult->receipt_number === $nullReceiptResult->fiscal_invoice_number
     && $nullReceiptResult->qr_code === 'https://eis.invalid/offline',
     'Successful submission with null receipt and URL preserves saved provisional receipt and offline URL');
+$offlineMode = new ReflectionMethod(Modules\EIS\Jobs\SubmitOfflineSalesJob::class, 'requiresOfflineSubmission');
+$offlineMode->setAccessible(true);
+$syncJob = new Illuminate\Queue\Jobs\SyncJob($container, '{}', 'sync', 'eis-submission');
+foreach ([[true, true, false], [true, false, true], [false, true, true], [false, false, true]] as [$original, $synchronous, $expectedOffline]) {
+    $job = new Modules\EIS\Jobs\SubmitOfflineSalesJob(1, 7, $original);
+    $job = unserialize(serialize($job));
+    if ($synchronous) { $job->setJob($syncJob); }
+    checkRetry($offlineMode->invoke($job) === $expectedOffline,
+        'Submission mode distinguishes original synchronous checkout from later payments and workers');
+}
+$checkoutTransaction = submissionFixture();
+(new Modules\EIS\Listeners\DispatchEisSaleJob())->handle(
+    new Modules\EIS\Events\SaleCompleted($checkoutTransaction, true)
+);
+$checkoutJob = end($dispatched);
+$checkoutJob->setJob($syncJob);
+checkRetry(!$offlineMode->invoke($checkoutJob), 'Original checkout event propagates its online eligibility through the listener');
+$deferredTransaction = submissionFixture();
+$deferredResult = $service->submit($deferredTransaction, $settings, true);
+$firstDeferredPayload = end($client->payloads);
+checkRetry($firstDeferredPayload['invoiceSummary']['offlineSignature'] === 'fixture-signature'
+    && $firstDeferredPayload['invoiceSummary']['validationURL'] === 'https://eis.invalid/offline'
+    && $firstDeferredPayload['offlineSignatureData']['offlineDataSignature'] === 'fixture-signature',
+    'Deferred first submission includes complete offline metadata without requiring an earlier failure');
+checkRetry($deferredResult->status === 'submitted',
+    'Offline first attempt still uses normal successful response handling');
+Carbon\Carbon::setTestNow(Carbon\Carbon::parse('2026-10-26 13:10:00'));
+try {
+    $datedSale = submissionFixture();
+    DB::table('transactions')->where('id', $datedSale->id)->update(['transaction_date' => '2026-09-01 09:00:00']);
+    $client->response = ['success' => false, 'error' => 'Fixture offline'];
+    failSubmission($service, $datedSale, $settings);
+    $datedTracking = EisSale::where('transaction_id', $datedSale->id)->firstOrFail();
+    $invoiceDate = end($client->payloads)['invoiceHeader']['invoiceDateTime'];
+    checkRetry($invoiceDate === $datedTracking->created_at->toIso8601String()
+        && Carbon\Carbon::parse($invoiceDate)->eq(now()),
+        'A new fiscal invoice uses current EIS creation time instead of the historical sale date');
+    checkRetry($datedSale->fresh()->transaction_date === '2026-09-01 09:00:00',
+        'Fiscal creation does not change the original POS transaction date');
+    checkRetry(Carbon\Carbon::parse(end($transformer->signatureDates))->eq(Carbon\Carbon::parse($invoiceDate)),
+        'Pending offline metadata is generated with the new fiscal invoice time');
+    Carbon\Carbon::setTestNow(now()->addHour());
+    failSubmission($service, $datedSale, $settings);
+    checkRetry(end($client->payloads)['invoiceHeader']['invoiceDateTime'] === $invoiceDate,
+        'Delayed retry retains the saved invoice timestamp rather than refreshing it');
+    $offlineSale = submissionFixture();
+    DB::table('transactions')->where('id', $offlineSale->id)->update(['transaction_date' => '2026-09-02 09:00:00']);
+    try { $service->submit($offlineSale, $settings, true); } catch (EisSaleException $exception) {}
+    checkRetry(Carbon\Carbon::parse(end($transformer->signatureDates))->eq(now())
+        && Carbon\Carbon::parse(end($client->payloads)['invoiceHeader']['invoiceDateTime'])->eq(now()),
+        'Offline first attempt uses the current fiscal creation time for both header and signature');
+} finally {
+    Carbon\Carbon::setTestNow();
+}
 echo "PASS: {$checks} EIS submission retry checks (isolated database, no network).\n";

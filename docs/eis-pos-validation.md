@@ -113,8 +113,20 @@ or live payments are made by this fixture.
 
 ## Submission payloads and provisional fiscal numbers
 
-- First submission omits `invoiceSummary.offlineSignature`, the offline validation
-  URL and `offlineSignatureData` entirely (not empty strings or nulls).
+- The first submission running synchronously inside the original web/desktop
+  sale-creation request omits `invoiceSummary.offlineSignature`, the offline
+  validation URL and `offlineSignatureData` entirely (not empty strings or nulls).
+- Every submission outside that original checkout uses offline metadata even on
+  its first attempt: later payment completion, edits, bulk clearing, manual
+  submission, scheduled work and queue workers. Checkout jobs executed by an
+  asynchronous worker are offline too. A retry always remains offline.
+  A new fiscal invoice uses the current `eis_sales.created_at` timestamp, not the
+  original POS transaction date. Its offline signature uses the same invoice
+  timestamp. Retries retain the saved payload's invoice timestamp (including
+  legacy invoices) and signature; the POS transaction date is never changed.
+  Offline mode does not correct an incorrect system clock.
+  Synchronize the application server/desktop clock if
+  EIS still reports clock skew. No automatic unsigned retry is sent.
 - Before the HTTP request, pending tracking saves an offline-ready copy of the
   exact invoice, including `offlineSignatureData`, the summary signature and
   validation URL, and `qr_code`. This local copy does not change the first online
