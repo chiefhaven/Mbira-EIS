@@ -179,6 +179,7 @@ $transaction = submissionFixture();
 $client->beforeResponse = function (array $payload) use ($transaction) {
     $pending = EisSale::where('transaction_id', $transaction->id)->firstOrFail();
     checkRetry($pending->status === 'pending'
+        && $pending->receipt_number === $pending->fiscal_invoice_number
         && $pending->qr_code === 'https://eis.invalid/offline'
         && ($pending->request_payload['invoiceSummary']['offlineSignature'] ?? null) === 'fixture-signature'
         && ($pending->request_payload['offlineSignatureData']['validationURL'] ?? null) === $pending->qr_code,
@@ -197,6 +198,8 @@ checkRetry(! isset($first['offlineSignatureData']) && ! isset($first['invoiceSum
 checkRetry($transformer->signatures === 0, 'First attempt does not generate offline signature');
 $tracking = EisSale::where('transaction_id', $transaction->id)->firstOrFail();
 checkRetry($tracking->status === 'failed' && $tracking->fiscal_invoice_number === 'GENERATED-1', 'Failed invoice persists generated fiscal number');
+checkRetry($tracking->receipt_number === $tracking->fiscal_invoice_number,
+    'Failed invoice uses its fiscal invoice number as the provisional receipt number');
 checkRetry(($tracking->request_payload['invoiceHeader']['invoiceNumber'] ?? null) === 'GENERATED-1',
     'First request payload stores the EIS invoice identity used for submission');
 checkRetry($tracking->qr_code === 'https://eis.invalid/offline'
@@ -262,7 +265,7 @@ checkRetry($uncertainSubmitted->status === 'submitted'
     && ($uncertainSubmitted->response_payload['recovery']['state'] ?? null) === 'verified',
     'Ambiguous post is reconciled after exact read-only invoice match');
 checkRetry($uncertainSubmitted->fiscal_invoice_number === $uncertainSubmitted->eis_invoice_number
-    && $uncertainSubmitted->receipt_number === null && !$uncertainSale->fresh()->is_fiscalized
+    && $uncertainSubmitted->receipt_number === $uncertainSubmitted->fiscal_invoice_number && !$uncertainSale->fresh()->is_fiscalized
     && str_starts_with($uncertainSubmitted->qr_code, 'https://eis.invalid/offline'),
     'Verified invoice without official receipt retains offline QR and does not claim fiscal receipt');
 $submittedCount = count($client->payloads);
@@ -355,9 +358,9 @@ unset($onlinePayload['invoiceSummary']['offlineSignature'], $onlinePayload['invo
 $afterNoReceiptSync->update(['request_payload' => $onlinePayload, 'qr_code' => 'https://eis.invalid/stale']);
 $onlineSync = $recovery->sync($afterNoReceiptSync->fresh(), $settings);
 $afterOnlineSync = $afterNoReceiptSync->fresh();
-checkRetry(!$onlineSync['offline_receipt_preserved'] && $afterOnlineSync->receipt_number === null
-    && $afterOnlineSync->receipt_signature === null && $afterOnlineSync->qr_code === null,
-    'Online invoice receipt fields reflect EIS when no validation URL is returned');
+checkRetry(!$onlineSync['offline_receipt_preserved'] && $afterOnlineSync->receipt_number === 'STALE-RECEIPT'
+    && $afterOnlineSync->receipt_signature === 'OFFLINE-SIG' && $afterOnlineSync->qr_code === 'https://eis.invalid/stale',
+    'Online invoice preserves saved receipt fields when EIS returns no validation URL');
 $afterOnlineSync->update(['request_payload' => $offlinePayload]);
 $afterNoReceiptSync = $afterOnlineSync->fresh();
 
@@ -710,6 +713,7 @@ $pending = EisSale::where('transaction_id', $interrupted->id)->firstOrFail();
 $pendingPayload = $pending->request_payload;
 $generationCount = $transformer->offlineQrGenerations;
 checkRetry($pending->status === 'pending' && $pending->qr_code === 'https://eis.invalid/offline'
+    && $pending->receipt_number === $pending->fiscal_invoice_number
     && !empty($pendingPayload['offlineSignatureData']['offlineDataSignature']),
     'Interrupted attempt leaves a pending invoice with complete offline retry metadata');
 $client->response = ['success' => false, 'error' => 'Fixture offline'];
@@ -722,4 +726,12 @@ checkRetry($retriedPayload['offlineSignatureData'] === $pendingPayload['offlineS
 checkRetry(json_decode(DB::table('eis_failed_transactions')->where('transaction_id', $interrupted->id)->value('payload'), true)['offlineSignatureData']
     === $pendingPayload['offlineSignatureData'],
     'Failure history preserves the pending invoice offline metadata for future retries');
+$nullReceiptSale = submissionFixture();
+$client->response = ['success' => true, 'data' => ['statusCode' => 1,
+    'data' => ['receiptNumber' => null, 'validationURL' => null]]];
+$nullReceiptResult = $service->submit($nullReceiptSale, $settings);
+checkRetry($nullReceiptResult->status === 'submitted'
+    && $nullReceiptResult->receipt_number === $nullReceiptResult->fiscal_invoice_number
+    && $nullReceiptResult->qr_code === 'https://eis.invalid/offline',
+    'Successful submission with null receipt and URL preserves saved provisional receipt and offline URL');
 echo "PASS: {$checks} EIS submission retry checks (isolated database, no network).\n";

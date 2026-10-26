@@ -121,6 +121,12 @@ or live payments are made by this fixture.
   `eis_sales.fiscal_invoice_number`. Retries reuse the saved invoice identity
   rather than allocating another number. Existing records are updated when retried;
   no historical database backfill is run.
+- Pending/failed tracking also uses that same number in `eis_sales.receipt_number`
+  as a provisional receipt identifier. It does not mark the sale fiscalized.
+  Successful submission or verified recovery replaces it only when an official
+  EIS receipt number is returned. Null/missing receipt numbers and validation URLs
+  preserve their saved database values, including the provisional receipt and
+  offline QR URL. Invoice lookup synchronization follows the same rule.
 - Successful submission retains the existing confirmed fiscal receipt handling;
   the generated invoice identity remains in `request_payload.invoiceHeader.invoiceNumber`.
 - Transport/API failures are persisted and raised to the queue. HTTP calls do not

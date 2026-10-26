@@ -117,7 +117,7 @@ class SaleSubmissionService
                 ?? $this->generateEISInvoiceNumber($transaction, $eisSetting);
             $sale = EisSale::updateOrCreate(['transaction_id' => $transaction->id], [
                 'business_id' => $transaction->business_id, 'invoice_number' => $transaction->invoice_no,
-                'fiscal_invoice_number' => $number, 'status' => 'pending',
+                'fiscal_invoice_number' => $number, 'receipt_number' => $number, 'status' => 'pending',
                 'eis_invoice_number' => $number,
                 'location_id' => $transaction->location_id, 'eis_setting_id' => $eisSetting->id,
             ]);

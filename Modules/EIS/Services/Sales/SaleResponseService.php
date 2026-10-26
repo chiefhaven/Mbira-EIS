@@ -42,15 +42,20 @@ class SaleResponseService
         // -------------------------
         // UPDATE EIS TRACKING
         // -------------------------
-        $eisSale->update([
+        $updates = [
             'status' => 'submitted',
             'response_payload' => $response,
             'fiscal_invoice_number' => $eisSale->eis_invoice_number
                 ?: $eisSale->getRawOriginal('fiscal_invoice_number'),
-            'receipt_number' => $receiptNumber ?: $eisSale->receipt_number,
-            'qr_code' => $validationUrl,
             'submitted_at' => now(),
-        ]);
+        ];
+        if ($receiptNumber !== null && $receiptNumber !== '') {
+            $updates['receipt_number'] = $receiptNumber;
+        }
+        if (is_string($validationUrl) && trim($validationUrl) !== '') {
+            $updates['qr_code'] = $validationUrl;
+        }
+        $eisSale->update($updates);
 
         // -------------------------
         // UPDATEPOS TRANSACTION

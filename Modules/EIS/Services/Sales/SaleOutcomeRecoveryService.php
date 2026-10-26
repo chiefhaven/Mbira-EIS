@@ -74,11 +74,11 @@ class SaleOutcomeRecoveryService
             $updates = [
                 'status' => 'submitted',
                 'fiscal_invoice_number' => $invoiceNumber,
-                'receipt_number' => $keepOffline ? $current->receipt_number : $receiptNumber,
+                'receipt_number' => $receiptNumber ?? $current->receipt_number,
                 'receipt_signature' => $keepOffline
                     ? ($current->receipt_signature ?: $this->receiptSignature($current->qr_code ?: $offlineUrl))
-                    : $receiptSignature,
-                'qr_code' => $keepOffline ? ($current->qr_code ?: $offlineUrl) : $url,
+                    : ($receiptSignature ?? $current->receipt_signature),
+                'qr_code' => $url ?? ($current->qr_code ?: ($keepOffline ? $offlineUrl : null)),
                 'response_payload' => $lookup['response'],
                 'error_message' => null,
                 'submitted_at' => isset($data['dateSubmitted'])
@@ -139,12 +139,14 @@ class SaleOutcomeRecoveryService
                     ],
                 ],
                 'fiscal_invoice_number' => $invoiceNumber,
-                'qr_code' => is_string($url) && $url !== '' ? $url : $sale->qr_code,
                 'error_message' => null,
                 'submitted_at' => isset($data['dateSubmitted']) ? Carbon::parse($data['dateSubmitted']) : now(),
             ];
             if ($receiptNumber !== null) {
                 $updates['receipt_number'] = $receiptNumber;
+            }
+            if ($url !== null) {
+                $updates['qr_code'] = $url;
             }
             if ($receiptSignature !== null) {
                 $updates['receipt_signature'] = $receiptSignature;
