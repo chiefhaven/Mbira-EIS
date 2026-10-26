@@ -1729,6 +1729,11 @@ class TransactionUtil extends Util
                 $output['qr_code_text'] = $qr_code_text;
             }
         }
+        if ($transaction->payment_status !== 'paid') {
+            $output['show_qr_code'] = false;
+            $output['qr_code_text'] = null;
+        }
+
         //Module related information.
         $il->module_info = ! empty($il->module_info) ? json_decode($il->module_info, true) : [];
         if (! empty($il->module_info['tables']) && $this->isModuleEnabled('tables')) {

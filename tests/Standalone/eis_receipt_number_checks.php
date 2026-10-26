@@ -131,4 +131,18 @@ foreach (['due', 'partial', 'paid'] as $paymentStatus) {
     $print((object) ($output + ['invoice_no' => 'TXN-100']));
     checkReceiptNumber(str_contains($harness->printer->output, 'EIS Number') === ($paymentStatus === 'paid'), 'Thermal EIS number hidden unless paid: '.$paymentStatus);
 }
+$qrGuardStart = strpos($util, "        if (\$transaction->payment_status !== 'paid') {");
+$qrGuardEnd = strpos($util, '        //Module related information.', $qrGuardStart);
+$qrGuard = substr($util, $qrGuardStart, $qrGuardEnd - $qrGuardStart);
+foreach (['due', 'partial', 'paid'] as $paymentStatus) {
+    foreach ([false, true] as $qrEnabled) {
+        $transaction = (object) ['payment_status' => $paymentStatus];
+        $output = ['show_qr_code' => $qrEnabled, 'qr_code_text' => 'https://eis.invalid/receipt'];
+        eval($qrGuard);
+        checkReceiptNumber($output['show_qr_code'] === ($paymentStatus === 'paid' && $qrEnabled),
+            'QR visibility respects payment status and layout setting: '.$paymentStatus);
+        checkReceiptNumber($output['qr_code_text'] === ($paymentStatus === 'paid' ? 'https://eis.invalid/receipt' : null),
+            'QR content omitted unless fully paid: '.$paymentStatus);
+    }
+}
 echo "PASS: {$checks} EIS receipt number checks (no database or printer).\n";
