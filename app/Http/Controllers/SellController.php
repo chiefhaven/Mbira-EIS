@@ -28,7 +28,7 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Log;
-use Modules\EIS\Events\SaleCompleted;
+use Modules\EIS\Services\Sales\SaleSubmissionRule;
 use Modules\EIS\Services\Sales\DirectSaleSubmissionService;
 use Spatie\Activitylog\Models\Activity;
 use Yajra\DataTables\Facades\DataTables;
@@ -1356,7 +1356,7 @@ class SellController extends Controller
             $cleared_invoices = [];
             
             foreach ($unpaidInvoices as $invoice) {
-                $due_amount = $invoice->final_total - $invoice->payment_lines->sum('amount');
+                $due_amount = $invoice->final_total - $this->transactionUtil->getTotalPaid($invoice->id);
                 
                 if ($due_amount > 0) {
                     // Create a payment entry for the due amount
@@ -1379,6 +1379,7 @@ class SellController extends Controller
                     
                     // Update payment status
                     $this->transactionUtil->updatePaymentStatus($invoice->id);
+                    SaleSubmissionRule::initiate($invoice);
                     
                     $total_cleared++;
                     $total_amount += $due_amount;
@@ -1388,14 +1389,6 @@ class SellController extends Controller
             
             DB::commit();
 
-            /**
-             * SAFE POINT: DB is now permanent
-             * External systems can no longer break POS
-             */
-            DB::afterCommit(function () use ($invoice) {
-                event(new SaleCompleted($invoice));
-            });
-            
             // Check if any invoices were actually cleared
             if ($total_cleared == 0) {
                 $msg = __('lang_v1.no_unpaid_bills_found');

@@ -83,6 +83,12 @@ validation has been performed.
 
 ## Payment completion
 
+The web POS list's **Clear All Bills** action initiates EIS submission for every
+invoice it fully settles, using the same shared after-commit rule as individual
+payments. It calculates the remaining balance net of returned change. A failed
+bulk payment transaction discards all scheduled submissions; already paid bills
+are not paid or submitted again by this action.
+
 Adding or editing an invoice payment initiates EIS submission when an unpaid or
 partially paid final sale becomes `paid` (remaining balance zero). Customer-due
 payments do the same for each fully settled invoice after child payments are

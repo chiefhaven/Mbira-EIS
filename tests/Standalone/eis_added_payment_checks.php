@@ -514,5 +514,49 @@ paymentCheck(postPayment($sale, 100, 'cash', (string) Illuminate\Support\Str::uu
     $sale->fresh()->payment_status === 'due' && count($submitted) === $before,
     'Restaurant workflow close failure rolls back backend payment and pending EIS event');
 DB::statement('DROP TRIGGER reject_restaurant_close');
+// POS list bulk clearing must initiate EIS for every settled sale, not just the last model.
+DB::table('transactions')->update(['status' => 'draft']);
+$bulkController = new App\Http\Controllers\SellController(
+    new App\Utils\ContactUtil(), new App\Utils\BusinessUtil(), $util, new ModuleUtil(), new App\Utils\ProductUtil()
+);
+$util->shouldReceive('num_f')->andReturnUsing(fn ($amount) => number_format((float) $amount, 2, '.', ''));
+$responseFactory = Mockery::mock(Illuminate\Contracts\Routing\ResponseFactory::class);
+$responseFactory->shouldReceive('json')->andReturnUsing(fn ($data) => new Illuminate\Http\JsonResponse($data));
+$container->instance(Illuminate\Contracts\Routing\ResponseFactory::class, $responseFactory);
+$bulkRequest = Request::create('/sells/clear-all-bill', 'POST', [], [], [], [
+    'HTTP_X_REQUESTED_WITH' => 'XMLHttpRequest',
+]);
+$bulkRequest->setLaravelSession($session);
+$container->instance('request', $bulkRequest);
+$firstBulk = saleFixture();
+$secondBulk = saleFixture();
+DB::beginTransaction();
+TransactionPayment::create(['transaction_id' => $secondBulk->id, 'business_id' => 7, 'amount' => 60, 'method' => 'cash']);
+TransactionPayment::create(['transaction_id' => $secondBulk->id, 'business_id' => 7, 'amount' => 10, 'method' => 'cash', 'is_return' => 1]);
+DB::table('transactions')->where('id', $secondBulk->id)->update(['payment_status' => 'partial']);
+DB::commit();
+$before = count($submitted);
+$bulkResult = $bulkController->clearAllBills()->getData(true);
+paymentCheck($bulkResult['success'] && $bulkResult['total_cleared'] === 2,
+    'POS list clears both due and partial bills');
+paymentCheck(array_slice($submitted, $before) === [$firstBulk->id, $secondBulk->id],
+    'Every bulk-cleared bill initiates EIS after commit using its committed paid status');
+paymentCheck($firstBulk->fresh()->payment_status === 'paid' && $secondBulk->fresh()->payment_status === 'paid'
+    && (float) $util->getTotalPaid($secondBulk->id) === 100.0,
+    'Bulk clearing nets returned change so each bill is fully paid');
+$before = count($submitted);
+$paymentCount = TransactionPayment::count();
+$bulkController->clearAllBills();
+paymentCheck(count($submitted) === $before && TransactionPayment::count() === $paymentCount,
+    'Repeated bulk clear does not pay or submit already settled bills again');
+$rollbackFirst = saleFixture();
+$rollbackSecond = saleFixture();
+DB::statement("CREATE TRIGGER reject_bulk_payment BEFORE INSERT ON transaction_payments WHEN NEW.transaction_id = {$rollbackSecond->id} BEGIN SELECT RAISE(ABORT, 'fixture bulk failure'); END");
+$failedBulk = $bulkController->clearAllBills()->getData(true);
+paymentCheck(!$failedBulk['success'] && count($submitted) === $before
+    && TransactionPayment::count() === $paymentCount
+    && $rollbackFirst->fresh()->payment_status === 'due',
+    'A later bulk payment failure rolls back all earlier payments and EIS callbacks');
+DB::statement('DROP TRIGGER reject_bulk_payment');
 Mockery::close();
 echo "PASS: {$checks} EIS added-payment checks (SQLite memory and local events only).\n";
