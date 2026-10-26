@@ -75,7 +75,9 @@ class SaleOutcomeRecoveryService
                 'status' => 'submitted',
                 'fiscal_invoice_number' => $invoiceNumber,
                 'receipt_number' => $keepOffline ? $current->receipt_number : $receiptNumber,
-                'receipt_signature' => $keepOffline ? $current->receipt_signature : $receiptSignature,
+                'receipt_signature' => $keepOffline
+                    ? ($current->receipt_signature ?: $this->receiptSignature($current->qr_code ?: $offlineUrl))
+                    : $receiptSignature,
                 'qr_code' => $keepOffline ? ($current->qr_code ?: $offlineUrl) : $url,
                 'response_payload' => $lookup['response'],
                 'error_message' => null,

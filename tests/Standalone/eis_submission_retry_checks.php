@@ -325,10 +325,15 @@ checkRetry(!$noReceiptSync['receipt_available'] && $noReceiptSync['offline_recei
     && $afterNoReceiptSync->qr_code === 'https://eis.invalid/stale'
     && $afterNoReceiptSync->response_payload === $noReceiptSync['response'],
     'Offline-signed invoice keeps its original QR and receipt when EIS returns no validation URL');
-$afterNoReceiptSync->update(['qr_code' => null]);
+$afterNoReceiptSync->update(['qr_code' => null, 'receipt_signature' => null]);
+$offlineFixtureUrl = 'https://eis.invalid/offline?TI=X&N=1&S=OFFLINE-SIG';
+$restorePayload = $afterNoReceiptSync->request_payload;
+$restorePayload['invoiceSummary']['validationURL'] = $offlineFixtureUrl;
+$afterNoReceiptSync->update(['request_payload' => $restorePayload]);
 $recovery->sync($afterNoReceiptSync->fresh(), $settings);
-checkRetry($afterNoReceiptSync->fresh()->qr_code === $afterNoReceiptSync->request_payload['invoiceSummary']['validationURL'],
-    'Offline-signed invoice with a cleared QR is restored from its saved offline validation URL');
+checkRetry($afterNoReceiptSync->fresh()->qr_code === $offlineFixtureUrl
+    && $afterNoReceiptSync->fresh()->receipt_signature === 'OFFLINE-SIG',
+    'Offline-signed invoice with a cleared QR is restored from its saved offline URL and fills the S signature');
 $onlinePayload = $afterNoReceiptSync->request_payload;
 $offlinePayload = $onlinePayload;
 unset($onlinePayload['invoiceSummary']['offlineSignature'], $onlinePayload['invoiceSummary']['validationURL'], $onlinePayload['offlineSignatureData']);
