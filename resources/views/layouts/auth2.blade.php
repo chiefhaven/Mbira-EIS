@@ -26,7 +26,7 @@
 
 </head>
 
-<body class="pace-done" data-new-gr-c-s-check-loaded="14.1172.0" data-gr-ext-installed="" cz-shortcut-listen="true">
+<body class="pace-done @if(request()->segment(1) == 'login') login-viewport @endif" data-new-gr-c-s-check-loaded="14.1172.0" data-gr-ext-installed="" cz-shortcut-listen="true">
     @inject('request', 'Illuminate\Http\Request')
     @if (session('status') && session('status.success'))
         <input type="hidden" id="status_span" data-status="{{ session('status.success') }}"
@@ -127,7 +127,36 @@
             height: 72px;
         }
         .login-brand-page {
-            padding-top: 112px;
+            padding-top: 104px;
+            padding-bottom: 16px;
+        }
+        .login-viewport {
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
+            min-height: 100dvh;
+        }
+        .login-viewport > .container-fluid {
+            display: flex;
+            flex-direction: column;
+            flex: 1;
+            width: 100%;
+        }
+        .login-viewport > .container-fluid > .eq-height-row {
+            display: flex;
+            flex: 1;
+        }
+        .login-brand-page {
+            display: flex;
+            flex-direction: column;
+        }
+        .login-brand-page .login-shell {
+            min-height: 0;
+            flex: 1;
+            padding: 12px 0;
+        }
+        .login-viewport > footer {
+            flex-shrink: 0;
         }
         @media (min-width: 768px) {
             .login-brand-logo {
@@ -135,7 +164,19 @@
                 height: 96px;
             }
             .login-brand-page {
-                padding-top: 152px;
+                padding-top: 136px;
+            }
+        }
+        @media (max-height: 700px) {
+            .login-brand-page .login-card {
+                padding-top: 16px;
+                padding-bottom: 12px;
+            }
+            .login-brand-page .login-header-block {
+                margin-bottom: 12px;
+            }
+            .login-brand-page .login-support-text {
+                margin-top: 8px;
             }
         }
         .wizard>.content {
