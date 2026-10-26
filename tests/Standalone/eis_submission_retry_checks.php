@@ -319,12 +319,27 @@ $recoveryClient->responder = function (EisSetting $setting, string $operation, a
 };
 $noReceiptSync = $recovery->sync($uncertainSubmitted->fresh(), $settings);
 $afterNoReceiptSync = $uncertainSubmitted->fresh();
-checkRetry(!$noReceiptSync['receipt_available']
-    && $afterNoReceiptSync->receipt_number === null
-    && $afterNoReceiptSync->receipt_signature === null
-    && $afterNoReceiptSync->qr_code === null
+checkRetry(!$noReceiptSync['receipt_available'] && $noReceiptSync['offline_receipt_preserved']
+    && $afterNoReceiptSync->receipt_number === 'STALE-RECEIPT'
+    && $afterNoReceiptSync->receipt_signature === 'STALE-SIGNATURE'
+    && $afterNoReceiptSync->qr_code === 'https://eis.invalid/stale'
     && $afterNoReceiptSync->response_payload === $noReceiptSync['response'],
-    'Individual sync refreshes every EIS invoice and receipt field, clearing stale receipt data absent from EIS');
+    'Offline-signed invoice keeps its original QR and receipt when EIS returns no validation URL');
+$afterNoReceiptSync->update(['qr_code' => null]);
+$recovery->sync($afterNoReceiptSync->fresh(), $settings);
+checkRetry($afterNoReceiptSync->fresh()->qr_code === $afterNoReceiptSync->request_payload['invoiceSummary']['validationURL'],
+    'Offline-signed invoice with a cleared QR is restored from its saved offline validation URL');
+$onlinePayload = $afterNoReceiptSync->request_payload;
+$offlinePayload = $onlinePayload;
+unset($onlinePayload['invoiceSummary']['offlineSignature'], $onlinePayload['invoiceSummary']['validationURL'], $onlinePayload['offlineSignatureData']);
+$afterNoReceiptSync->update(['request_payload' => $onlinePayload, 'qr_code' => 'https://eis.invalid/stale']);
+$onlineSync = $recovery->sync($afterNoReceiptSync->fresh(), $settings);
+$afterOnlineSync = $afterNoReceiptSync->fresh();
+checkRetry(!$onlineSync['offline_receipt_preserved'] && $afterOnlineSync->receipt_number === null
+    && $afterOnlineSync->receipt_signature === null && $afterOnlineSync->qr_code === null,
+    'Online invoice receipt fields reflect EIS when no validation URL is returned');
+$afterOnlineSync->update(['request_payload' => $offlinePayload]);
+$afterNoReceiptSync = $afterOnlineSync->fresh();
 
 $validSyncResponder = $recoveryClient->responder;
 $beforeMismatchSync = $afterNoReceiptSync->getRawOriginal();

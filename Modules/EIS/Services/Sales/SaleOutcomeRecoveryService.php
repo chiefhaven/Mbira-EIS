@@ -64,12 +64,19 @@ class SaleOutcomeRecoveryService
                 throw new \UnexpectedValueException('The saved sale changed during EIS lookup. No local data was synchronized.');
             }
 
+            // Offline-signed invoices keep their original offline QR/receipt when EIS returns no official URL.
+            $offlineUrl = !empty($payload['invoiceSummary']['offlineSignature'])
+                && is_string($payload['invoiceSummary']['validationURL'] ?? null)
+                && $payload['invoiceSummary']['validationURL'] !== ''
+                    ? $payload['invoiceSummary']['validationURL'] : null;
+            $keepOffline = $url === null && $receiptNumber === null && $offlineUrl !== null;
+
             $updates = [
                 'status' => 'submitted',
                 'fiscal_invoice_number' => $invoiceNumber,
-                'receipt_number' => $receiptNumber,
-                'receipt_signature' => $receiptSignature,
-                'qr_code' => $url,
+                'receipt_number' => $keepOffline ? $current->receipt_number : $receiptNumber,
+                'receipt_signature' => $keepOffline ? $current->receipt_signature : $receiptSignature,
+                'qr_code' => $keepOffline ? ($current->qr_code ?: $offlineUrl) : $url,
                 'response_payload' => $lookup['response'],
                 'error_message' => null,
                 'submitted_at' => isset($data['dateSubmitted'])
@@ -85,6 +92,7 @@ class SaleOutcomeRecoveryService
                 'status' => $current->status,
                 'receipt_number' => $current->receipt_number,
                 'receipt_available' => $receiptNumber !== null,
+                'offline_receipt_preserved' => $keepOffline,
                 'submitted_at' => $current->submitted_at,
                 'response' => $lookup['response'],
             ];
