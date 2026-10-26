@@ -18,15 +18,10 @@ class DispatchEisSaleJob
             return;
         }
 
-        $connection = config('queue.default');
-        if (in_array(config("queue.connections.{$connection}.driver"), ['sync', 'null'], true)) {
-            $connection = 'database';
-        }
-
         SubmitOfflineSalesJob::dispatch(
             (int) $event->transaction->id,
             (int) $event->transaction->business_id
-        )->onConnection($connection)->onQueue('eis-submission')->afterCommit();
+        )->onQueue('eis-submission');
         Log::info('EIS sale submission queued after transaction commit.', [
             'transaction_id' => $event->transaction->id,
             'business_id' => $event->transaction->business_id,

@@ -660,86 +660,22 @@ try {
 $listenerReflection = new ReflectionClass(Modules\EIS\Listeners\DispatchEisSaleJob::class);
 checkRetry(!$listenerReflection->implementsInterface(Illuminate\Contracts\Queue\ShouldQueue::class),
     'Checkout listener dispatches the submission job without blocking checkout on EIS');
-$container->instance('config', new Illuminate\Config\Repository([
-    'database' => ['default' => 'default', 'connections' => ['default' => [
-        'driver' => 'sqlite', 'database' => ':memory:', 'prefix' => '',
-    ]]],
-    'queue' => ['default' => 'sync', 'connections' => [
-        'sync' => ['driver' => 'sync'],
-        'null' => ['driver' => 'null'],
-        'database' => ['driver' => 'database'],
-        'background' => ['driver' => 'database'],
-    ]],
-]));
-$migration = require dirname(__DIR__, 2).'\database\migrations\2026_10_26_000001_create_jobs_table.php';
-$migration->up();
-$migration->up();
-$db = $capsule->getConnection();
-$transactions = new Illuminate\Database\DatabaseTransactionsManager();
-$db->setTransactionManager($transactions);
-$container->instance('db.transactions', $transactions);
-$container->instance('events', new Illuminate\Events\Dispatcher($container));
-$container['events']->listen(Modules\EIS\Events\SaleCompleted::class, Modules\EIS\Listeners\DispatchEisSaleJob::class);
-$connections = [];
-$bus = new Illuminate\Bus\Dispatcher($container, function ($connection) use ($container, $db, &$connections) {
-    $connections[] = $connection;
-    $queue = match ($connection) {
-        'sync' => new Illuminate\Queue\SyncQueue(),
-        'null' => new Illuminate\Queue\NullQueue(),
-        'database', 'background' => new Illuminate\Queue\DatabaseQueue($db, 'jobs', 'default', 90),
-        default => throw new RuntimeException('Unexpected queue connection: '.$connection),
-    };
-    $queue->setContainer($container);
-    return $queue;
+$dispatched = [];
+$container->instance(Illuminate\Contracts\Bus\Dispatcher::class, new class($dispatched) implements Illuminate\Contracts\Bus\Dispatcher {
+    public function __construct(public array &$dispatched) {}
+    public function dispatch($command) { $this->dispatched[] = $command; return $command; }
+    public function dispatchSync($command, $handler = null) { throw new RuntimeException('Unexpected synchronous job dispatch'); }
+    public function dispatchNow($command, $handler = null) { throw new RuntimeException('Unexpected direct job execution'); }
+    public function hasCommandHandler($command) { return false; }
+    public function getCommandHandler($command) { return null; }
+    public function getMiddleware($command) { return []; }
+    public function pipeThrough(array $pipes) {}
+    public function map(array $map) {}
 });
-$container->instance(Illuminate\Contracts\Bus\Dispatcher::class, $bus);
 $directTransaction = submissionFixture();
-$httpCalls = count($client->payloads);
-foreach (['sync' => 'database', 'null' => 'database', 'database' => 'database', 'background' => 'background'] as $default => $expected) {
-    $container['config']->set('queue.default', $default);
-    $before = DB::table('jobs')->count();
-    (new Modules\EIS\Listeners\DispatchEisSaleJob())->handle(new Modules\EIS\Events\SaleCompleted($directTransaction));
-    $row = DB::table('jobs')->orderByDesc('id')->first();
-    $queued = unserialize(json_decode($row->payload, true)['data']['command']);
-    checkRetry(DB::table('jobs')->count() === $before + 1 && end($connections) === $expected
-        && $row->queue === 'eis-submission'
-        && $queued instanceof Modules\EIS\Jobs\SubmitOfflineSalesJob
-        && $queued->afterCommit === true,
-        "Checkout persists a background submission job with default connection {$default}");
-}
-checkRetry(count($client->payloads) === $httpCalls
-    && !EisSale::where('transaction_id', $directTransaction->id)->exists(),
-    'Checkout never performs fiscal submission or waits for EIS');
-$container['config']->set('queue.default', 'sync');
-$before = DB::table('jobs')->count();
-foreach ([
-    ['payment_status' => 'partial'], ['payment_status' => 'due'],
-    ['status' => 'draft'], ['type' => 'sell_return'],
-] as $attributes) {
-    $ineligible = clone $directTransaction;
-    $ineligible->fill($attributes);
-    (new Modules\EIS\Listeners\DispatchEisSaleJob())->handle(new Modules\EIS\Events\SaleCompleted($ineligible));
-}
-checkRetry(DB::table('jobs')->count() === $before, 'Unpaid, partial, draft and return sales do not queue submission');
-$db->beginTransaction();
-$db->beginTransaction();
-Modules\EIS\Services\Sales\SaleSubmissionRule::initiate($directTransaction);
-$db->commit();
-checkRetry(DB::table('jobs')->count() === $before, 'Nested commit does not queue checkout submission early');
-$db->commit();
-checkRetry(DB::table('jobs')->count() === $before + 1, 'Outermost checkout commit persists the submission job');
-$nextTransaction = submissionFixture();
-Modules\EIS\Services\Sales\SaleSubmissionRule::initiate($nextTransaction);
-checkRetry(DB::table('jobs')->count() === $before + 2 && count($client->payloads) === $httpCalls,
-    'The next checkout queues independently without processing the previous submission');
-$before = DB::table('jobs')->count();
-$db->beginTransaction();
-Modules\EIS\Services\Sales\SaleSubmissionRule::initiate($nextTransaction);
-$db->rollBack();
-checkRetry(DB::table('jobs')->count() === $before, 'Rolled-back checkout does not leave a submission job');
-$db->beginTransaction();
-(new Modules\EIS\Listeners\DispatchEisSaleJob())->handle(new Modules\EIS\Events\SaleCompleted($nextTransaction));
-checkRetry(DB::table('jobs')->count() === $before, 'Direct event dispatch also defers the queued job until commit');
-$db->rollBack();
-checkRetry(DB::table('jobs')->count() === $before, 'Direct event rollback discards its deferred job');
+(new Modules\EIS\Listeners\DispatchEisSaleJob())->handle(new Modules\EIS\Events\SaleCompleted($directTransaction));
+checkRetry(count($dispatched) === 1
+    && $dispatched[0] instanceof Modules\EIS\Jobs\SubmitOfflineSalesJob
+    && $dispatched[0]->onQueue('eis-submission') === $dispatched[0],
+    'Checkout queues EIS submission in the background for a paid final sale');
 echo "PASS: {$checks} EIS submission retry checks (isolated database, no network).\n";

@@ -86,23 +86,11 @@ validation has been performed.
 Adding or editing an invoice payment initiates EIS submission when an unpaid or
 partially paid final sale becomes `paid` (remaining balance zero). Customer-due
 payments do the same for each fully settled invoice after child payments are
-inserted. Submission uses the existing `SaleCompleted` / `eis-submission` queue flow
+inserted. Submission uses the existing `SaleCompleted` / `eis-sales` queue flow
 after the outer database transaction commits. Partial payments, purchases,
 returns and draft sales do not initiate submission; rollback discards callbacks.
 The EIS queue worker must be running. The hourly unsubmitted-sales job remains
 the fallback. Existing fiscal submission deduplication and retry behavior applies.
-
-Direct checkout on `/pos/create` and the connector/desktop API always queues
-`SubmitOfflineSalesJob` and returns without submitting to EIS inline. Configured
-asynchronous queue connections are preserved; `sync` and `null` defaults use the
-`database` connection for checkout submissions instead. This does not change bulk
-submission or other jobs' queue connections.
-
-Deploy the `2026_10_26_000001_create_jobs_table` migration before enabling this
-flow (existing `jobs` tables are preserved). With a `sync` or `null` default, run
-`php artisan queue:work database --queue=eis-submission` under the deployment's
-process supervisor. For another asynchronous default, use that connection in
-place of `database`. Checkout can continue while jobs wait for the worker.
 
 `tests/Standalone/eis_added_payment_checks.php` executes 52 isolated checks of
 the real add/edit payment controllers, customer-due allocation, after-commit
