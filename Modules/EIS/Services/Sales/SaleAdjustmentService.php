@@ -9,6 +9,7 @@ use Modules\EIS\Models\EisSale;
 use Modules\EIS\Models\EisSetting;
 use Modules\EIS\Services\Terminal\TerminalContext;
 use Modules\EIS\Services\Utilities\EisUtilitiesClient;
+use Modules\EIS\Services\EisSubscriptionAccess;
 
 class SaleAdjustmentService
 {
@@ -16,6 +17,10 @@ class SaleAdjustmentService
 
     public function beforeReturn(Transaction $sale, int $actorId): ?EisSale
     {
+        if (!app(EisSubscriptionAccess::class)->allows((int) $sale->business_id)) {
+            return null;
+        }
+
         if (!DB::getSchemaBuilder()->hasTable('eis_sales')) { return null; }
         $fiscal = EisSale::where('business_id', $sale->business_id)->where('transaction_id', $sale->id)->first();
         if (!$fiscal) {
@@ -61,6 +66,8 @@ class SaleAdjustmentService
 
     public function capture(Transaction $sale, Transaction $return, EisSale $fiscal, int $actorId): void
     {
+        app(EisSubscriptionAccess::class)->assertAllowed((int) $sale->business_id);
+
         if (DB::connection()->transactionLevel() < 1) {
             throw new \InvalidArgumentException('EIS return capture must commit with the local return ledger.');
         }
@@ -134,6 +141,8 @@ class SaleAdjustmentService
 
     public function submit(EisSetting $setting, int $id, int $actorId): object
     {
+        app(EisSubscriptionAccess::class)->assertAllowed((int) $setting->business_id);
+
         $this->storage();
         if (DB::connection()->transactionLevel() !== 0) {
             throw new \InvalidArgumentException('Send EIS adjustments outside a local ledger transaction.');

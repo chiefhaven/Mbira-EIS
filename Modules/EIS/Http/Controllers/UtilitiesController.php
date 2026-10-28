@@ -16,29 +16,13 @@ use Modules\EIS\Services\Utilities\VoidReceiptSynchronizer;
 
 class UtilitiesController extends Controller
 {
-    public function index(Request $request)
-    {
-        $this->authorizeAccount($request);
-        $locations = BusinessLocation::where('business_id', $request->user()->business_id);
-        $permitted = $request->user()->permitted_locations();
-        if ($permitted !== 'all') { $locations->whereIn('id', $permitted); }
-        $locations = $locations->get(['id', 'name']);
-        $terminals = EisSetting::where('business_id', $request->user()->business_id)
-            ->whereIn('location_id', $locations->pluck('id'))->get(['id', 'device_id', 'location_id']);
-        $operations = UtilityOperations::definitions();
-        $history = DB::table('eis_utility_requests')->where('business_id', $request->user()->business_id)
-            ->whereIn('location_id', $locations->pluck('id'))->orderByDesc('id')->limit(50)
-            ->get(['id', 'eis_setting_id', 'operation', 'status', 'result_message', 'created_at']);
-        return view('eis::utilities.index', compact('locations', 'terminals', 'operations', 'history'));
-    }
-
     public function execute(Request $request, EisUtilitiesClient $client, UtilityRequestService $mutations)
     {
-        $this->authorizeAccount($request);
         $input = $request->validate([
             'terminal_id' => 'required|integer|min:1', 'operation' => 'required|string',
             'payload' => 'required|string|max:8000000',
         ]);
+        $this->authorizeAccount($request, $input['operation']);
         $setting = $this->terminal($request, (int) $input['terminal_id']);
         try {
             $object = json_decode($input['payload'], false, 64, JSON_THROW_ON_ERROR);
@@ -109,7 +93,6 @@ class UtilitiesController extends Controller
 
     public function show(Request $request, int $requestId)
     {
-        $this->authorizeAccount($request);
         $row = $this->record($request, $requestId);
         $setting = $this->terminal($request, (int) $row->eis_setting_id);
         $this->authorizeOperation($request, $setting, $row->operation, json_decode($row->payload, true, 512, JSON_THROW_ON_ERROR));
@@ -118,7 +101,6 @@ class UtilitiesController extends Controller
 
     public function submit(Request $request, int $requestId, UtilityRequestService $service)
     {
-        $this->authorizeAccount($request);
         $request->validate(['confirmed' => 'required|accepted', 'real_inventory' => 'sometimes|accepted']);
         $row = $this->record($request, $requestId);
         $setting = $this->terminal($request, (int) $row->eis_setting_id);
@@ -136,10 +118,12 @@ class UtilitiesController extends Controller
             $row->status === 'accepted' ? 200 : 409);
     }
 
-    private function authorizeAccount(Request $request): void
+    private function authorizeAccount(Request $request, ?string $operation = null): void
     {
-        abort_unless($request->user() && $request->user()->business_id
-            && $request->user()->can('business_settings.access'), 403);
+        $user = $request->user();
+        abort_unless($user && $user->business_id
+            && ($user->can('business_settings.access')
+                || ($operation === 'cancel-receipt' && $user->can('sell.delete'))), 403);
     }
 
     private function terminal(Request $request, int $id): EisSetting
@@ -183,6 +167,7 @@ class UtilitiesController extends Controller
     {
         $row = DB::table('eis_utility_requests')->where('business_id', $request->user()->business_id)->where('id', $id)->first();
         abort_unless($row, 404);
+        $this->authorizeAccount($request, $row->operation);
         $permitted = $request->user()->permitted_locations();
         abort_unless($permitted === 'all' || in_array((int) $row->location_id, array_map('intval', (array) $permitted), true), 403);
         return $row;

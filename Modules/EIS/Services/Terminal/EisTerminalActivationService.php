@@ -10,6 +10,7 @@ use Modules\EIS\Models\EisTerminalConfiguration;
 use Modules\EIS\Models\EisTaxRate;
 use Modules\EIS\Models\EisSetting;
 use Modules\EIS\Services\Configuration\ConfigurationSyncService;
+use Modules\EIS\Services\EisSubscriptionAccess;
 
 class EisTerminalActivationService
 {
@@ -37,6 +38,8 @@ class EisTerminalActivationService
         ?int $activatedBy = null,
         ?int $locationId = null
     ): array {
+        app(EisSubscriptionAccess::class)->assertAllowed($businessId);
+
         try {
             Log::info('Terminal activation started', [
                 'business_id' => $businessId,
@@ -887,6 +890,8 @@ class EisTerminalActivationService
      */
     public function deactivate(int $businessId, ?string $reason = null, ?int $deactivatedBy = null, ?int $terminalId = null): array
     {
+        app(EisSubscriptionAccess::class)->assertAllowed($businessId);
+
         try {
             Log::info('Terminal deactivation requested', [
                 'business_id' => $businessId,
@@ -966,6 +971,8 @@ class EisTerminalActivationService
      */
     public function toggle(int $businessId, string $token, ?int $toggledBy = null, ?int $terminalId = null): array
     {
+        app(EisSubscriptionAccess::class)->assertAllowed($businessId);
+
         try {
             $setting = TerminalContext::settings($businessId, $token, $terminalId);
             Log::info('Terminal activation toggle requested', [
@@ -1049,6 +1056,8 @@ class EisTerminalActivationService
      */
     public function getLatestConfig(int $businessId, ?int $terminalId = null): array
     {
+        app(EisSubscriptionAccess::class)->assertAllowed($businessId);
+
         try {
             // Get the EIS settings for this business
             $setting = TerminalContext::settings($businessId, null, $terminalId);
@@ -1127,6 +1136,8 @@ class EisTerminalActivationService
      */
     public function getStatus(int $businessId, ?int $terminalId = null): array
     {
+        app(EisSubscriptionAccess::class)->assertAllowed($businessId);
+
         try {
             $setting = TerminalContext::settings($businessId, null, $terminalId);
             $configuration = EisConfiguration::where('eis_setting_id', $setting->id)->first();
@@ -1190,6 +1201,8 @@ class EisTerminalActivationService
      */
     public function getActivationHistory(int $businessId, ?int $terminalId = null): array
     {
+        app(EisSubscriptionAccess::class)->assertAllowed($businessId);
+
         try {
             $setting = TerminalContext::settings($businessId, null, $terminalId);
             $configuration = EisConfiguration::where('eis_setting_id', $setting->id)->first();
@@ -1250,6 +1263,8 @@ class EisTerminalActivationService
      */
     public function regenerateCredentials(int $businessId, string $token, ?int $terminalId = null): array
     {
+        app(EisSubscriptionAccess::class)->assertAllowed($businessId);
+
         try {
             $setting = TerminalContext::settings($businessId, $token, $terminalId);
             Log::info('Regenerating terminal credentials', [
@@ -1350,6 +1365,8 @@ class EisTerminalActivationService
      */
     public function syncTerminal(int $businessId, string $token, ?int $terminalId = null): array
     {
+        app(EisSubscriptionAccess::class)->assertAllowed($businessId);
+
         try {
             Log::info('Syncing terminal configuration', [
                 'business_id' => $businessId

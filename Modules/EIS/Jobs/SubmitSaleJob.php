@@ -11,6 +11,7 @@ use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
 use Modules\EIS\Services\Sales\SaleSubmissionService;
 use Modules\EIS\Models\EisSetting;
+use Modules\EIS\Services\EisSubscriptionAccess;
 
 class SubmitSaleJob implements ShouldQueue
 {
@@ -31,6 +32,14 @@ class SubmitSaleJob implements ShouldQueue
         if (!$transaction) {
             Log::warning('EIS job skipped: transaction not found', [
                 'transaction_id' => $this->transactionId
+            ]);
+            return;
+        }
+
+        if (!app(EisSubscriptionAccess::class)->allows((int) $transaction->business_id)) {
+            Log::info('EIS sale submission skipped because the business package does not include EIS.', [
+                'business_id' => $transaction->business_id,
+                'transaction_id' => $transaction->id,
             ]);
             return;
         }

@@ -9,6 +9,7 @@ use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Modules\EIS\Services\EisSubscriptionAccess;
 
 class RetryAllFailedTransactionsJob implements ShouldQueue
 {
@@ -36,14 +37,22 @@ class RetryAllFailedTransactionsJob implements ShouldQueue
 
             $query = DB::table('eis_failed_transactions')
                 ->where('next_retry_at', '<=', now())
-                ->orderBy('next_retry_at')
-                ->limit($this->limit);
+                ->orderBy('next_retry_at');
 
             if ($this->businessId) {
                 $query->where('business_id', $this->businessId);
             }
 
-            $failed = $query->get();
+            $subscriptionAccess = app(EisSubscriptionAccess::class);
+            $eligibleBusinessIds = (clone $query)->distinct()->pluck('business_id')->filter(
+                fn ($businessId) => $subscriptionAccess->allows((int) $businessId)
+            )->values();
+            if ($eligibleBusinessIds->isEmpty()) {
+                Log::info('No subscribed businesses have failed transactions to retry.');
+                return;
+            }
+
+            $failed = $query->whereIn('business_id', $eligibleBusinessIds)->limit($this->limit)->get();
 
             if ($failed->isEmpty()) {
                 Log::info('No failed transactions to retry.');

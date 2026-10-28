@@ -11,6 +11,7 @@ use Illuminate\Support\Facades\DB;
 use App\Transaction;
 use Modules\EIS\Services\Sales\SaleSubmissionService;
 use Modules\EIS\Models\EisSetting;
+use Modules\EIS\Services\EisSubscriptionAccess;
 
 class RetryFailedSaleJob implements ShouldQueue
 {
@@ -20,20 +21,32 @@ class RetryFailedSaleJob implements ShouldQueue
 
     public function handle(SaleSubmissionService $service)
     {
+        $subscriptionAccess = app(EisSubscriptionAccess::class);
+        $due = DB::table('eis_failed_transactions')
+            ->where('next_retry_at', '<=', now())
+            ->where('attempts', '<', 5)
+            ->distinct()
+            ->pluck('business_id')
+            ->filter(fn ($businessId) => $subscriptionAccess->allows((int) $businessId))
+            ->values();
+        if ($due->isEmpty()) {
+            return;
+        }
+
         // 1. LIMIT BATCH SIZE (CRITICAL)
         $failed = DB::table('eis_failed_transactions')
+            ->whereIn('business_id', $due)
             ->where('next_retry_at', '<=', now())
             ->where('attempts', '<', 5)
             ->limit(50)
-            ->lockForUpdate()
             ->get();
 
         foreach ($failed as $row) {
-
             // 2. Prevent race condition
             $updated = DB::table('eis_failed_transactions')
                 ->where('id', $row->id)
                 ->where('next_retry_at', '<=', now())
+                ->where('attempts', '<', 5)
                 ->update([
                     'next_retry_at' => now()->addMinutes(1), // temporary lock
                 ]);

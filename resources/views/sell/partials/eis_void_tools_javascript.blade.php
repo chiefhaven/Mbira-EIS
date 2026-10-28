@@ -1,6 +1,6 @@
 <script>
 $(function() {
-    var executeUrl = @json(route('eis.utilities.execute'));
+    var executeUrl = @json(route('eis.sales.operations.execute'));
     var syncBusy = false;
 
     $(document).on('click', '.eis-void-sync', function(event) {

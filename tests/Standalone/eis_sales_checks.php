@@ -91,7 +91,8 @@ $schema->create('transaction_payments', function (Blueprint $t) {
 $schema->create('eis_sales', function (Blueprint $t) {
     $t->increments('id');
     foreach (['business_id', 'transaction_id', 'eis_setting_id', 'location_id'] as $c) { $t->integer($c); }
-    foreach (['status', 'request_payload', 'receipt_number', 'eis_invoice_number', 'fiscal_invoice_number'] as $c) { $t->text($c)->nullable(); }
+    foreach (['status', 'request_payload', 'receipt_number', 'eis_invoice_number', 'fiscal_invoice_number',
+        'invoice_number', 'error_message', 'submitted_at'] as $c) { $t->text($c)->nullable(); }
     $t->timestamps();
 });
 $m = require dirname(__DIR__, 2).'\Modules\EIS\Database\Migrations\2026_10_24_020000_create_eis_utility_requests.php'; $m->up();
@@ -99,7 +100,7 @@ $m = require dirname(__DIR__, 2).'\Modules\EIS\Database\Migrations\2026_10_24_03
 DB::table('eis_settings')->where('id', 101)->update(['branch_id' => 'SITE-A', 'tpin' => '12345678']);
 DB::table('eis_settings')->where('id', 102)->update(['branch_id' => 'SITE-A', 'tpin' => '12345678']);
 DB::table('transactions')->insert(['id' => 800, 'business_id' => 1, 'location_id' => 10, 'type' => 'sell',
-    'status' => 'final', 'created_by' => 7, 'final_total' => 345, 'invoice_no' => 'POS-800']);
+    'status' => 'final', 'payment_status' => 'paid', 'created_by' => 7, 'final_total' => 345, 'invoice_no' => 'POS-800']);
 DB::table('products')->insert(['id' => 1, 'business_id' => 1, 'sku' => 'SKU-1', 'enable_stock' => true]);
 DB::table('variations')->insert(['id' => 1, 'product_id' => 1, 'product_variation_id' => 1]);
 DB::table('transaction_sell_lines')->insert(['id' => 1, 'transaction_id' => 800, 'product_id' => 1, 'variation_id' => 1,
@@ -118,6 +119,24 @@ $original = ['invoiceHeader' => ['invoiceNumber' => 'FISCAL-800', 'invoiceDateTi
 DB::table('eis_sales')->insert(['id' => 1, 'business_id' => 1, 'transaction_id' => 800, 'eis_setting_id' => 101,
     'location_id' => 10, 'status' => 'submitted', 'receipt_number' => 'RECEIPT-800',
     'eis_invoice_number' => 'FISCAL-800', 'request_payload' => json_encode($original)]);
+$salesFixtures = [
+    [801, 2, 'paid', 'pending'],
+    [802, 3, 'paid', 'failed'],
+    [803, 4, 'due', 'pending'],
+    [804, 5, 'paid', 'cancelled'],
+];
+foreach ($salesFixtures as [$transactionId, $eisSaleId, $paymentStatus, $eisStatus]) {
+    DB::table('transactions')->insert([
+        'id' => $transactionId, 'business_id' => 1, 'location_id' => 10, 'type' => 'sell',
+        'status' => 'final', 'payment_status' => $paymentStatus, 'created_by' => 7,
+        'final_total' => 100, 'invoice_no' => 'POS-'.$transactionId,
+    ]);
+    DB::table('eis_sales')->insert([
+        'id' => $eisSaleId, 'business_id' => 1, 'transaction_id' => $transactionId,
+        'eis_setting_id' => 101, 'location_id' => 10, 'status' => $eisStatus,
+        'invoice_number' => 'POS-'.$transactionId,
+    ]);
+}
 $factory = new Factory(); Http::swap($factory);
 $requests = []; $disconnect = false; $responseStatus = 200;
 $responseBody = ['statusCode' => 1, 'data' => []];
@@ -231,6 +250,18 @@ $user = new class {
 };
 $user->locations = [10]; $user->allowed = true;
 function salesRequest(array $data = []): Illuminate\Http\Request { return managementRequest($data); }
+$viewFactory = Mockery::mock(Illuminate\Contracts\View\Factory::class);
+$viewFactory->shouldReceive('make')->once()->andReturnUsing(function ($name, $data) {
+    return new class($name, $data) {
+        public function __construct(public string $name, private array $data) {}
+        public function getData(): array { return $this->data; }
+    };
+});
+$app->instance(Illuminate\Contracts\View\Factory::class, $viewFactory);
+$salesListing = $controller->index(salesRequest())->getData()['sales'];
+salesCheck($salesListing->pluck('transaction_id')->sort()->values()->all() === [800, 801, 802]
+    && $salesListing->pluck('status')->sort()->values()->all() === ['failed', 'pending', 'submitted'],
+    'EIS sales list includes only fully paid final POS sales with pending, submitted or failed EIS states');
 $responseBody = ['statusCode' => 1, 'data' => $original];
 foreach (['get-invoice-by-number', 'last-submitted-online-transaction', 'last-submitted-offline-transaction'] as $operation) {
     $result = $controller->lookup(salesRequest(['terminal_id' => 101, 'operation' => $operation, 'invoice_number' => 'RECEIPT-800']), $client);

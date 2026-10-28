@@ -4,11 +4,14 @@ namespace Modules\EIS\Services\Utilities;
 
 use Illuminate\Support\Facades\Http;
 use Modules\EIS\Models\EisSetting;
+use Modules\EIS\Services\EisSubscriptionAccess;
 
 class EisUtilitiesClient
 {
     public function send(EisSetting $setting, string $operation, array $payload): array
     {
+        app(EisSubscriptionAccess::class)->assertAllowed((int) $setting->business_id);
+
         $path = UtilityOperations::path($operation);
         $base = self::baseUrl();
         if (trim((string) $setting->jwt_token) === '') {

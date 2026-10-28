@@ -5,11 +5,14 @@ namespace Modules\EIS\Services\Sales;
 use Illuminate\Support\Facades\Http;
 use Modules\EIS\Models\EisSetting;
 use Modules\EIS\Services\Utilities\EisUtilitiesClient;
+use Modules\EIS\Services\EisSubscriptionAccess;
 
 class SalesApiClient
 {
     public function send(EisSetting $setting, string $operation, array $payload = []): array
     {
+        app(EisSubscriptionAccess::class)->assertAllowed((int) $setting->business_id);
+
         if (!in_array($operation, ['last-submitted-online-transaction', 'last-submitted-offline-transaction',
             'get-invoice-by-number', 'process-credit-debit-note'], true)) {
             throw new \InvalidArgumentException('Select a documented Sales operation.');

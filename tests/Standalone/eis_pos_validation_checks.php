@@ -189,7 +189,7 @@ rejectsEis(fn () => $service->validate(7, ['contact_id' => 2]), 'buyerTIN');
 fakeEis(function () { throw new Illuminate\Http\Client\ConnectionException('fixture offline'); });
 rejectsEis(fn () => $service->validate(7, ['contact_id' => 2]), 'buyerTIN');
 fakeEis();
-rejectsEis(fn () => $client->validateAuthorizationCode(new EisSetting(), 'CODE1'), 'buyerAuthorizationCode');
+rejectsEis(fn () => $client->validateAuthorizationCode(new EisSetting(['business_id' => 7]), 'CODE1'), 'buyerAuthorizationCode');
 checkEis(count(Http::recorded()) === 0, 'Missing credentials fail before HTTP');
 
 // Persistence, edit omission/payment-only metadata, uncheck, and invoice header.

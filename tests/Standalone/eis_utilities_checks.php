@@ -201,11 +201,14 @@ $controller = new Modules\EIS\Http\Controllers\UtilitiesController();
 $user = new class extends App\User {
     public $locations = [1];
     public bool $allowed = true;
+    public bool $canDeleteSell = false;
     public function permitted_locations($business_id = null) { return $this->locations; }
-    public function can($abilities, $arguments = []) { return $this->allowed; }
+    public function can($abilities, $arguments = []) {
+        return $this->allowed || ($this->canDeleteSell && $abilities === 'sell.delete');
+    }
 };
 $user->business_id = 7;
-$request = Illuminate\Http\Request::create('/eis/utilities');
+$request = Illuminate\Http\Request::create('/eis/sales/operations');
 $request->setUserResolver(fn () => $user);
 $operationGuard = new ReflectionMethod($controller, 'authorizeOperation'); $operationGuard->setAccessible(true);
 utilityReject(fn () => $operationGuard->invoke($controller, $request, $setting, 'taxpayer-initial-inventory-upload', $initial), 'Restricted admin cannot upload taxpayer-wide inventory');
@@ -219,6 +222,10 @@ utilityReject(fn () => $terminalGuard->invoke($controller, $request, 1), 'Locati
 $accountGuard = new ReflectionMethod($controller, 'authorizeAccount'); $accountGuard->setAccessible(true);
 $user->allowed = false;
 utilityReject(fn () => $accountGuard->invoke($controller, $request), 'Utilities require business-settings permission');
+$user->canDeleteSell = true;
+utilityCheck($accountGuard->invoke($controller, $request, 'cancel-receipt') === null,
+    'Receipt cancellation may use the sales-delete permission without general utilities access');
+$user->canDeleteSell = false;
 $config->set('eis.base_url', 'https://eis.invalid/api/v1');
 DB::table('eis_utility_requests')->delete();
 $responseStatus = 200;
@@ -256,10 +263,38 @@ Illuminate\Http\Request::macro('validate', function (array $rules) {
 $user->allowed = true; $user->locations = 'all'; $user->id = 5;
 function utilityRequest(array $data): Illuminate\Http\Request {
     global $user;
-    $request = Illuminate\Http\Request::create('/eis/utilities/execute', 'POST', $data);
+    $request = Illuminate\Http\Request::create('/eis/sales/operations/execute', 'POST', $data);
     $request->setUserResolver(fn () => $user);
     return $request;
 }
+$user->allowed = false; $user->canDeleteSell = true; $user->locations = 'all'; $user->id = 5;
+$responseBody = ['statusCode' => 1, 'data' => ['invoiceNumber' => 'RECEIPT-800', 'approvalStatus' => 'Pending']];
+$cancelPrepared = $controller->execute(utilityRequest([
+    'terminal_id' => 1,
+    'operation' => 'cancel-receipt',
+    'payload' => json_encode(['receiptNumber' => 'RECEIPT-800', 'reason' => 'Recorded in POS sales list']),
+]), $client, $service);
+$preparedData = $cancelPrepared->getData(true)['data'] ?? [];
+utilityCheck($cancelPrepared->getStatusCode() === 200 && ($preparedData['status'] ?? null) === 'prepared',
+    'POS sales-delete permission can prepare a reviewed cancellation without general utilities access');
+$cancelSubmitted = $controller->submit(utilityRequest(['confirmed' => 1]), (int) $preparedData['id'], $service);
+utilityCheck($cancelSubmitted->getStatusCode() === 200 && $cancelSubmitted->getData(true)['data']['status'] === 'accepted',
+    'POS sales-delete permission can submit the explicitly confirmed void request');
+$user->allowed = true; $user->canDeleteSell = false;
+$productStatusController = new Modules\EIS\Http\Controllers\ProductStatusController();
+$user->locations = 'all';
+$responseBody = ['statusCode' => 1, 'data' => ['productId' => 'LOCAL-BARCODE', 'status' => 'Active']];
+$productStatusRequest = Illuminate\Http\Request::create('/eis/products/9/status', 'POST');
+$productStatusRequest->setUserResolver(fn () => $user);
+$productStatus = $productStatusController->show($productStatusRequest, 9, $client);
+utilityCheck($productStatus->getStatusCode() === 200 && $productStatus->getData(true)['data']['status'] === 'Active'
+    && end($requests)->url() === 'https://eis.invalid/api/v1/utilities/product-status'
+    && end($requests)->data()['productId'] === 'LOCAL-BARCODE',
+    'Mapped product action queries EIS status for the tenant-owned product identifier');
+$user->locations = [1];
+utilityReject(fn () => $productStatusController->show($productStatusRequest, 9, $client),
+    'Taxpayer-wide product status is hidden from restricted-location users');
+$user->locations = 'all';
 $responseBody = ['statusCode' => 1, 'data' => ['serverDate' => '2026-10-24T02:00:00+02:00']];
 $lookup = $controller->execute(utilityRequest(['terminal_id' => 1, 'operation' => 'ping', 'payload' => '{}']), $client, $service);
 utilityCheck($lookup->getStatusCode() === 200 && $lookup->getData(true)['success'],

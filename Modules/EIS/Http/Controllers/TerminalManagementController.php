@@ -57,6 +57,13 @@ class TerminalManagementController extends Controller
         ]);
     }
 
+    public function page(Request $request)
+    {
+        $this->businessId($request);
+
+        return view('eis::terminals.index');
+    }
+
     public function activate(Request $request)
     {
         $businessId = $this->businessId($request);

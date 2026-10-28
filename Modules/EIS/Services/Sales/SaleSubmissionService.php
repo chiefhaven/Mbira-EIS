@@ -13,6 +13,7 @@ use Modules\EIS\Services\Http\EisSaleClient;
 use Modules\EIS\Exceptions\EisSaleException;
 use Modules\EIS\Services\Sales\InvoiceNumberGenerator;
 use Modules\EIS\Services\Sales\SaleResponseService;
+use Modules\EIS\Services\EisSubscriptionAccess;
 
 class SaleSubmissionService
 {
@@ -34,6 +35,8 @@ class SaleSubmissionService
      */
     public function submit(Transaction $transaction, object $settings, bool $forceOffline = false): EisSale
     {
+        app(EisSubscriptionAccess::class)->assertAllowed((int) $transaction->business_id);
+
         return Cache::lock('eis-sale-'.$transaction->business_id.'-'.$transaction->id, 300)
             ->block(10, fn () => $this->submitLocked($transaction, $settings, $forceOffline));
     }

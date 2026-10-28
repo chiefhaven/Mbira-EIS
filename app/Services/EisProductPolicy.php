@@ -6,6 +6,7 @@ use App\Product;
 use Illuminate\Support\Facades\DB;
 use Modules\EIS\Models\EisProductMap;
 use Modules\EIS\Models\EisSetting;
+use Modules\EIS\Services\EisSubscriptionAccess;
 
 class EisProductPolicy
 {
@@ -13,7 +14,9 @@ class EisProductPolicy
 
     public static function configured($businessId): bool
     {
-        return $businessId && DB::connection()->getSchemaBuilder()->hasTable('eis_settings')
+        return $businessId
+            && app(EisSubscriptionAccess::class)->allows((int) $businessId)
+            && DB::connection()->getSchemaBuilder()->hasTable('eis_settings')
             && EisSetting::where('business_id', $businessId)->exists();
     }
 

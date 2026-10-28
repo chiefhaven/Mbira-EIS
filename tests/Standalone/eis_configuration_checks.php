@@ -56,7 +56,7 @@ $factory->fake(function ($request) use ($factory, &$requests, &$status, &$body, 
 $token = str_repeat('fixture-token-', 3);
 foreach (['https://eis.invalid', 'https://eis.invalid/api/v1/'] as $base) {
     $app['config']->set('eis.base_url', $base);
-    $result = $client->latest($token);
+    $result = $client->latest($token, 1);
     $sent = end($requests);
     configCheck($sent->url() === 'https://eis.invalid/api/v1/configuration/get-latest-configs'
         && $sent->method() === 'POST' && $sent->body() === '', 'Exact latest configuration path, POST and no request body');
@@ -74,30 +74,30 @@ foreach ([
     [302, ['statusCode' => 1, 'data' => (object) []]],
 ] as [$status, $body]) {
     $before = count($requests);
-    configReject(fn () => $client->latest($token), 'Unsuccessful or malformed configuration is explicitly rejected');
+    configReject(fn () => $client->latest($token, 1), 'Unsuccessful or malformed configuration is explicitly rejected');
     configCheck(count($requests) === $before + 1, 'Permanent configuration failure does not retry');
 }
 $status = 503; $body = ['statusCode' => 0];
 $before = count($requests);
-configReject(fn () => $client->latest($token), 'Repeated configuration server failure is surfaced');
+configReject(fn () => $client->latest($token, 1), 'Repeated configuration server failure is surfaced');
 configCheck(count($requests) === $before + 3, 'Read-only configuration server failures retry at most three times');
 $disconnect = true; $before = count($requests);
-configReject(fn () => $client->latest($token), 'Configuration connection failure is surfaced');
+configReject(fn () => $client->latest($token, 1), 'Configuration connection failure is surfaced');
 configCheck(count($requests) === $before + 3, 'Read-only connection failure retries at most three times');
 $before = count($requests);
-try { $client->requestNewTerminalToken($token); } catch (ConnectionException $e) {}
+try { $client->requestNewTerminalToken($token, 1); } catch (ConnectionException $e) {}
 configCheck(count($requests) === $before + 1, 'Token request never retries a lost response');
 $disconnect = false; $before = count($requests);
-configReject(fn () => $client->requestNewTerminalToken($token), 'Token server rejection is explicit');
+configReject(fn () => $client->requestNewTerminalToken($token, 1), 'Token server rejection is explicit');
 configCheck(count($requests) === $before + 1, 'Token request never retries a server failure');
 $disconnect = false; $status = 200;
 $body = ['statusCode' => 1, 'data' => (object) ['jwtToken' => str_repeat('new-token-', 4)]];
-$client->requestNewTerminalToken($token);
+$client->requestNewTerminalToken($token, 1);
 $sent = end($requests);
 configCheck($sent->url() === 'https://eis.invalid/api/v1/configuration/request-new-terminal-token'
     && $sent->method() === 'POST' && $sent->body() === '', 'Exact documented new-token endpoint and no invented request fields');
 $before = count($requests);
-configReject(fn () => $client->latest(''), 'Missing token rejected before HTTP');
+configReject(fn () => $client->latest('', 1), 'Missing token rejected before HTTP');
 configCheck(count($requests) === $before, 'Invalid credentials do not contact EIS');
 
 $schema->create('business', function (Blueprint $t) { $t->increments('id'); });

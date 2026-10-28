@@ -10,6 +10,7 @@ use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
+use Modules\EIS\Services\EisSubscriptionAccess;
 
 class ProcessSalesChunkJob implements ShouldQueue
 {
@@ -30,6 +31,7 @@ class ProcessSalesChunkJob implements ShouldQueue
 
     public function handle(): void
     {
+        $subscriptionAccess = app(EisSubscriptionAccess::class);
         Log::info('ProcessSalesChunkJob started', [
             'chunk_number' => $this->chunkNumber,
             'transaction_count' => count($this->transactionIds)
@@ -43,6 +45,14 @@ class ProcessSalesChunkJob implements ShouldQueue
                     Log::warning('Transaction not found', [
                         'transaction_id' => $transactionId,
                         'chunk' => $this->chunkNumber
+                    ]);
+                    continue;
+                }
+
+                if (!$subscriptionAccess->allows((int) $transaction->business_id)) {
+                    Log::info('EIS sale batch item skipped because the business package does not include EIS.', [
+                        'business_id' => $transaction->business_id,
+                        'transaction_id' => $transaction->id,
                     ]);
                     continue;
                 }

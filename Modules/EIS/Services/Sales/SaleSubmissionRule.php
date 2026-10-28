@@ -36,9 +36,16 @@ class SaleSubmissionRule
                 $committed = $transaction->newQuery()
                     ->where('business_id', $transaction->business_id)
                     ->findOrFail($transaction->id);
-                if (static::qualifies($committed)) {
-                    event(new SaleCompleted($committed, $originalCheckout));
+                if (!static::qualifies($committed)) {
+                    return;
                 }
+
+                if (!app(\Modules\EIS\Services\EisSubscriptionAccess::class)
+                    ->allows((int) $committed->business_id)) {
+                    return;
+                }
+
+                event(new SaleCompleted($committed, $originalCheckout));
             } catch (\Throwable $e) {
                 Log::error('EIS submission failed after sale commit', [
                     'transaction_id' => $transaction->id,

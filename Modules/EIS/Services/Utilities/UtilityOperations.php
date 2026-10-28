@@ -21,12 +21,15 @@ final class UtilityOperations
             'validate-authorization-code' => ['authorizationCode' => ''],
             'ping' => [],
             'product-status' => ['productId' => ''],
-            'cancel-receipt' => ['receiptNumber' => '', 'reason' => ''],
-            'get-void-receipts' => ['page' => 1, 'pageSize' => 20],
+            'cancel-receipt' => ['receiptNumber' => '', 'reason' => '', 'supportingDocuments' => ''],
+            'get-void-receipts' => [
+                'status' => null, 'invoiceNumber' => '', 'startDate' => '', 'endDate' => '', 'page' => 1, 'pageSize' => 20,
+            ],
             'get-terminal-site-products' => [],
             'taxpayer-initial-inventory-upload' => ['isLastBatch' => false, 'products' => [[
                 'barCode' => '', 'productName' => '', 'productDescription' => '',
                 'unitPrice' => 0, 'quantityInStock' => 0, 'costPrice' => 0, 'sellingPrice' => 0,
+                'reorderLevel' => null, 'overQuantityStockLevel' => null,
             ]]],
         ];
     }

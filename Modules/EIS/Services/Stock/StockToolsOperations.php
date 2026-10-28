@@ -17,10 +17,11 @@ final class StockToolsOperations
             'warehouse-inventory' => ['page' => 1, 'pageSize' => 50],
             'get-raw-material' => ['page' => 1, 'pageSize' => 50],
             'get-suppliers' => [], 'get-hs-codes' => [], 'get-units-of-measure' => [],
-            'warehouse-transfer' => ['items' => [['barcode' => '', 'quantity' => 1]]],
+            'warehouse-transfer' => ['items' => [['barcode' => '', 'quantity' => 1, 'price' => null]]],
             'submit-conversion' => ['productionBatchId' => '', 'productionDate' => '',
                 'rawMaterials' => [['productId' => '', 'productName' => '', 'availableQuantity' => 1, 'usedQuantity' => 1]],
-                'finishedProducts' => [['quantity' => 1, 'unitOfMeasure' => '', 'productDescription' => '', 'barcode' => '']]],
+                'finishedProducts' => [['quantity' => 1, 'unitOfMeasure' => '', 'expiryDate' => '',
+                    'productDescription' => '', 'barcode' => '']]],
             'add-product' => ['barcode' => '', 'hsCode' => '', 'name' => '', 'description' => '', 'uom' => ''],
         ];
     }

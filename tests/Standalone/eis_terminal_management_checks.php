@@ -269,8 +269,14 @@ $app->instance('router', $router);
 require dirname(__DIR__, 2).'\Modules\EIS\Routes\web.php';
 $routes = $router->getRoutes();
 $routes->refreshNameLookups();
+managementCheck($routes->getByName('eis.index') && $routes->getByName('eis.index')->uri() === 'eis',
+    'EIS root route opens an authorized EIS page');
+managementCheck($routes->getByName('eis.products.status')
+    && $routes->getByName('eis.products.status')->uri() === 'eis/products/{productId}/status',
+    'Mapped EIS product status has a dedicated route');
 foreach ([
-    'index' => ['GET', 'eis/terminals'],
+    'page' => ['GET', 'eis/terminals'],
+    'index' => ['GET', 'eis/terminals/data'],
     'activate' => ['POST', 'eis/terminals/activate'],
     'latest-config' => ['POST', 'eis/terminals/{terminalId}/latest-config'],
     'configuration' => ['GET', 'eis/terminals/{terminalId}/configuration'],
@@ -289,11 +295,115 @@ foreach (['settings', 'partials\settings_mra_eis'] as $view) {
     token_get_all($blade->compileString($source), TOKEN_PARSE);
     managementCheck(true, 'Blade compiles: '.$view);
 }
+foreach ([
+    'terminals\index.blade.php',
+    'terminals\script.blade.php',
+    'shared\styles.blade.php',
+    'shared\navigation.blade.php',
+    'shared\request-form.blade.php',
+    'shared\result-table.blade.php',
+    'sales\index.blade.php',
+    'shared\navigation.blade.php',
+    'stock\tools.blade.php',
+    'stock\outbound.blade.php',
+    'stock\reconcile.blade.php',
+] as $view) {
+    $moduleView = file_get_contents(dirname(__DIR__, 2).'\Modules\EIS\Resources\views\\'.$view);
+    token_get_all($blade->compileString($moduleView), TOKEN_PARSE);
+    managementCheck(true, 'Blade compiles EIS view: '.$view);
+}
+foreach ([
+    'sell\index.blade.php',
+    'sell\partials\eis_cancel_receipt_modal.blade.php',
+    'sell\partials\eis_cancel_receipt_javascript.blade.php',
+    'product\index.blade.php',
+] as $view) {
+    $moduleView = file_get_contents(dirname(__DIR__, 2).'\resources\views\\'.$view);
+    token_get_all($blade->compileString($moduleView), TOKEN_PARSE);
+    managementCheck(true, 'Blade compiles integrated EIS UI: '.$view);
+}
+$terminalView = file_get_contents(dirname(__DIR__, 2).'\Modules\EIS\Resources\views\terminals\index.blade.php');
+managementCheck(str_contains($terminalView, "business.partials.settings_mra_eis")
+    && str_contains($terminalView, "'standalone' => true"),
+    'Standalone terminal page renders the MRA EIS settings interface');
+$terminalScript = file_get_contents(dirname(__DIR__, 2).'\Modules\EIS\Resources\views\terminals\script.blade.php');
 $source = file_get_contents(dirname(__DIR__, 2).'\resources\views\business\settings.blade.php');
 managementCheck(!str_contains($source, "route('eis.terminal.") && !str_contains($source, 'eis_token')
     && !str_contains($source, 'getTerminalStatus'), 'Obsolete API/singleton JS and credentials removed');
-managementCheck(str_contains($source, "(action === 'deactivate' || action === 'default') && !terminal.is_active"),
+managementCheck(str_contains($terminalScript, "(action === 'deactivate' || action === 'default') && !terminal.is_active"),
     'UI hides default action when combined terminal status is inactive');
+managementCheck(str_contains($terminalScript, "@json(route('eis.terminals.index'))")
+    && str_contains(file_get_contents(dirname(__DIR__, 2).'\Modules\EIS\Routes\web.php'), "Route::get('data', [TerminalManagementController::class, 'index'])->name('index')"),
+    'Terminal UI uses the dedicated JSON listing route');
 managementCheck(str_contains($source, 'test_sms_btn') && str_contains($source, 'test_email_btn')
     && str_contains($source, 'tinymce.init'), 'Other business settings handlers retained');
+$toolsView = file_get_contents(dirname(__DIR__, 2).'\Modules\EIS\Resources\views\stock\tools.blade.php');
+managementCheck(str_contains($toolsView, 'EisRequestForms.collect')
+    && !str_contains($toolsView, 'eis-tools-payload'),
+    'EIS warehouse tools use guided fields instead of raw JSON editors');
+$salesView = file_get_contents(dirname(__DIR__, 2).'\Modules\EIS\Resources\views\sales\index.blade.php');
+$salesScript = substr($salesView, strpos($salesView, '<script>'));
+managementCheck(str_contains($salesView, 'EisResultTables.render')
+    && str_contains($toolsView, 'EisResultTables.render')
+    && str_contains($terminalScript, 'EisResultTables.render'),
+    'EIS API responses and terminal configuration render as tables');
+managementCheck(!str_contains($salesView, 'Normal sales use the existing POS fiscal submission workflow')
+    && !str_contains($salesView, 'eis-sales-terminal')
+    && str_contains($salesView, 'Sync &amp; Print')
+    && str_contains($salesScript, "data-href': button.attr('data-print-url')")
+    && str_contains($salesScript, "trigger('click').remove()"),
+    'EIS sales removes the manual lookup section and syncs each sale before invoking POS receipt printing');
+$routeProviderSource = file_get_contents(dirname(__DIR__, 2).'\Modules\EIS\Providers\RouteServiceProvider.php');
+managementCheck(str_contains($routeProviderSource, "'SetSessionData'")
+    && str_contains($routeProviderSource, "'AdminSidebarMenu'"),
+    'EIS web routes initialize the business session and render the admin side menu');
+$menuSource = file_get_contents(dirname(__DIR__, 2).'\Modules\EIS\Http\Controllers\DataController.php');
+managementCheck(str_contains($menuSource, '$menu->url')
+    && str_contains($menuSource, 'route($homeRoute)')
+    && !str_contains($menuSource, '$menu->dropdown'),
+    'EIS sidebar uses one direct module link without a redundant submenu');
+$navigationSource = file_get_contents(dirname(__DIR__, 2).'\Modules\EIS\Resources\views\shared\navigation.blade.php');
+managementCheck(str_contains($navigationSource, 'navbar navbar-default bg-white')
+    && str_contains($navigationSource, "request()->routeIs('eis.stock.outbound.*')")
+    && str_contains($navigationSource, "auth()->user()->can('business_settings.access')")
+    && !str_contains(file_get_contents(dirname(__DIR__, 2).'\Modules\EIS\Routes\web.php'), 'eis/utilities')
+    && !file_exists(dirname(__DIR__, 2).'\Modules\EIS\Resources\views\utilities\index.blade.php'),
+    'EIS module navigation follows the HRM navbar pattern without a generic Utilities tab');
+$productControllerSource = file_get_contents(dirname(__DIR__, 2).'\app\Http\Controllers\ProductController.php');
+$productViewSource = file_get_contents(dirname(__DIR__, 2).'\resources\views\product\index.blade.php');
+$productStatusSource = file_get_contents(dirname(__DIR__, 2).'\Modules\EIS\Http\Controllers\ProductStatusController.php');
+managementCheck(str_contains($productControllerSource, 'eis-product-status')
+    && str_contains($productControllerSource, 'eis_product_maps.eis_product_id')
+    && str_contains($productViewSource, 'eis_product_status_modal')
+    && str_contains($productStatusSource, 'UtilityOperations::payload($setting,')
+    && str_contains($productStatusSource, "permitted_locations((int) \$user->business_id) === 'all'"),
+    'Mapped EIS products have an all-location-guarded product status lookup in their action menu');
+$sellControllerSource = file_get_contents(dirname(__DIR__, 2).'\app\Http\Controllers\SellController.php');
+$cancelScriptSource = file_get_contents(dirname(__DIR__, 2).'\resources\views\sell\partials\eis_cancel_receipt_javascript.blade.php');
+managementCheck(str_contains($sellControllerSource, 'eis-cancel-receipt')
+    && str_contains($cancelScriptSource, "operation: 'cancel-receipt'")
+    && str_contains($cancelScriptSource, "data: {confirmed: 1}")
+    && str_contains($cancelScriptSource, 'approval is separate'),
+    'POS sales actions prepare and explicitly confirm EIS receipt void requests');
+$moduleViews = [
+    'terminals\index.blade.php', 'sales\index.blade.php',
+    'stock\tools.blade.php', 'stock\outbound.blade.php', 'stock\reconcile.blade.php',
+];
+foreach ($moduleViews as $view) {
+    $moduleView = file_get_contents(dirname(__DIR__, 2).'\Modules\EIS\Resources\views\\'.$view);
+    managementCheck(str_contains($moduleView, "eis::shared.navigation"),
+        'EIS page includes the shared module navigation: '.$view);
+}
+$settingsPartial = file_get_contents(dirname(__DIR__, 2).'\resources\views\business\partials\settings_mra_eis.blade.php');
+managementCheck(str_contains($settingsPartial, "eis::shared.navigation")
+    && !str_contains($settingsPartial, 'btn-default" href="{{ route(\'eis.'),
+    'Business settings uses the shared EIS navigation without duplicate page links');
+managementCheck(substr_count($source, '@if ($canUseEis)') === 3
+    && str_contains($source, "@lang('lang_v1.mra_eis')")
+    && str_contains($source, "@include('business.partials.settings_mra_eis')"),
+    'MRA EIS settings tab and panel are both conditional on subscription');
+$controllerSource = file_get_contents(dirname(__DIR__, 2).'\app\Http\Controllers\BusinessController.php');
+managementCheck(str_contains($controllerSource, 'app(EisSubscriptionAccess::class)->allows((int) $business_id)')
+    && str_contains($controllerSource, "'canUseEis'"),
+    'Business settings receives the current business EIS subscription entitlement');
 echo "OK: {$checks} terminal management checks\n";

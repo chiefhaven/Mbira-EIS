@@ -92,6 +92,7 @@ class SellController extends Controller
         ];
 
         $business_id = request()->session()->get('user.business_id');
+        $canUseEis = \App\Services\EisProductPolicy::configured($business_id);
         $is_woocommerce = $this->moduleUtil->isModuleInstalled('Woocommerce');
         $is_crm = $this->moduleUtil->isModuleInstalled('Crm');
         $is_tables_enabled = $this->transactionUtil->isModuleEnabled('tables');
@@ -236,7 +237,7 @@ class SellController extends Controller
             $datatable = Datatables::of($sells)
                 ->addColumn(
                     'action',
-                    function ($row) use ($only_shipments, $is_admin, $sale_type, $is_zatca) {
+                    function ($row) use ($only_shipments, $is_admin, $sale_type, $is_zatca, $canUseEis) {
 
                         // this action button for zatca module
                         if ($is_zatca) {
@@ -375,6 +376,24 @@ class SellController extends Controller
                                     $html .= '<li><a href="#" class="eis-sale-sync" data-sync-url="'
                                         .e(route('eis.sales.sync', ['id' => $fiscalSale->id])).'">'
                                         .'<i class="fas fa-sync"></i> Sync EIS Invoice/Receipt</a></li>';
+                                }
+                            }
+                            if ($canUseEis && auth()->user()->can('sell.delete')) {
+                                $fiscalSale = $row->relationLoaded('eisSale') ? $row->eisSale : null;
+                                $eisInvoiceNumber = $fiscalSale ? $fiscalSale->getRawOriginal('fiscal_invoice_number') : null;
+                                $receiptNumber = $fiscalSale
+                                    ? ($fiscalSale->getRawOriginal('receipt_number') ?: $eisInvoiceNumber)
+                                    : null;
+                                if ($fiscalSale && $fiscalSale->status === 'submitted'
+                                    && $eisInvoiceNumber && $receiptNumber && $fiscalSale->eis_setting_id) {
+                                    $html .= '<li><a href="#" class="eis-cancel-receipt" data-terminal-id="'
+                                        .e((string) $fiscalSale->eis_setting_id).'" data-invoice-number="'
+                                        .e($receiptNumber).'"><i class="fas fa-ban"></i> Request EIS receipt cancellation</a></li>';
+                                    if (auth()->user()->can('business_settings.access')) {
+                                        $html .= '<li><a href="#" class="eis-void-sync" data-terminal-id="'
+                                            .e((string) $fiscalSale->eis_setting_id).'" data-invoice-number="'
+                                            .e($eisInvoiceNumber).'"><i class="fas fa-sync"></i> Check EIS void status</a></li>';
+                                    }
                                 }
                             }
 
@@ -597,7 +616,7 @@ class SellController extends Controller
 
         $payment_types = $this->transactionUtil->payment_types(null, true, $business_id);
         return view('sell.index')
-        ->with(compact('business_locations', 'customers', 'is_woocommerce', 'sales_representative', 'is_cmsn_agent_enabled', 'commission_agents', 'service_staffs', 'is_tables_enabled', 'is_service_staff_enabled', 'is_types_service_enabled', 'shipping_statuses', 'sources', 'payment_types'));
+        ->with(compact('business_locations', 'customers', 'is_woocommerce', 'sales_representative', 'is_cmsn_agent_enabled', 'commission_agents', 'service_staffs', 'is_tables_enabled', 'is_service_staff_enabled', 'is_types_service_enabled', 'shipping_statuses', 'sources', 'payment_types', 'canUseEis'));
     }
 
     /**

@@ -6,6 +6,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Modules\EIS\Models\EisSetting;
 use Modules\EIS\Services\Terminal\TerminalContext;
+use Modules\EIS\Services\EisSubscriptionAccess;
 
 class UtilityRequestService
 {
@@ -13,6 +14,8 @@ class UtilityRequestService
 
     public function prepare(EisSetting $setting, string $operation, array $payload, int $actorId): object
     {
+        app(EisSubscriptionAccess::class)->assertAllowed((int) $setting->business_id);
+
         if (!in_array($operation, UtilityOperations::MUTATIONS, true)) {
             throw new \InvalidArgumentException('Only mutating utilities require a reviewed request.');
         }
@@ -45,6 +48,8 @@ class UtilityRequestService
 
     public function submit(EisSetting $setting, int $requestId, int $actorId): object
     {
+        app(EisSubscriptionAccess::class)->assertAllowed((int) $setting->business_id);
+
         if (DB::connection()->transactionLevel() !== 0) {
             throw new \InvalidArgumentException('Submit reviewed utilities outside an existing database transaction so the send claim is durable.');
         }

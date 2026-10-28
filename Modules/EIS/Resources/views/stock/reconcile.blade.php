@@ -1,6 +1,7 @@
 @extends('layouts.app')
 @section('title', 'EIS stock reconciliation')
 @section('content')
+@include('eis::shared.navigation')
 <section class="content-header"><h1>EIS stock reconciliation</h1></section>
 <section class="content">
     <div class="box box-primary"><div class="box-body">
@@ -21,10 +22,16 @@
         <button type="button" id="eis-stock-apply" class="btn btn-warning" disabled>Reconcile local stock to EIS</button>
         @endcan
         <div class="table-responsive">
-            <table class="table table-striped"><thead><tr><th>Product code</th><th>Product</th><th>Local quantity</th><th>EIS quantity</th></tr></thead><tbody id="eis-stock-lines"></tbody></table>
+            <table class="table table-striped table-bordered">
+                <thead><tr><th>Product code</th><th>Product</th><th>Local quantity</th><th>EIS quantity</th></tr></thead>
+                <tbody id="eis-stock-lines"><tr><td colspan="4" class="text-muted">Run a comparison to review quantities.</td></tr></tbody>
+            </table>
         </div>
     </div></div>
 </section>
+@endsection
+@section('css')
+@include('eis::shared.styles')
 @endsection
 @section('javascript')
 <script>

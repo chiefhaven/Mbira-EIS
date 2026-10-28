@@ -3,9 +3,9 @@
 @section('title', 'EIS stock operations')
 
 @section('content')
+@include('eis::shared.navigation')
 <section class="content-header">
     <h1>EIS stock operations</h1>
-    <p><a href="{{ route('eis.stock.tools.index') }}">Warehouse inventory, raw materials, warehouse-to-site transfers, suppliers, conversion and product tools</a></p>
     <p>Submitted operations are immutable. Unknown outcomes are not retried because EIS does not document an idempotency key.</p>
     <p>These forms submit to EIS only. After acceptance (and approval for informal purchases), compare/reconcile each affected location to create the local stock movements. Do not also enter a separate local transfer or purchase for the same operation.</p>
 </section>
@@ -108,7 +108,7 @@
                 </div>
 
                 <div class="table-responsive">
-                    <table class="table table-bordered" id="eis-stock-items">
+                    <table class="table table-bordered table-striped" id="eis-stock-items">
                         <thead>
                             <tr>
                                 <th>Mapped product</th>
@@ -139,7 +139,7 @@
                             <td>{{ $operation->id }}</td>
                             <td>{{ $operation->destination_name ? $operation->location_name.' → '.$operation->destination_name : $operation->location_name }}</td>
                             <td>{{ str_replace('_', ' ', $operation->operation_type) }}</td>
-                            <td>{{ $operation->status }}</td>
+                            <td><span class="eis-status-label {{ in_array($operation->status, ['submitted', 'verified'], true) ? 'eis-status-success' : (in_array($operation->status, ['queued', 'submitting', 'awaiting_approval'], true) ? 'eis-status-warning' : 'eis-status-danger') }}">{{ $operation->status }}</span></td>
                             <td>{{ $operation->created_at }}</td>
                             <td>
                                 {{ $operation->status === 'verified' ? 'Final EIS outcome verified; reconcile local stock.' : ($operation->error_message ?: ($operation->submitted_at ? ($operation->status === 'awaiting_approval' ? 'Accepted; awaiting EIS approval' : 'Accepted by EIS') : 'Awaiting worker/result')) }}
@@ -183,6 +183,9 @@
         </div>
     </div>
 </section>
+@endsection
+@section('css')
+@include('eis::shared.styles')
 @endsection
 
 @section('javascript')

@@ -22,17 +22,17 @@ class SalesController extends Controller
         $permitted = $request->user()->permitted_locations((int) $request->user()->business_id);
         if ($permitted !== 'all') { $locations->whereIn('id', $permitted); }
         $locations = $locations->get(['id', 'name']);
-        $terminals = EisSetting::where('business_id', $request->user()->business_id)
-            ->whereIn('location_id', $locations->pluck('id'))->get(['id', 'location_id', 'device_id']);
         $sales = DB::table('eis_sales as e')->join('transactions as t', 't.id', '=', 'e.transaction_id')
             ->where('e.business_id', $request->user()->business_id)->where('t.business_id', $request->user()->business_id)
             ->whereIn('e.location_id', $locations->pluck('id'))->whereIn('t.location_id', $locations->pluck('id'))
+            ->where('t.type', 'sell')->where('t.status', 'final')->where('t.payment_status', 'paid')
+            ->whereIn('e.status', ['pending', 'submitted', 'failed'])
             ->orderByDesc('e.id')->limit(50)
             ->get(['e.id', 'e.transaction_id', 'e.invoice_number', 'e.eis_invoice_number', 'e.status',
                 'e.receipt_number', 'e.error_message', 'e.location_id', 'e.eis_setting_id', 'e.submitted_at']);
         $adjustments = DB::table('eis_sale_adjustments')->where('business_id', $request->user()->business_id)
             ->whereIn('location_id', $locations->pluck('id'))->orderByDesc('id')->limit(50)->get();
-        return view('eis::sales.index', compact('locations', 'terminals', 'sales', 'adjustments'));
+        return view('eis::sales.index', compact('locations', 'sales', 'adjustments'));
     }
 
     public function lookup(Request $request, SalesApiClient $client)

@@ -6,6 +6,7 @@ use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
 use Modules\EIS\Models\EisSetting;
 use Modules\EIS\Services\Terminal\TerminalContext;
+use Modules\EIS\Services\EisSubscriptionAccess;
 
 class StockOperationsClient
 {
@@ -119,6 +120,8 @@ class StockOperationsClient
 
     private function request(EisSetting $setting)
     {
+        app(EisSubscriptionAccess::class)->assertAllowed((int) $setting->business_id);
+
         $base = rtrim(trim((string) config('eis.base_url')), '/');
         if ($base === '' || !is_string($setting->jwt_token) || trim($setting->jwt_token) === '') {
             throw new \InvalidArgumentException('EIS stock operations require a configured endpoint and terminal token.');

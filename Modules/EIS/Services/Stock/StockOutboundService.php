@@ -7,6 +7,7 @@ use Illuminate\Support\Facades\Log;
 use Modules\EIS\Jobs\SubmitStockOperationJob;
 use Modules\EIS\Models\EisSetting;
 use Modules\EIS\Services\Terminal\TerminalContext;
+use Modules\EIS\Services\EisSubscriptionAccess;
 
 class StockOutboundService
 {
@@ -31,6 +32,8 @@ class StockOutboundService
         ?int $sourceStockAdjustmentId = null,
         ?int $destinationLocationId = null
     ): int {
+        app(EisSubscriptionAccess::class)->assertAllowed($businessId);
+
         if (!in_array($operationType, ['adjustment', 'transfer', 'informal_purchase'], true) || $linePayloads === []) {
             throw new \InvalidArgumentException('A supported stock operation with at least one item is required.');
         }
@@ -109,6 +112,8 @@ class StockOutboundService
 
     public function verifyOutcome(int $businessId, int $operationId, int $actorId, string $notes, array $permitted): void
     {
+        app(EisSubscriptionAccess::class)->assertAllowed($businessId);
+
         if (mb_strlen(trim($notes)) < 20) {
             throw new \InvalidArgumentException('Record the EIS verification reference and confirmed outcome (at least 20 characters).');
         }
@@ -129,6 +134,10 @@ class StockOutboundService
 
     public function dispatchQueued(int $operationId, int $businessId, array $permittedLocationIds): bool
     {
+        if (!app(EisSubscriptionAccess::class)->allows($businessId)) {
+            return false;
+        }
+
         $operation = DB::table('eis_stock_operations')->where('id', $operationId)
             ->where('business_id', $businessId)->first();
         if (!$operation || $operation->status !== 'queued'
@@ -153,6 +162,10 @@ class StockOutboundService
         if ($transaction->type !== 'stock_adjustment' || $transaction->source === 'eis_reconciliation') {
             return null;
         }
+        if (!app(EisSubscriptionAccess::class)->allows((int) $transaction->business_id)) {
+            return null;
+        }
+
         if ($terminalId === null || $siteId === null) {
             return null;
         }
@@ -226,6 +239,8 @@ class StockOutboundService
         if (!$operation || $operation->status !== 'queued') {
             return;
         }
+        app(EisSubscriptionAccess::class)->assertAllowed((int) $operation->business_id);
+
         $updated = DB::transaction(function () use ($operation, $operationId) {
             DB::table('business')->where('id', $operation->business_id)->lockForUpdate()->first();
             $setting = EisSetting::where('business_id', $operation->business_id)

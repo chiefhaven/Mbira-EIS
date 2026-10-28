@@ -8,6 +8,7 @@ use Modules\EIS\Services\Products\EisProductClient;
 use Modules\EIS\Services\Products\OpeningStockInitializer;
 use Modules\EIS\Services\Products\ProductTransformer;
 use Modules\EIS\Services\Products\ProductUpsertService;
+use Modules\EIS\Services\EisSubscriptionAccess;
 
 class ProductSyncService
 {
@@ -19,6 +20,8 @@ class ProductSyncService
 
     public function sync($settings, int $businessId)
     {
+        app(EisSubscriptionAccess::class)->assertAllowed($businessId);
+
         if (!is_object($settings) || $businessId <= 0
             || (!is_int($settings->business_id ?? null) && !is_string($settings->business_id ?? null))
             || (string) $settings->business_id !== (string) $businessId) {

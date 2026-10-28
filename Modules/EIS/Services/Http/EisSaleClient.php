@@ -7,6 +7,7 @@ use Illuminate\Http\Client\RequestException;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Modules\EIS\Exceptions\EisSaleException;
+use Modules\EIS\Services\EisSubscriptionAccess;
 
 class EisSaleClient
 {
@@ -43,6 +44,8 @@ class EisSaleClient
      */
     public function submit(array $payload, object $settings): array
     {
+        app(EisSubscriptionAccess::class)->assertAllowed((int) ($settings->business_id ?? 0));
+
         try {
             $site = \Modules\EIS\Services\Terminal\TerminalContext::site($settings);
         } catch (\InvalidArgumentException $e) {

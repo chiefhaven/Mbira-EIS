@@ -17,7 +17,7 @@ use Modules\EIS\Http\Controllers\API\TerminalActivationController;
 |
 */
 
-Route::middleware('auth:api')->get('/eis', function (Request $request) {
+Route::middleware(['auth:api', \Modules\EIS\Http\Middleware\RequireEisSubscription::class])->get('/eis', function (Request $request) {
     return $request->user();
 });
 
@@ -27,7 +27,7 @@ Route::middleware('auth:api')->get('/eis', function (Request $request) {
 |--------------------------------------------------------------------------
 */
 
-Route::prefix('v1')->group(function () {
+Route::prefix('v1')->middleware(\Modules\EIS\Http\Middleware\RequireEisSubscription::class)->group(function () {
     
     /**
      * Terminal Activation Routes
@@ -166,7 +166,7 @@ Route::prefix('v1')->group(function () {
 | Public Routes (No Authentication Required)
 |--------------------------------------------------------------------------
 */
-Route::prefix('v1/public')->group(function () {
+Route::prefix('v1/public')->middleware(\Modules\EIS\Http\Middleware\RequireEisSubscription::class)->group(function () {
     
     // Check Terminal Health (for monitoring)
     Route::get('terminal/health/{businessId}', [TerminalActivationController::class, 'health'])

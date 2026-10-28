@@ -6,6 +6,7 @@ use Illuminate\Console\Command;
 use App\Transaction;
 use Modules\EIS\Models\EisSetting;
 use Modules\EIS\Services\Sales\DirectSaleSubmissionService;
+use Modules\EIS\Services\EisSubscriptionAccess;
 
 class DispatchAllUnsubmittedSalesCommand extends Command
 {
@@ -17,12 +18,17 @@ class DispatchAllUnsubmittedSalesCommand extends Command
 
     protected $description = 'Submit all eligible unsubmitted sales to EIS directly';
 
-    public function handle(DirectSaleSubmissionService $submission)
+    public function handle(DirectSaleSubmissionService $submission, EisSubscriptionAccess $subscriptionAccess)
     {
         $businessId = $this->option('business-id');
         $dateFrom = $this->option('date-from');
         $dateTo = $this->option('date-to');
         $dryRun = $this->option('dry-run');
+
+        if ($businessId && !$subscriptionAccess->allows((int) $businessId)) {
+            $this->error('The selected business package does not include the EIS module.');
+            return 1;
+        }
 
         $this->info('Starting direct submission of unsubmitted sales...');
 
@@ -83,7 +89,9 @@ class DispatchAllUnsubmittedSalesCommand extends Command
             ->whereNotNull('tpin')
             ->whereNotNull('device_id')
             ->whereNotNull('jwt_token')
-            ->pluck('business_id');
+            ->pluck('business_id')
+            ->unique()
+            ->filter(fn ($businessId) => app(EisSubscriptionAccess::class)->allows((int) $businessId));
         $query = Transaction::where('type', 'sell')
             ->where('status', 'final')
             ->whereNotNull('invoice_no')

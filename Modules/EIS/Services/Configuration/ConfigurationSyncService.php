@@ -12,6 +12,7 @@ use Modules\EIS\Models\EisTerminalConfiguration;
 use Modules\EIS\Models\EisTerminalSite;
 use Modules\EIS\Services\Configuration\EISConfigurationResponse;
 use Modules\EIS\Services\Configuration\Validators\ConfigurationValidator;
+use Modules\EIS\Services\EisSubscriptionAccess;
 
 class ConfigurationSyncService
 {
@@ -59,6 +60,7 @@ class ConfigurationSyncService
         bool $force = false,
         ?int $terminalId = null
     ): EisConfiguration {
+        app(EisSubscriptionAccess::class)->assertAllowed($businessId);
         $this->validateBusinessId($businessId);
         $this->validateToken($token);
 
@@ -70,7 +72,7 @@ class ConfigurationSyncService
             return DB::transaction(function () use ($businessId, $token, $force, $terminalId) {
                 $settings = \Modules\EIS\Services\Terminal\TerminalContext::settings($businessId, $token, $terminalId);
                 // Fetch configuration from EIS
-                $response = $this->client->latest($token);
+                $response = $this->client->latest($token, $businessId);
 
                 // Log response summary
                 Log::debug('EIS API response received', [
@@ -184,6 +186,8 @@ class ConfigurationSyncService
      */
     public function getLatestConfig(array $settings): array
     {
+        app(EisSubscriptionAccess::class)->assertAllowed((int) ($settings['business_id'] ?? 0));
+
         try {
             $terminalSettings = \Modules\EIS\Services\Terminal\TerminalContext::settings(
                 (int) ($settings['business_id'] ?? 0), $settings['jwt_token'] ?? ''
@@ -197,7 +201,8 @@ class ConfigurationSyncService
                 ];
             }
 
-            $response = $this->client->latest($settings['jwt_token']);
+
+            $response = $this->client->latest($settings['jwt_token'], (int) $settings['business_id']);
 
             if (!$response->isSuccess()) {
                 return [

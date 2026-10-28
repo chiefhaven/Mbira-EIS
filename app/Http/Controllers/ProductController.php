@@ -101,6 +101,10 @@ class ProductController extends Controller
         $business_id = request()->session()->get('user.business_id');
         $selling_price_group_count = SellingPriceGroup::countSellingPriceGroups($business_id);
         $eis_managed = \App\Services\EisProductPolicy::configured($business_id);
+        $canCheckEisProductStatus = $eis_managed
+            && auth()->user()->can('product.view')
+            && auth()->user()->permitted_locations() === 'all'
+            && DB::getSchemaBuilder()->hasTable('eis_product_maps');
         $is_woocommerce = $this->moduleUtil->isModuleInstalled('Woocommerce');
 
         try {
@@ -138,6 +142,15 @@ class ProductController extends Controller
                 ->whereNull('v.deleted_at')
                 ->where('products.business_id', $business_id)
                 ->where('products.type', '!=', 'modifier');
+            if ($canCheckEisProductStatus) {
+                $query->leftJoin('eis_product_maps', function ($join) use ($business_id) {
+                    $join->on('eis_product_maps.product_id', '=', 'products.id')
+                        ->where('eis_product_maps.business_id', '=', $business_id);
+                    if (DB::getSchemaBuilder()->hasColumn('eis_product_maps', 'deleted_at')) {
+                        $join->whereNull('eis_product_maps.deleted_at');
+                    }
+                });
+            }
 
             if (! empty($location_id) && $location_id != 'none') {
                 if ($permitted_locations == 'all' || in_array($location_id, $permitted_locations)) {
@@ -184,6 +197,9 @@ class ProductController extends Controller
                 DB::raw('MAX(v.dpp_inc_tax) as max_purchase_price'),
                 DB::raw('MIN(v.dpp_inc_tax) as min_purchase_price')
                 );
+            if ($canCheckEisProductStatus) {
+                $products->addSelect('eis_product_maps.eis_product_id as eis_product_id');
+            }
 
             //if woocomerce enabled add field to query
             if ($is_woocommerce) {
@@ -248,13 +264,19 @@ class ProductController extends Controller
                 ->editColumn('category', '{{$category}} @if(!empty($sub_category))<br/> -- {{$sub_category}}@endif')
                 ->addColumn(
                     'action',
-                    function ($row) use ($selling_price_group_count, $eis_managed) {
+                    function ($row) use ($selling_price_group_count, $eis_managed, $canCheckEisProductStatus) {
                         $html =
                         '<div class="btn-group"><button type="button" class="tw-dw-btn tw-dw-btn-xs tw-dw-btn-outline  tw-dw-btn-info tw-w-max dropdown-toggle" data-toggle="dropdown" aria-expanded="false">'.__('messages.actions').'<span class="caret"></span><span class="sr-only">Toggle Dropdown</span></button><ul class="dropdown-menu dropdown-menu-left" role="menu"><li><a href="'.action([\App\Http\Controllers\LabelsController::class, 'show']).'?product_id='.$row->id.'" data-toggle="tooltip" title="'.__('lang_v1.label_help').'"><i class="fa fa-barcode"></i> '.__('barcode.labels').'</a></li>';
 
                         if (auth()->user()->can('product.view')) {
                             $html .=
                             '<li><a href="'.action([\App\Http\Controllers\ProductController::class, 'view'], [$row->id]).'" class="view-product"><i class="fa fa-eye"></i> '.__('messages.view').'</a></li>';
+                        }
+
+                        if ($canCheckEisProductStatus && !empty($row->eis_product_id)) {
+                            $html .= '<li><a href="#" class="eis-product-status" data-status-url="'
+                                .e(route('eis.products.status', ['productId' => $row->id])).'">'
+                                .'<i class="fas fa-file-invoice"></i> Check EIS product status</a></li>';
                         }
 
                         if (auth()->user()->can('product.update')) {
@@ -394,7 +416,8 @@ class ProductController extends Controller
                 'show_manufacturing_data',
                 'pos_module_data',
                 'is_woocommerce',
-                'is_admin'
+                'is_admin',
+                'canCheckEisProductStatus'
             ));
     }
 

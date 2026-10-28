@@ -15,6 +15,7 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\DB;
 use Modules\EIS\Models\EisSetting as ModelsEisSetting;
+use Modules\EIS\Services\EisSubscriptionAccess;
 use Modules\EIS\Services\Sales\SaleSubmissionRule;
 
 class DispatchAllUnsubmittedSalesJob implements ShouldQueue
@@ -123,11 +124,14 @@ class DispatchAllUnsubmittedSalesJob implements ShouldQueue
     protected function getUnsubmittedTransactionIds(): array
     {
         // Get businesses with valid EIS settings
+        $subscriptionAccess = app(EisSubscriptionAccess::class);
         $validBusinessIds = ModelsEisSetting::where('status', 1)
             ->whereNotNull('tpin')
             ->whereNotNull('device_id')
             ->whereNotNull('jwt_token')
             ->pluck('business_id')
+            ->unique()
+            ->filter(fn ($businessId) => $subscriptionAccess->allows((int) $businessId))
             ->toArray();
 
         if (empty($validBusinessIds)) {

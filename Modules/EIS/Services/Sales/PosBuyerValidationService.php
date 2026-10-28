@@ -10,6 +10,7 @@ use Illuminate\Validation\ValidationException;
 use Modules\EIS\Models\EisSetting;
 use Modules\EIS\Services\Http\EisHealthService;
 use Modules\EIS\Services\Utilities\EisValidationClient;
+use Modules\EIS\Services\EisSubscriptionAccess;
 
 class PosBuyerValidationService
 {
@@ -92,6 +93,16 @@ class PosBuyerValidationService
         $tin = trim((string) $contact->tax_number);
 
         $code = trim((string) $contact->authorization_code);
+
+        if (!app(EisSubscriptionAccess::class)->allows($businessId)) {
+            if ($relief) {
+                throw ValidationException::withMessages([
+                    'is_relief' => 'The active package does not include EIS validation for relief sales.',
+                ]);
+            }
+
+            return null;
+        }
 
         /*
         |--------------------------------------------------------------------------

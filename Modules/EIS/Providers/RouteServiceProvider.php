@@ -47,7 +47,18 @@ class RouteServiceProvider extends ServiceProvider
      */
     protected function mapWebRoutes()
     {
-        Route::middleware(['web', \Modules\EIS\Http\Middleware\EnforceTerminalBusiness::class])
+        Route::middleware([
+            'web',
+            'setData',
+            'auth',
+            'SetSessionData',
+            'language',
+            'timezone',
+            'AdminSidebarMenu',
+            'CheckUserLogin',
+            \Modules\EIS\Http\Middleware\EnforceTerminalBusiness::class,
+            \Modules\EIS\Http\Middleware\RequireEisSubscription::class,
+        ])
             ->namespace($this->moduleNamespace)
             ->group(module_path('EIS', '/Routes/web.php'));
     }

@@ -36,6 +36,14 @@ class SubmitOfflineSalesJob implements ShouldQueue
 
     public function handle(SaleSubmissionService $submissionService): void
     {
+        if (!app(\Modules\EIS\Services\EisSubscriptionAccess::class)->allows($this->businessId)) {
+            Log::info('EIS sale submission skipped because the business package does not include EIS.', [
+                'business_id' => $this->businessId,
+                'transaction_id' => $this->transactionId,
+            ]);
+            return;
+        }
+
         if (DB::connection()->transactionLevel() > 0) {
             $this->deferUntilCommit();
             return;

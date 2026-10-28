@@ -10,6 +10,7 @@ use Modules\EIS\Models\EisTerminalConfiguration;
 use Modules\EIS\Models\EisConfiguration;
 use Modules\EIS\Services\Terminal\EisTerminalActivationService;
 use Modules\EIS\Services\Terminal\TerminalContext;
+use Modules\EIS\Services\EisSubscriptionAccess;
 
 class TerminalActivationController extends Controller
 {
@@ -943,6 +944,8 @@ class TerminalActivationController extends Controller
                     'message' => 'Missing required fields'
                 ], 400);
             }
+
+            app(EisSubscriptionAccess::class)->assertAllowed((int) $businessId);
 
             // Process the callback
             $result = $this->activationService->handleActivationCallback(

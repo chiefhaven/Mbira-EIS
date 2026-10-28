@@ -8,6 +8,7 @@ use Illuminate\Support\Str;
 use Modules\EIS\Models\EisSetting;
 use Modules\EIS\Services\Terminal\TerminalContext;
 use Modules\EIS\Services\Utilities\EisUtilitiesClient;
+use Modules\EIS\Services\EisSubscriptionAccess;
 
 class StockToolsService
 {
@@ -15,6 +16,8 @@ class StockToolsService
 
     public function prepare(EisSetting $setting, string $operation, array $input, string $key, int $actorId): object
     {
+        app(EisSubscriptionAccess::class)->assertAllowed((int) $setting->business_id);
+
         $this->storage();
         if (!in_array($operation, StockToolsOperations::MUTATIONS, true) || !Str::isUuid($key)) {
             throw new \InvalidArgumentException('A supported stock mutation and valid request identifier are required.');
@@ -64,6 +67,8 @@ class StockToolsService
 
     public function submit(EisSetting $setting, int $id, int $actorId): object
     {
+        app(EisSubscriptionAccess::class)->assertAllowed((int) $setting->business_id);
+
         $this->storage();
         if (DB::connection()->transactionLevel() !== 0) {
             throw new \InvalidArgumentException('Send reviewed stock tools outside an existing database transaction.');
@@ -136,6 +141,8 @@ class StockToolsService
 
     public function verify(int $businessId, int $id, int $actorId, string $notes): object
     {
+        app(EisSubscriptionAccess::class)->assertAllowed($businessId);
+
         $this->storage();
         if (mb_strlen(trim($notes)) < 20) {
             throw new \InvalidArgumentException('Record the MRA reference and confirmed outcome in at least 20 characters.');

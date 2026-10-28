@@ -8,6 +8,7 @@ use Modules\EIS\Models\EisSetting;
 use Modules\EIS\Models\EisTerminalConfiguration;
 use Modules\EIS\Services\Terminal\TerminalContext;
 use Modules\EIS\Services\Utilities\EisUtilitiesClient;
+use Modules\EIS\Services\EisSubscriptionAccess;
 
 class TerminalTokenService
 {
@@ -15,6 +16,8 @@ class TerminalTokenService
 
     public function request(EisSetting $setting, int $actorId): array
     {
+        app(EisSubscriptionAccess::class)->assertAllowed((int) $setting->business_id);
+
         if (DB::connection()->transactionLevel() !== 0) {
             throw new \InvalidArgumentException('Terminal token requests must run outside an existing database transaction.');
         }
@@ -49,7 +52,7 @@ class TerminalTokenService
             return [$id, $current];
         });
         try {
-            $response = $this->client->requestNewTerminalToken($current->jwt_token);
+            $response = $this->client->requestNewTerminalToken($current->jwt_token, (int) $current->business_id);
             // Swagger leaves data untyped. Persist only recognized credentials; never guess or expose it.
             $data = $response->data;
             if (!is_string($data->jwtToken ?? null) || strlen(trim($data->jwtToken)) < 20

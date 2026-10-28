@@ -322,7 +322,12 @@ $app->instance(Illuminate\Http\Client\Factory::class, $http);
 Illuminate\Support\Facades\Http::swap($http);
 $http->fake(['*' => $http->response(['data' => []], 500)]);
 try {
-    (new EisProductClient())->fetch((object) ['jwt_token' => 'fixture', 'tpin' => 'fixture', 'site_id' => 'SITE-A']);
+    (new EisProductClient())->fetch((object) [
+        'business_id' => 1,
+        'jwt_token' => 'fixture',
+        'tpin' => 'fixture',
+        'site_id' => 'SITE-A',
+    ]);
     throw new RuntimeException('Expected HTTP failure');
 } catch (Illuminate\Http\Client\RequestException $e) {
     catalogCheck($e->response->status() === 500, 'HTTP errors cannot masquerade as empty successful catalogs');

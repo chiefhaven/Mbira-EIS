@@ -6,6 +6,7 @@ use Illuminate\Database\Connection;
 use Modules\EIS\Models\EisSetting;
 use Modules\EIS\Services\Products\OpeningStockInitializer;
 use Modules\EIS\Services\Terminal\TerminalContext;
+use Modules\EIS\Services\EisSubscriptionAccess;
 
 class StockReconciliationService
 {
@@ -13,6 +14,8 @@ class StockReconciliationService
 
     public function preview(int $businessId, int $terminalId, int $actorId): object
     {
+        app(EisSubscriptionAccess::class)->assertAllowed($businessId);
+
         $this->storage();
         $setting = TerminalContext::settings($businessId, null, $terminalId);
         TerminalContext::assertActive($setting);
@@ -35,6 +38,8 @@ class StockReconciliationService
 
     public function apply(int $businessId, int $snapshotId, int $actorId): object
     {
+        app(EisSubscriptionAccess::class)->assertAllowed($businessId);
+
         $this->storage();
         return $this->db->transaction(function () use ($businessId, $snapshotId, $actorId) {
             $snapshot = $this->db->table('eis_stock_reconciliations')->where('business_id', $businessId)

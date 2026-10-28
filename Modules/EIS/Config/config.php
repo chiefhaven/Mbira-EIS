@@ -5,6 +5,8 @@ use FontLib\Table\Type\name;
 return [
 
     'name' => 'EIS',
+
+    'module_version' => '1.0.0',
     
     'enabled' => true,
 

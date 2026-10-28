@@ -3,11 +3,14 @@ namespace Modules\EIS\Services\Auth;
 
 use Modules\EIS\Models\EisSetting;
 use Illuminate\Support\Facades\Http;
+use Modules\EIS\Services\EisSubscriptionAccess;
 
 class EisAuthService
 {
     public function refresh(EisSetting $setting)
     {
+        app(EisSubscriptionAccess::class)->assertAllowed((int) $setting->business_id);
+
         $baseUrl = rtrim(trim((string) config('eis.base_url')), '/');
         if ($baseUrl === '') {
             throw new \InvalidArgumentException('Configure EIS_BASE_URL before refreshing EIS credentials.');

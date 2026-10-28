@@ -4,11 +4,14 @@ namespace Modules\EIS\Services\Utilities;
 
 use Illuminate\Support\Facades\DB;
 use Modules\EIS\Models\EisSetting;
+use Modules\EIS\Services\EisSubscriptionAccess;
 
 final class VoidReceiptSynchronizer
 {
     public function sync(EisSetting $setting, array $items): array
     {
+        app(EisSubscriptionAccess::class)->assertAllowed((int) $setting->business_id);
+
         foreach (['void_status', 'void_approval_status', 'void_synced_at', 'void_response_payload'] as $column) {
             if (!DB::getSchemaBuilder()->hasColumn('eis_sales', $column)) {
                 throw new \RuntimeException('EIS void receipt sync storage is missing. Run the EIS migrations before syncing.');

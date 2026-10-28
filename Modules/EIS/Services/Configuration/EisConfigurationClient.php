@@ -7,11 +7,13 @@ use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Modules\EIS\Services\Utilities\EisUtilitiesClient;
+use Modules\EIS\Services\EisSubscriptionAccess;
 
 class EisConfigurationClient
 {
-    public function latest(string $token): EISConfigurationResponse
+    public function latest(string $token, int $businessId): EISConfigurationResponse
     {
+        app(EisSubscriptionAccess::class)->assertAllowed($businessId);
         $this->validateToken($token);
         for ($attempt = 1; $attempt <= 3; $attempt++) {
             try {
@@ -40,8 +42,9 @@ class EisConfigurationClient
         throw new \RuntimeException('EIS configuration request failed.');
     }
 
-    public function requestNewTerminalToken(string $token): object
+    public function requestNewTerminalToken(string $token, int $businessId): object
     {
+        app(EisSubscriptionAccess::class)->assertAllowed($businessId);
         $this->validateToken($token);
         // This endpoint rotates credentials: never retry, including after a lost response.
         return $this->envelope($this->request($token, 'request-new-terminal-token'));

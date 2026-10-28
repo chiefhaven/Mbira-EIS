@@ -2,6 +2,7 @@
 
 namespace Modules\EIS\Services\Http;
 
+use Modules\EIS\Services\EisSubscriptionAccess;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -10,6 +11,8 @@ class EisHealthService
 {
     public function isOnline(int $businessId, string $token): bool
     {
+        app(EisSubscriptionAccess::class)->assertAllowed($businessId);
+
         $base = rtrim(trim((string) config('eis.base_url')), '/');
         // Deployments configure either the host or the complete API base.
         $base = preg_replace('~/api/v1$~', '', $base);

@@ -14,6 +14,7 @@ use Modules\EIS\Services\Stock\StockInventoryClient;
 use Modules\EIS\Services\Stock\StockReconciliationService;
 use Modules\EIS\Services\Sync\ProductSyncService;
 use Modules\EIS\Services\Terminal\TerminalContext;
+use Modules\EIS\Services\EisSubscriptionAccess;
 
 class SyncProductsJob implements ShouldBeUnique, ShouldQueue
 {
@@ -40,6 +41,14 @@ class SyncProductsJob implements ShouldBeUnique, ShouldQueue
 
     public function handle(ProductSyncService $service, StockInventoryClient $stockClient): void
     {
+        if (!app(EisSubscriptionAccess::class)->allows($this->businessId)) {
+            Log::info('EIS product sync skipped because the business package does not include EIS.', [
+                'business_id' => $this->businessId,
+                'terminal_id' => $this->terminalId,
+            ]);
+            return;
+        }
+
         if (!$this->allTerminals && !$this->reconcileStock) {
             Log::info('Products syncing', [
                 'business_id' => $this->businessId,

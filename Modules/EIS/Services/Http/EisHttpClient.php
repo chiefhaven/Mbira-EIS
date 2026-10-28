@@ -4,6 +4,7 @@ namespace Modules\EIS\Services\Http;
 use Illuminate\Support\Facades\Http;
 use Modules\EIS\Exceptions\EisSaleException;
 use Modules\EIS\Services\Security\EisSignatureService;
+use Modules\EIS\Services\EisSubscriptionAccess;
 
 class EisHttpClient
 {   
@@ -23,7 +24,8 @@ class EisHttpClient
 
     public function post($endpoint, $payload, $setting)
     {
-        
+        app(EisSubscriptionAccess::class)->assertAllowed((int) ($setting->business_id ?? 0));
+
         if (! $this->health->isOnline($setting->business_id, $setting->jwt_token)) {
             throw new EisSaleException('EIS server is currently offline.');
         }
@@ -50,6 +52,8 @@ class EisHttpClient
 
     public function get($endpoint, $setting)
     {
+        app(EisSubscriptionAccess::class)->assertAllowed((int) ($setting->business_id ?? 0));
+
         $timestamp = time();
 
         $signature = hash_hmac('sha256', $endpoint . $timestamp, $setting->secret_key);
