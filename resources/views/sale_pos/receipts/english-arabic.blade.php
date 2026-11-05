@@ -39,7 +39,7 @@
     <div class="col-xs-6">
         <div style="display: flex; justify-content: center; align-items: center; margin-bottom: 19px;">
             <div class="print-red" style="font-size: 18px; font-weight: bold; ">
-                {{$receipt_details->invoice_no}}
+                {!! $receipt_details->invoice_no_prefix !!} {{$receipt_details->invoice_no}}
                 @include('sale_pos.receipts.partial.eis_invoice_number')
             </div>
         </div>
@@ -139,7 +139,7 @@
                         QUANTITY<br><span style="direction: rtl;">الكمية</span>
                     </th>
                     <th style=" text-align: center; font-weight: bold;">
-                        U.P<br><span style="direction: rtl;">سعر الوحدة</span>
+                        UNIT PRICE<br><span style="direction: rtl;">سعر الوحدة</span>
                     </th>
                     <th style=" text-align: center; font-weight: bold;">
                         TOTAL<br><span style="direction: rtl;">الإجمالي</span>
@@ -174,7 +174,7 @@
                         @endif
                     </td>
                     <td class="print-red" style="text-align: center;">{{$line['quantity']}} {{$line['units']}}</td>
-                    <td class="print-red" style=" text-align: center;">{{$line['unit_price_before_discount']}}</td>
+                    <td class="print-red" style=" text-align: center;">{{$line['unit_price_inc_tax']}}</td>
                     <td class="print-red" style=" text-align: center;">{{$line['line_total_exc_tax']}}</td>
                     <td class="print-red" style=" text-align: center;">
                         @if(!empty($line['tax']))
@@ -224,31 +224,21 @@
                         </div>
                         
                         <div style="margin-top: 15px;">
-                            <strong>PAYMENT REFERENCE:</strong>
-                            <span >
-                                @if(!empty($receipt_details->payments))
-                                    @foreach($receipt_details->payments as $payment)
-                                        {{$payment['method']}}: {{$payment['amount']}}
-                                    @endforeach
+                            <strong>AMOUNT IN WORDS</strong>
+                            <br>
+                            <span>
+                                @if(!empty($receipt_details->total_unformatted))
+                                    {{ app(\App\Utils\TransactionUtil::class)->numberToCurrencyWords($receipt_details->total_unformatted, 'riyal', 'halala', 'en') }}
+                                @endif
+                            </span>
+                            <br>
+                            <span>
+                                @if(!empty($receipt_details->total_unformatted))
+                                    {{ app(\App\Utils\TransactionUtil::class)->numberToCurrencyWords($receipt_details->total_unformatted, 'ريالًا و', ' هللة فقط', 'ar'); }}
                                 @endif
                             </span>
                         </div>
-                        
-                        <div>
-                            <strong>AMOUNT IN WORDS</strong>
-							<br>
-                        <span>
-                            @if(!empty($receipt_details->total_unformatted))
-                                {{ app(\App\Utils\TransactionUtil::class)->numberToCurrencyWords($receipt_details->total_unformatted, 'riyal', 'halala', 'en') }}
-                            @endif
-                        </span>
-                        <br>
-                        <span>
-                            @if(!empty($receipt_details->total_unformatted))
-							{{ app(\App\Utils\TransactionUtil::class)->numberToCurrencyWords($receipt_details->total_unformatted, 'ريالًا و', ' هللة فقط', 'ar'); }}
-                            @endif
-                        </span>
-                        </div>
+
                     </div>
                 </td>
                 <td>
@@ -257,67 +247,13 @@
                         <table class="table table-bordered" style="width: 98%; font-size: 11px; margin-bottom: 2px;">
                             <tbody>
                                 <tr>
-                                    <td  style="font-weight: bold; text-align: right; width: 30%;">Gross:</td>
-                                    <td class="print-red" style="text-align: center; width: 25%;">
-                                        @if(!empty($receipt_details->subtotal))
-                                            {{$receipt_details->subtotal}}
-                                        @endif
-                                    </td>
-                                    <td style="font-weight: bold; direction: rtl; text-align: right; width: 45%;">المبلغ الكلي:</td>
-                                </tr>
-                                
-                                <tr>
-                                    <td style="font-weight: bold; text-align: right;">Discount:</td>
-                                    <td class="print-red" style="text-align: center;">
-                                        @if(!empty($receipt_details->discount))
-                                            {{$receipt_details->discount}}
-										@else
-											@format_currency(0)
-                                        @endif
-                                    </td>
-                                    <td style="font-weight: bold; direction: rtl; text-align: right;">الخصم:</td>
-                                </tr>
-                                
-                                <tr>
-                                    <td style="font-weight: bold; text-align: right;">After Discount:</td>
-                                    <td class="print-red" style="text-align: center;">
-										@format_currency($receipt_details->subtotal_unformatted - $receipt_details->discount_amount_unformatted)
-                                    </td>
-                                    <td style="font-weight: bold; direction: rtl; text-align: right;">المبلغ بعد الخصم:</td>
-                                </tr>
-                            
-								@php
-                                    // Calculate total VAT (sum of all line taxes)
-                                    $total_vat = 0;
-                                    if (!empty($receipt_details->lines)) {
-                                        foreach ($receipt_details->lines as $line) {
-                                            if (!empty($line['tax']) && !empty($line['quantity'])) {
-                                                $total_vat += $line['tax'] * $line['quantity'];
-                                            }
-                                        }
-                                    }
-                                @endphp
-                                <tr>
-                                    <td style="font-weight: bold; text-align: right;">Total VAT:</td>
-                                    <td class="print-red" style="text-align: center;">
-                                        @format_currency($total_vat ?? 0)
-                                    </td>
-                                    <td style="font-weight: bold; direction: rtl; text-align: right;">إجمالي ضريبة القيمة المضافة:</td>
-                                </tr>
-                                <tr>
-                                    <td style="font-weight: bold; text-align: right;">Order Tax:</td>
-                                    <td class="print-red" style=" text-align: center;">
-										@if(!empty($receipt_details->tax))
-                                            {{ $receipt_details->tax }} 
-										@else
-											@format_currency(0)
-										@endif
-                                    </td>
-                                    <td style="font-weight: bold; direction: rtl; text-align: right;">ضريبة الطلب:</td>
+                                    <td style="font-weight: bold; text-align: right;">Subtotal:</td>
+                                    <td class="print-red" style="text-align: center;">{{$receipt_details->subtotal}}</td>
+                                    <td style="font-weight: bold; direction: rtl; text-align: right;">المجموع الفرعي:</td>
                                 </tr>
 								<tr class="bg-net-amount">
                                     <td style=" font-weight: bold; text-align: right;">
-                                        NET AMOUNT
+                                        TOTAL:
                                     </td>
                                     <td style=" text-align: center;">
                                         {{ $receipt_details->total }}
@@ -326,28 +262,29 @@
                                         المبلغ الصافي (مجموع كل شيء):
                                     </td>
                                 </tr>
-                                
-                                <tr>
-                                    <td style=" font-weight: bold; text-align: right;">Paid Amount:</td>
-                                    <td class="print-red" style=" text-align: center;">
-                                        @if(!empty($receipt_details->total_paid))
-                                            {{$receipt_details->total_paid}}
-                                        @endif
-                                    </td>
-                                    <td style=" font-weight: bold; direction: rtl; text-align: right;">المبلغ المدفوع:</td>
-                                </tr>
-                                
-                                <tr>
-                                    <td style=" font-weight: bold; text-align: right;">Due Amount:</td>
-                                    <td class="print-red" style="text-align: center;">
-                                        @if(!empty($receipt_details->total_due))
-                                            {{$receipt_details->total_due}}
-										@else
-											@format_currency(0)
-                                        @endif
-                                    </td>
-                                    <td style="font-weight: bold; direction: rtl; text-align: right;">المبلغ المستحق:</td>
-                                </tr>
+                                @if(empty($receipt_details->hide_price))
+                                    <tr>
+                                        <td style="font-weight: bold; text-align: right;">VAT:</td>
+                                        <td class="print-red" style="text-align: center;">{{$receipt_details->vat_amount}}</td>
+                                        <td style="font-weight: bold; direction: rtl; text-align: right;">ضريبة القيمة المضافة:</td>
+                                    </tr>
+                                @endif
+                                @if(!empty($receipt_details->payments))
+                                    @foreach($receipt_details->payments as $payment)
+                                        <tr>
+                                            <td style="font-weight: bold; text-align: right;">{{$payment['method']}} ({{$payment['date']}}):</td>
+                                            <td class="print-red" style="text-align: center;">{{$payment['amount']}}</td>
+                                            <td></td>
+                                        </tr>
+                                    @endforeach
+                                @endif
+                                @if(!empty($receipt_details->total_paid))
+                                    <tr>
+                                        <td style="font-weight: bold; text-align: right;">Total Paid:</td>
+                                        <td class="print-red" style="text-align: center;">{{$receipt_details->total_paid}}</td>
+                                        <td></td>
+                                    </tr>
+                                @endif
                                
                             </tbody>
                         </table>

@@ -1487,7 +1487,6 @@ return [
     'payment_details' => 'Payment details',
     'payments_recovered_for' => 'Payments recovered for',
     'show_base_unit_details' => 'Show base unit details (If applicable)',
-    'tax_summary_label' => 'Tax summary label',
     'discounted_unit_price_label' => 'Discounted unit price label',
     'format_1' => 'Format 1',
     'format_2' => 'Format 2',

@@ -995,6 +995,13 @@ class TransactionUtil extends Util
     public function getReceiptDetails($transaction_id, $location_id, $invoice_layout, $business_details, $location_details, $receipt_printer_type)
     {
         $il = $invoice_layout;
+        $append_colon = static function ($label) {
+            if (empty($label) || preg_match('/:\s*$/', strip_tags($label))) {
+                return $label;
+            }
+
+            return rtrim($label).':';
+        };
 
         $transaction = Transaction::with('eisSale')->find($transaction_id);
         $transaction_type = $transaction->type;
@@ -1144,7 +1151,7 @@ class TransactionUtil extends Util
         $output['customer_tax_label'] = '';
         $output['customer_custom_fields'] = '';
         if ($il->show_customer == 1) {
-            $output['customer_label'] = ! empty($il->customer_label) ? $il->customer_label : '';
+            $output['customer_label'] = $append_colon(! empty($il->customer_label) ? $il->customer_label : '');
             $output['customer_name'] = ! empty($customer->name) ? $customer->name : $customer->supplier_business_name;
             $output['customer_mobile'] = $customer->mobile;
 
@@ -1160,7 +1167,7 @@ class TransactionUtil extends Util
             }
 
             $output['customer_tax_number'] = $customer->tax_number;
-            $output['customer_tax_label'] = ! empty($il->client_tax_label) ? $il->client_tax_label : '';
+            $output['customer_tax_label'] = $append_colon(! empty($il->client_tax_label) ? $il->client_tax_label : '');
 
             $temp = [];
             $customer_custom_fields_settings = ! empty($il->contact_custom_fields) ? $il->contact_custom_fields : [];
@@ -1303,7 +1310,8 @@ class TransactionUtil extends Util
             }
         }
 
-        $output['date_label'] = $il->date_label;
+        $output['invoice_no_prefix'] = $append_colon($output['invoice_no_prefix']);
+        $output['date_label'] = $append_colon($il->date_label);
         if (blank($il->date_time_format)) {
             $output['invoice_date'] = $this->format_date($transaction->transaction_date, true, $business_details);
         } else {
@@ -1317,7 +1325,7 @@ class TransactionUtil extends Util
         $output['hide_price'] = ! empty($il->common_settings['hide_price']) ? true : false;
 
         if (! empty($il->common_settings['show_due_date']) && $transaction->payment_status != 'paid') {
-            $output['due_date_label'] = ! empty($il->common_settings['due_date_label']) ? $il->common_settings['due_date_label'] : '';
+            $output['due_date_label'] = $append_colon(! empty($il->common_settings['due_date_label']) ? $il->common_settings['due_date_label'] : '');
             $due_date = $transaction->due_date;
             if (! empty($due_date)) {
                 if (blank($il->date_time_format)) {
@@ -1339,6 +1347,7 @@ class TransactionUtil extends Util
 
         $output['lines'] = [];
         $total_exempt = 0;
+        $total_line_taxes = 0;
         if (in_array($transaction_type, ['sell', 'sales_order'])) {
             $sell_line_relations = ['modifiers', 'sub_unit', 'warranties'];
 
@@ -1362,14 +1371,12 @@ class TransactionUtil extends Util
 
             $output['show_base_unit_details'] = ! empty($il->common_settings['show_base_unit_details']);
 
-            $output['tax_summary_label'] = $il->common_settings['tax_summary_label'] ?? '';
             $details = $this->_receiptDetailsSellLines($lines, $il, $business_details);
 
             $output['lines'] = $details['lines'];
             $output['taxes'] = [];
             $total_quantity = 0;
             $total_line_discount = 0;
-            $total_line_taxes = 0;
             $subtotal_exc_tax = 0;
             $unique_items = [];
             foreach ($details['lines'] as $line) {
@@ -1415,7 +1422,6 @@ class TransactionUtil extends Util
         } elseif ($transaction_type == 'sell_return') {
             $parent_sell = Transaction::find($transaction->return_parent_id);
             $lines = $parent_sell->sell_lines;
-            $total_line_taxes = 0;
             foreach ($lines as $key => $value) {
                 if (! empty($value->sub_unit_id)) {
                     $formated_sell_line = $this->recalculateSellLineTotals($business_details->id, $value);
@@ -1503,6 +1509,7 @@ class TransactionUtil extends Util
         }
         $output['tax_label'] .= ':';
         $output['tax'] = ($transaction->tax_amount != 0) ? $this->num_f($transaction->tax_amount, $show_currency, $business_details) : 0;
+        $output['vat_amount'] = $this->num_f($total_line_taxes + $transaction->tax_amount, $show_currency, $business_details);
 
         if ($transaction->tax_amount != 0 && $tax->is_tax_group) {
             $transaction_group_tax_details = $this->groupTaxDetails($tax, $transaction->tax_amount);
@@ -1544,9 +1551,9 @@ class TransactionUtil extends Util
             $due = $transaction->final_total - $paid_amount;
 
             $output['total_paid'] = ($paid_amount == 0) ? 0 : $this->num_f($paid_amount, $show_currency, $business_details);
-            $output['total_paid_label'] = $il->paid_label;
+            $output['total_paid_label'] = $append_colon($il->paid_label);
             $output['total_due'] = ($due == 0) ? 0 : $this->num_f($due, $show_currency, $business_details);
-            $output['total_due_label'] = $il->total_due_label;
+            $output['total_due_label'] = $append_colon($il->total_due_label);
 
             if ($il->show_previous_bal == 1) {
                 $all_due = $this->getContactDue($transaction->contact_id);
@@ -1651,11 +1658,11 @@ class TransactionUtil extends Util
         $output['additional_notes'] = $transaction->additional_notes;
         $output['footer_text'] = $invoice_layout->footer_text .
             '<br>
-            <small style="font-size:6px; color:#333333; line-height:1.4;">
-                POS & ERP Supported by <br>
-                <strong>HavenPlus Technologies Ltd.</strong><br>
-                Contact: +265 882 547 343
-            </small>'.
+            <div style="text-align:center; font-size:9px; color:#333333; line-height:1.5; margin-top:4px;">
+                <div>POS &amp; ERP supported by</div>
+                <div><strong>HavenPlus Technologies Ltd.</strong></div>
+                <div>Contact: +265 882 547 343</div>
+            </div>'.
             ($is_eis_receipt ? "<br>\n".'<span class="eis-legal-marker" style="font-size:12px; font-weight:normal; line-height:1.4;">****End of Legal Receipt****</span>' : '');
 
         //Barcode related information.
@@ -1694,7 +1701,7 @@ class TransactionUtil extends Util
                     $qr_code_details[] = $is_label_enabled ? $il->invoice_no_prefix.': '.$transaction->invoice_no : $transaction->invoice_no;
                 }
                 if (in_array('invoice_datetime', $qr_code_fields)) {
-                    $qr_code_details[] = $is_label_enabled ? $output['date_label'].': '.$output['invoice_date'] : $output['invoice_date'];
+                    $qr_code_details[] = $is_label_enabled ? $output['date_label'].' '.$output['invoice_date'] : $output['invoice_date'];
                 }
                 if (in_array('subtotal', $qr_code_fields)) {
                     $qr_code_details[] = $is_label_enabled ? $output['subtotal_label'].' '.$output['subtotal'] : $output['subtotal'];

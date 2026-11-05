@@ -90,7 +90,7 @@
 						<img style="width: 100%;margin-bottom: 10px;" src="{{$receipt_details->letter_head}}">
 					</div>
 				@endif
-			<div class="textbox-info receipt-meta-first">
+			<div class="textbox-info receipt-meta-first receipt-left-aligned">
 				<p class="f-left"><strong>{!! $receipt_details->invoice_no_prefix !!}</strong></p>
 				<p class="f-right">
 					{{$receipt_details->invoice_no}}
@@ -101,7 +101,7 @@
 					@include('sale_pos.receipts.partial.eis_invoice_number')
 				</div>
 			@endif
-			<div class="textbox-info">
+			<div class="textbox-info receipt-left-aligned">
 				<p class="f-left"><strong>{!! $receipt_details->date_label !!}</strong></p>
 				<p class="f-right">
 					{{$receipt_details->invoice_date}}
@@ -243,7 +243,7 @@
 			@endif
 
 			<!-- customer info -->
-			<div class="textbox-info receipt-customer">
+			<div class="textbox-info receipt-customer receipt-left-aligned">
 				<p><strong>
 					{{$receipt_details->customer_label ?? ''}}
 				</strong></p>
@@ -266,7 +266,7 @@
 			@endif
 			
 			@if(!empty($receipt_details->customer_tax_label))
-				<div class="textbox-info">
+				<div class="textbox-info receipt-left-aligned">
 					<p class="f-left"><strong>
 						{{ $receipt_details->customer_tax_label }}
 					</strong></p>
@@ -377,7 +377,7 @@
                         </th>
                         @if(empty($receipt_details->hide_price))
                         <th class="unit_price text-right">
-                        	{{$receipt_details->table_unit_price_label}}
+						{{$receipt_details->table_unit_price_label}}
                         </th>
                         @if(!empty($receipt_details->discounted_unit_price_label))
 							<th class="text-right">
@@ -442,7 +442,7 @@
                             </small>
                             @endif</td>
 	                        @if(empty($receipt_details->hide_price))
-	                        <td class="unit_price text-right">{{$line['unit_price_before_discount']}}</td>
+	                        <td class="unit_price text-right">{{$line['unit_price_inc_tax']}}</td>
 
 	                        @if(!empty($receipt_details->discounted_unit_price_label))
 								<td class="text-right">
@@ -511,10 +511,10 @@
 			@endif
 			@if(empty($receipt_details->hide_price))
                 <div class="flex-box">
-                    <p class="left text-right sub-headings">
-                    	{!! $receipt_details->subtotal_label !!}
+                    <p class="left text-right">
+                        Subtotal:
                     </p>
-                    <p class="width-50 text-right sub-headings">
+                    <p class="width-50 text-right">
                     	{{$receipt_details->subtotal}}
                     </p>
                 </div>
@@ -593,17 +593,6 @@
 					</div>
 				@endif
 
-				@if( !empty($receipt_details->tax) )
-					<div class="flex-box">
-						<p class="width-50 text-right">
-							{!! $receipt_details->tax_label !!}
-						</p>
-						<p class="width-50 text-right">
-							(+) {{$receipt_details->tax}}
-						</p>
-					</div>
-				@endif
-
 				@if( $receipt_details->round_off_amount > 0)
 					<div class="flex-box">
 						<p class="width-50 text-right">
@@ -615,14 +604,20 @@
 					</div>
 				@endif
 
-				<div class="flex-box grand-total">
-					<p class="width-50 text-right sub-headings">
-						{!! $receipt_details->total_label !!}
+				<div class="flex-box">
+					<p class="width-50 text-right">
+						TOTAL:
 					</p>
-					<p class="width-50 text-right sub-headings">
+					<p class="width-50 text-right">
 						{{$receipt_details->total}}
 					</p>
 				</div>
+				@if(empty($receipt_details->hide_price))
+					<div class="flex-box">
+						<p class="width-50 text-right">VAT:</p>
+						<p class="width-50 text-right">{{$receipt_details->vat_amount}}</p>
+					</div>
+				@endif
 				@if(!empty($receipt_details->total_in_words))
 				<p colspan="2" class="text-right mb-0">
 					<small>
@@ -633,7 +628,7 @@
 				@if(!empty($receipt_details->payments))
 					@foreach($receipt_details->payments as $payment)
 						<div class="flex-box">
-							<p class="width-50 text-right">{{$payment['method']}} ({{$payment['date']}}) </p>
+							<p class="width-50 text-right">{{$payment['method']}} ({{$payment['date']}}):</p>
 							<p class="width-50 text-right">{{$payment['amount']}}</p>
 						</div>
 					@endforeach
@@ -643,7 +638,7 @@
 				@if(!empty($receipt_details->total_paid))
 					<div class="flex-box">
 						<p class="width-50 text-right">
-							{!! $receipt_details->total_paid_label !!}
+							Total Paid:
 						</p>
 						<p class="width-50 text-right">
 							{{$receipt_details->total_paid}}
@@ -684,23 +679,6 @@
 				@endif
 				
 			@endif
-			@if(empty($receipt_details->hide_price) && !empty($receipt_details->tax_summary_label) )
-				<!-- tax -->
-				@if(!empty($receipt_details->taxes))
-					<table class="receipt-tax-summary width-100 table-f-12">
-						<tr>
-							<th colspan="2" class="text-center">{{$receipt_details->tax_summary_label}}</th>
-	            		</tr>
-	            		@foreach($receipt_details->taxes as $key => $val)
-	            			<tr>
-	            				<td class="left">{{$key}}</td>
-	            				<td class="right">{{$val}}</td>
-	            			</tr>
-	            		@endforeach
-	            	</table>
-	            @endif
-            @endif
-
             @if(!empty($receipt_details->additional_notes))
 	            <p class="centered receipt-notes">
 	            	{!! nl2br($receipt_details->additional_notes) !!}
@@ -749,6 +727,8 @@
 .ticket p { margin: 0; }
 .ticket img { max-width: 100%; height: auto; }
 .ticket .f-8 { font-size: 8px !important; }
+.ticket, .ticket * { font-weight: 400 !important; }
+
 .ticket .centered { text-align: center; }
 .ticket .text-right { text-align: right; }
 .ticket .text-center { text-align: center; }
@@ -809,16 +789,21 @@
 .ticket .textbox-info p.f-left { flex: 0 0 auto; color: var(--receipt-muted); }
 .ticket .textbox-info p.f-left strong { font-weight: 600; }
 .ticket .textbox-info p.f-right { flex: 1 1 auto; text-align: right; font-weight: 600; overflow-wrap: anywhere; }
+.ticket .receipt-left-aligned { justify-content: flex-start; text-align: left; }
+.ticket .receipt-left-aligned p.f-right { text-align: left; }
 .ticket .textbox-info > p.centered { flex: 1 1 100%; }
 .ticket .receipt-meta-first { margin-top: 2px; }
-.ticket .receipt-eis-number { font-weight: 600; text-align: right; overflow-wrap: anywhere; }
+.ticket .receipt-eis-number { justify-content: flex-start; font-weight: 600; text-align: left; overflow-wrap: anywhere; }
 .ticket .receipt-eis-number br { display: none; }
 .ticket .receipt-eis-number > span { display: contents; }
 .ticket .receipt-eis-number strong { flex: 0 0 auto; color: var(--receipt-muted); font-weight: 600; }
 .ticket .receipt-customer {
 	display: block;
 	margin-top: 6px;
+	text-align: left;
 }
+.ticket .receipt-customer .bw,
+.ticket .receipt-customer .bw * { text-align: left !important; }
 .ticket .receipt-customer strong { color: var(--receipt-muted); font-weight: 600; }
 
 /* Items */

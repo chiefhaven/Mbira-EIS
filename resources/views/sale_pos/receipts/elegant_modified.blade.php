@@ -194,7 +194,7 @@
 							{{$line['quantity']}} {{$line['units']}}
 						</td>
 						<td class="text-right">
-							{{$line['unit_price_exc_tax']}}
+							{{$line['unit_price_inc_tax']}}
 						</td>
 						<td class="text-right">
 							{{$line['line_total']}}
@@ -224,7 +224,7 @@
 									{{$modifier['quantity']}} {{$modifier['units']}}
 								</td>
 								<td class="text-right">
-									{{$modifier['unit_price_exc_tax']}}
+									{{$modifier['unit_price_inc_tax']}}
 								</td>
 								<td class="text-right">
 									{{$modifier['line_total']}}
@@ -260,9 +260,8 @@
 			@if(!empty($receipt_details->payments))
 				@foreach($receipt_details->payments as $payment)
 					<tr>
-						<td>{{$payment['method']}}</td>
+						<td>{{$payment['method']}} ({{$payment['date']}}):</td>
 						<td>{{$payment['amount']}}</td>
-						<td>{{$payment['date']}}</td>
 					</tr>
 				@endforeach
 			@endif
@@ -294,16 +293,6 @@
 					</tr>
 				@endif
 
-				<!-- Tax -->
-				@if(!empty($receipt_details->taxes))
-					@foreach($receipt_details->taxes as $k => $v)
-						<tr class="color-555">
-							<td>{{$k}}</td>
-							<td class="text-right">(+) {{$v}}</td>
-						</tr>
-					@endforeach
-				@endif
-
 				<!-- Discount -->
 				@if( !empty($receipt_details->discount) )
 					<tr class="color-555">
@@ -317,30 +306,6 @@
 					</tr>
 				@endif
 
-				@if(!empty($receipt_details->group_tax_details))
-					@foreach($receipt_details->group_tax_details as $key => $value)
-						<tr class="color-555">
-							<td>
-								{!! $key !!}
-							</td>
-							<td class="text-right">
-								(+) {{$value}}
-							</td>
-						</tr>
-					@endforeach
-				@else
-					@if( !empty($receipt_details->tax) )
-						<tr class="color-555">
-							<td>
-								{!! $receipt_details->tax_label !!}
-							</td>
-							<td class="text-right">
-								(+) {{$receipt_details->tax}}
-							</td>
-						</tr>
-					@endif
-				@endif
-				
 				<!-- Total -->
 				<tr>
 					<th style="background-color: #357ca5 !important; color: white !important" class="font-23 padding-10">
@@ -352,6 +317,12 @@
 				</tr>
 			</tbody>
         </table>
+		@if(empty($receipt_details->hide_price) && !empty($receipt_details->vat_amount))
+			<div class="border-bottom">
+				VAT:
+				<span class="pull-right">{{$receipt_details->vat_amount}}</span>
+			</div>
+		@endif
 	</div>
 </div>
 

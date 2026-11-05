@@ -416,7 +416,7 @@
 	                        		<p class="text-left width-60 quantity m-0 bw" style="direction: ltr;">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
 	                        			{{$line['quantity']}} 
 	                        			@if(empty($receipt_details->hide_price))
-	                        			x {{$line['unit_price_before_discount']}}
+												x {{$line['unit_price_inc_tax']}}
 	                        			
 	                        			@if(!empty($line['total_line_discount']) && $line['total_line_discount'] != 0)
 	                        				- {{$line['total_line_discount']}}
@@ -487,10 +487,10 @@
 			@if(empty($receipt_details->hide_price))
             <div class="flex-box">
                 <p class="left text-left">
-                	<strong>{!! $receipt_details->subtotal_label !!}</strong>
+                    Subtotal:
                 </p>
                 <p class="width-50 text-right">
-                	<strong>{{$receipt_details->subtotal}}</strong>
+                    {{$receipt_details->subtotal}}
                 </p>
             </div>
 
@@ -568,17 +568,6 @@
 				</div>
 			@endif
 
-			@if( !empty($receipt_details->tax) )
-				<div class="flex-box">
-					<p class="width-50 text-left">
-						{!! $receipt_details->tax_label !!}
-					</p>
-					<p class="width-50 text-right">
-						(+) {{$receipt_details->tax}}
-					</p>
-				</div>
-			@endif
-
 			@if( $receipt_details->round_off_amount > 0)
 				<div class="flex-box">
 					<p class="width-50 text-left">
@@ -592,12 +581,18 @@
 
 			<div class="flex-box">
 				<p class="width-50 text-left">
-					<strong>{!! $receipt_details->total_label !!}</strong>
+					TOTAL:
 				</p>
 				<p class="width-50 text-right">
-					<strong>{{$receipt_details->total}}</strong>
+					{{$receipt_details->total}}
 				</p>
 			</div>
+			@if(empty($receipt_details->hide_price))
+				<div class="flex-box">
+					<p class="width-50 text-left">VAT:</p>
+					<p class="width-50 text-right">{{$receipt_details->vat_amount}}</p>
+				</div>
+			@endif
 			@if(!empty($receipt_details->total_in_words))
 				<p colspan="2" class="text-right mb-0">
 					<small>
@@ -608,7 +603,7 @@
 			@if(!empty($receipt_details->payments))
 				@foreach($receipt_details->payments as $payment)
 					<div class="flex-box">
-						<p class="width-50 text-left">{{$payment['method']}} ({{$payment['date']}}) </p>
+						<p class="width-50 text-left">{{$payment['method']}} ({{$payment['date']}}):</p>
 						<p class="width-50 text-right">{{$payment['amount']}}</p>
 					</div>
 				@endforeach
@@ -617,7 +612,7 @@
 				@if(!empty($receipt_details->total_paid))
 					<div class="flex-box">
 						<p class="width-50 text-left">
-							{!! $receipt_details->total_paid_label !!}
+							Total Paid:
 						</p>
 						<p class="width-50 text-right">
 							{{$receipt_details->total_paid}}
@@ -658,24 +653,6 @@
 					</div>
 				@endif
 			@endif
-            <div class="border-bottom width-100">&nbsp;</div>
-            @if(empty($receipt_details->hide_price) && !empty($receipt_details->tax_summary_label) )
-	            <!-- tax -->
-	            @if(!empty($receipt_details->taxes))
-	            	<table class="border-bottom width-100 table-f-12">
-	            		<tr>
-	            			<th colspan="2" class="text-center">{{$receipt_details->tax_summary_label}}</th>
-	            		</tr>
-	            		@foreach($receipt_details->taxes as $key => $val)
-	            			<tr>
-	            				<td class="left">{{$key}}</td>
-	            				<td class="right">{{$val}}</td>
-	            			</tr>
-	            		@endforeach
-	            	</table>
-	            @endif
-            @endif
-
             @if(!empty($receipt_details->additional_notes))
 	            <p class="centered" >
 	            	{!! nl2br($receipt_details->additional_notes) !!}
@@ -710,6 +687,8 @@
 body {
 	color: #000000;
 }
+.ticket, .ticket * { font-weight: 400 !important; }
+
 @media print {
 	* {
     	font-size: 12px;

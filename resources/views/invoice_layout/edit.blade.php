@@ -932,13 +932,6 @@
           </div>
         </div>
 
-        <div class="col-sm-3">
-          <div class="form-group">
-            {!! Form::label('tax_summary_label', __('lang_v1.tax_summary_label') . ':' ) !!}
-            {!! Form::text('common_settings[tax_summary_label]', !empty($invoice_layout->common_settings['tax_summary_label']) ? $invoice_layout->common_settings['tax_summary_label'] : null, ['class' => 'form-control', 'placeholder' => __('lang_v1.tax_summary_label'), 'id' => 'tax_summary_label' ]); !!}
-          </div>
-        </div>
-
       </div>
     </div>
   </div>

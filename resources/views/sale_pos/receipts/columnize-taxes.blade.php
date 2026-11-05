@@ -502,7 +502,7 @@
                             @endif
 						</td>
 						<td class="text-right">
-							{{$line['unit_price_before_discount']}}
+							{{$line['unit_price_inc_tax']}}
 						</td>
 						@if(!empty($receipt_details->discounted_unit_price_label))
 							<td class="text-right">
@@ -718,9 +718,8 @@
 			@if(!empty($receipt_details->payments))
 				@foreach($receipt_details->payments as $payment)
 					<tr>
-						<td>{{$payment['method']}}</td>
+						<td>{{$payment['method']}} ({{$payment['date']}}):</td>
 						<td>{{$payment['amount']}}</td>
-						<td>{{$payment['date']}}</td>
 					</tr>
 				@endforeach
 			@endif
@@ -835,30 +834,6 @@
 					</tr>
 				@endif
 
-				@if(!empty($receipt_details->group_tax_details))
-					@foreach($receipt_details->group_tax_details as $key => $value)
-						<tr >
-							<td>
-								{!! $key !!}
-							</td>
-							<td class="text-right">
-								(+) {{$value}}
-							</td>
-						</tr>
-					@endforeach
-				@else
-					@if( !empty($receipt_details->tax) )
-						<tr >
-							<td>
-								{!! $receipt_details->tax_label !!}
-							</td>
-							<td class="text-right">
-								(+) {{$receipt_details->tax}}
-							</td>
-						</tr>
-					@endif
-				@endif
-				
 				@if( $receipt_details->round_off_amount > 0)
 					<tr >
 						<td>
@@ -891,24 +866,12 @@
 	</div>
 </div>
 
-<div class="border-bottom col-md-12">
-    @if(empty($receipt_details->hide_price) && !empty($receipt_details->tax_summary_label) )
-        <!-- tax -->
-        @if(!empty($receipt_details->taxes))
-        	<table class="table table-slim table-bordered">
-        		<tr>
-        			<th colspan="2" class="text-center">{{$receipt_details->tax_summary_label}}</th>
-        		</tr>
-        		@foreach($receipt_details->taxes as $key => $val)
-        			<tr>
-        				<td class="text-center"><b>{{$key}}</b></td>
-        				<td class="text-center">{{$val}}</td>
-        			</tr>
-        		@endforeach
-        	</table>
-        @endif
-    @endif
-</div>
+@if(empty($receipt_details->hide_price) && !empty($receipt_details->vat_amount))
+	<div class="border-bottom col-md-12">
+		VAT:
+		<span class="pull-right">{{$receipt_details->vat_amount}}</span>
+	</div>
+@endif
 
 @if(!empty($receipt_details->additional_notes))
 	<div class="row ">
