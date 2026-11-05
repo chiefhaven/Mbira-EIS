@@ -234,8 +234,12 @@ class InvoiceLayoutController extends Controller
             $input['qr_code_fields'] = ! empty($request->input('qr_code_fields')) ? json_encode($request->input('qr_code_fields')) : null;
 
             InvoiceLayout::where('id', $id)
-                        ->where('business_id', $business_id)
-                        ->update($input);
+                ->where('business_id', $business_id)
+                ->update($input);
+            if ((int) $id === 5
+                && InvoiceLayout::whereKey(5)->where('business_id', $business_id)->exists()) {
+                InvoiceLayout::copySampleSettingsToAllBusinessDefaults();
+            }
             $output = ['success' => 1,
                 'msg' => __('invoice.layout_updated_success'),
             ];

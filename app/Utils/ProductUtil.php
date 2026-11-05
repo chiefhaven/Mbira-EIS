@@ -479,7 +479,9 @@ class ProductUtil extends Util
 
         $query = Variation::join('products AS p', 'variations.product_id', '=', 'p.id')
                 ->join('product_variations AS pv', 'variations.product_variation_id', '=', 'pv.id')
-                ->leftjoin('variation_location_details AS vld', 'variations.id', '=', 'vld.variation_id')
+                ->leftjoin('variation_location_details AS vld', function ($join) {
+                    $join->on('variations.id', '=', 'vld.variation_id')->whereNull('vld.deleted_at');
+                })
                 ->leftjoin('units', 'p.unit_id', '=', 'units.id')
                 ->leftjoin('units as u', 'p.secondary_unit_id', '=', 'u.id')
                 ->leftjoin('brands', function ($join) {
@@ -1653,7 +1655,7 @@ class ProductUtil extends Util
                 ->leftjoin(
                     'variation_location_details AS VLD',
                     function ($join) use ($location_id) {
-                        $join->on('variations.id', '=', 'VLD.variation_id');
+                        $join->on('variations.id', '=', 'VLD.variation_id')->whereNull('VLD.deleted_at');
 
                         //Include Location
                         if (! empty($location_id)) {
@@ -1801,7 +1803,9 @@ class ProductUtil extends Util
     {
         $query = Variation::join('products as p', 'p.id', '=', 'variations.product_id')
                   ->join('units', 'p.unit_id', '=', 'units.id')
-                  ->join('variation_location_details as vld', 'variations.id', '=', 'vld.variation_id')
+                  ->join('variation_location_details as vld', function ($join) {
+                      $join->on('variations.id', '=', 'vld.variation_id')->whereNull('vld.deleted_at');
+                  })
                   ->join('business_locations as l', 'vld.location_id', '=', 'l.id')
                   ->leftjoin('categories as c', 'p.category_id', '=', 'c.id')
                   ->join('product_variations as pv', 'variations.product_variation_id', '=', 'pv.id')
@@ -2258,7 +2262,9 @@ class ProductUtil extends Util
     {
         $query = Variation::leftjoin('products as p', 'p.id', '=', 'variations.product_id')
                     ->leftjoin('units', 'p.unit_id', '=', 'units.id')
-                    ->leftjoin('variation_location_details as vld', 'variations.id', '=', 'vld.variation_id')
+                    ->leftjoin('variation_location_details as vld', function ($join) {
+                        $join->on('variations.id', '=', 'vld.variation_id')->whereNull('vld.deleted_at');
+                    })
                     ->leftjoin('product_variations as pv', 'variations.product_variation_id', '=', 'pv.id')
                     ->where('p.business_id', $business_id)
                     ->where('vld.location_id', $location_id);

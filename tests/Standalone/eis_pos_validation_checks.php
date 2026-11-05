@@ -50,7 +50,7 @@ $schema->create('contacts', function (Blueprint $t) {
 });
 $schema->create('eis_settings', function (Blueprint $t) {
     $t->increments('id'); $t->integer('business_id'); $t->boolean('status'); $t->string('jwt_token');
-    $t->integer('location_id')->default(2);
+    $t->integer('location_id')->default(2); $t->softDeletes();
 });
 foreach (['business_locations', 'eis_configurations', 'eis_terminal_configurations'] as $name) {
     $schema->create($name, function (Blueprint $t) use ($name) {
@@ -60,6 +60,9 @@ foreach (['business_locations', 'eis_configurations', 'eis_terminal_configuratio
         } else {
             $t->integer('business_id');
             $t->integer($name === 'business_locations' ? 'default_eis_setting_id' : 'eis_setting_id');
+        }
+        if ($name !== 'business_locations') {
+            $t->softDeletes();
         }
     });
 }

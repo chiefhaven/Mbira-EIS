@@ -101,8 +101,8 @@ class ConfigurationValidator
 
         // Validate phone number
         if (isset($terminalConfig->phoneNumber) && !empty($terminalConfig->phoneNumber)) {
-            // Adjust regex as needed for your phone number format
-            if (!preg_match('/^[0-9+\-\s()]{10,15}$/', $terminalConfig->phoneNumber)) {
+            // Malawi landlines can be as short as 8 digits (e.g. 01830704).
+            if (!is_string($terminalConfig->phoneNumber) || !preg_match('/^[0-9+\-\s()]{7,20}$/', $terminalConfig->phoneNumber)) {
                 throw new ValidationException('Invalid phone number format');
             }
         }

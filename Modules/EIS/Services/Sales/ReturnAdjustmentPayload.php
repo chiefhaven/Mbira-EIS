@@ -65,6 +65,7 @@ final class ReturnAdjustmentPayload
         $header = array_intersect_key($original['invoiceHeader'] ?? [], array_flip(['invoiceNumber', 'invoiceDateTime',
             'sellerTIN', 'buyerTIN', 'buyerName', 'buyerAuthorizationCode', 'siteId', 'globalConfigVersion',
             'taxpayerConfigVersion', 'terminalConfigVersion', 'isExport', 'isReliefSupply', 'vat5CertificateDetails', 'paymentMethod']));
+        $header['buyerName'] = trim((string) ($header['buyerName'] ?? '')) ?: 'Walk-in Customer';
         foreach (['invoiceDateTime', 'sellerTIN', 'siteId', 'globalConfigVersion', 'taxpayerConfigVersion', 'terminalConfigVersion'] as $key) {
             if (!isset($header[$key])) { throw new \InvalidArgumentException('Original fiscal invoice header is incomplete.'); }
         }

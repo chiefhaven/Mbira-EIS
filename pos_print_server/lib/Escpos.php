@@ -72,13 +72,21 @@ class Escpos
         }
 
         /* Shop name */
+        $businessName = $data->business_name ?? '';
+        $locationName = $data->location_name ?? '';
         if (!empty($data->display_name)) {
-            $this->printer->text($data->display_name);
+            $this->printer->text(!empty($businessName) ? $businessName : (!empty($locationName) ? $locationName : $data->display_name));
             $this->printer->feed();
         }
 
         /* Address */
         $this->printer->setTextSize(1, 1);
+
+        if (!empty($data->display_name) && !empty($businessName) && !empty($locationName)) {
+            $this->printer->setEmphasis(false);
+            $this->printer->text($locationName);
+            $this->printer->feed();
+        }
 
         if (!empty($data->address)) {
             $this->printer->text($data->address);

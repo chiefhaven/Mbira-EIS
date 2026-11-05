@@ -46,7 +46,10 @@
 		<!-- Shop & Location Name  -->
 		@if(!empty($receipt_details->display_name))
 			<p>
-				{{$receipt_details->display_name}}<br/>
+				{{$receipt_details->business_name ?: $receipt_details->location_name}}<br/>
+				@if(!empty($receipt_details->business_name) && !empty($receipt_details->location_name))
+					<small>{{$receipt_details->location_name}}</small><br/>
+				@endif
 				{!! $receipt_details->address !!}
 
 				@if(!empty($receipt_details->contact))

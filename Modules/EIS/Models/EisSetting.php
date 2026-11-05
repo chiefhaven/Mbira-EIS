@@ -3,10 +3,13 @@
 namespace Modules\EIS\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Carbon;
 
 class EisSetting extends Model
 {
+    use SoftDeletes;
+
     public function configuration()
     {
         return $this->hasOne(EisConfiguration::class, 'eis_setting_id');

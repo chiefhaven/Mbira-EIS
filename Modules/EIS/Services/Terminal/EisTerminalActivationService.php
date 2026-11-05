@@ -70,8 +70,14 @@ class EisTerminalActivationService
                 if ($terminalId && $secretKey && $jwtToken) {
                     // Send activation confirmation to EIS API
                     $confirmationSuccess = $this->sendActivationConfirmation($businessId, $terminalId, $activationCode, $jwtToken, $secretKey);
+                    $result['data']['is_confirmed'] = $confirmationSuccess;
+                    $result['confirmed'] = $confirmationSuccess;
+                    if ($confirmationSuccess) {
+                        $result['data']['confirmed_at'] = now();
+                    }
                     
                     if (!$confirmationSuccess) {
+                        $result['message'] .= ' Warning: EIS did not acknowledge the activation confirmation; check the logs before using this terminal.';
                         Log::warning('Activation confirmation could not be sent to EIS', [
                             'terminal_id' => $terminalId,
                             'business_id' => $businessId,
@@ -167,9 +173,8 @@ class EisTerminalActivationService
                 ->where('terminal_id', $terminalId)->first();
             if ($terminal) {
                 $terminal->update([
-                    'is_confirmed' => true,
                     'confirmed_at' => now(),
-                    'confirmation_response' => json_encode($responseData)
+                    'confirmation_response' => mb_substr((string) json_encode($responseData), 0, 255),
                 ]);
             }
 
@@ -556,7 +561,14 @@ class EisTerminalActivationService
                 if ($configurationTerminalId !== null && (string) $configurationTerminalId !== $terminalId) {
                     throw new \InvalidArgumentException('EIS activation response contains mismatched terminal identities.');
                 }
+                $this->assertActivationBusinessIdentity($businessId, $configurationData, $taxpayerId);
+                $this->assertVatRegistered($configurationData);
                 $location = $this->syncService->locationForActivation($businessId, $configurationData, $activatedBy);
+                // A terminal can only serve an active location: reopen it and bring back its retired products.
+                if ($location->is_active !== null && !$location->is_active) {
+                    $location->update(['is_active' => 1]);
+                    app(\App\Services\LocationProducts::class)->restore($businessId, (int) $location->id);
+                }
                 if ($currentSettings && (int) $currentSettings->location_id !== (int) $location->id) {
                     \App\BusinessLocation::where('business_id', $businessId)
                         ->where('default_eis_setting_id', $currentSettings->id)
@@ -565,6 +577,12 @@ class EisTerminalActivationService
 
                 $setting = $this->updateEisSettings($response->data, $businessId, (int) $location->id);
                 TerminalContext::assertConfiguration($setting, $configurationData);
+                $this->claimLocationDefault($businessId, (int) $location->id, (int) $setting->id);
+                // EIS prices are tax-inclusive, so the business must show inline tax on purchases and sales.
+                DB::table('business')->where('id', $businessId)->update(['enable_inline_tax' => 1]);
+                if (app()->bound('session') && (int) session('business.id') === $businessId) {
+                    session(['business.enable_inline_tax' => 1]);
+                }
 
                 // Save or update main configuration
                 $configuration = $this->saveConfiguration($businessId, $configurationData, $setting);
@@ -620,6 +638,89 @@ class EisTerminalActivationService
             ]);
 
             throw $e;
+        }
+    }
+
+    /**
+     * The first terminal activated at a location becomes its default; an existing valid default is kept.
+     */
+    private function claimLocationDefault(int $businessId, int $locationId, int $settingId): void
+    {
+        $location = \App\BusinessLocation::where('business_id', $businessId)->lockForUpdate()->find($locationId);
+        if (!$location) {
+            return;
+        }
+
+        $currentDefault = (int) $location->default_eis_setting_id;
+        $hasValidDefault = $currentDefault > 0 && EisSetting::where('business_id', $businessId)
+            ->where('location_id', $locationId)
+            ->whereKey($currentDefault)
+            ->exists();
+
+        if (!$hasValidDefault) {
+            \App\BusinessLocation::whereKey($locationId)->update(['default_eis_setting_id' => $settingId]);
+        }
+    }
+
+    private function assertVatRegistered(object $data): void
+    {
+        $flag = $data->taxpayerConfiguration->isVATRegistered ?? null;
+        $registered = $flag === true || $flag === 1
+            || (is_string($flag) && in_array(strtolower(trim($flag)), ['1', 'true'], true));
+        if (!$registered) {
+            throw new \InvalidArgumentException('This taxpayer is not VAT registered in EIS. Only VAT-registered taxpayers can activate terminals.', 422);
+        }
+    }
+
+    private function assertActivationBusinessIdentity(int $businessId, object $data, int $taxpayerId): void
+    {
+        $tin = $data->taxpayerConfiguration->tin ?? null;
+        $tradingName = $data->terminalConfiguration->tradingName ?? null;
+        if ((!is_string($tin) && !is_int($tin)) || trim((string) $tin) === ''
+            || !is_string($tradingName) || trim($tradingName) === '') {
+            throw new \InvalidArgumentException('EIS activation requires a taxpayer TIN and trading name to verify account ownership.', 422);
+        }
+        $tin = trim((string) $tin);
+        $tradingName = mb_strtolower(trim($tradingName));
+
+        // Include inactive terminals and the terminal being reactivated: neither resets account ownership.
+        foreach (EisSetting::where('business_id', $businessId)->pluck('tpin') as $existingTin) {
+            if ($existingTin !== null && trim((string) $existingTin) !== ''
+                && trim((string) $existingTin) !== $tin) {
+                throw new \InvalidArgumentException('This terminal belongs to a different taxpayer TIN. Use a separate ERP business account.', 422);
+            }
+        }
+        $registered = DB::table('eis_configurations as configuration')
+            ->leftJoin('eis_terminal_configurations as terminal', function ($join) {
+                $join->on('terminal.configuration_id', '=', 'configuration.id')->whereNull('terminal.deleted_at');
+            })
+            ->where('configuration.business_id', $businessId)
+            ->whereNull('configuration.deleted_at')
+            ->get(['configuration.tpin', 'terminal.taxpayer_id', 'terminal.trading_name']);
+        foreach ($registered as $terminal) {
+            if (($terminal->tpin !== null && trim((string) $terminal->tpin) !== ''
+                    && trim((string) $terminal->tpin) !== $tin)
+                || ($terminal->taxpayer_id !== null && (int) $terminal->taxpayer_id > 0
+                    && (int) $terminal->taxpayer_id !== $taxpayerId)) {
+                throw new \InvalidArgumentException('This terminal belongs to a different taxpayer. Use a separate ERP business account.', 422);
+            }
+            if (is_string($terminal->trading_name) && trim($terminal->trading_name) !== ''
+                && mb_strtolower(trim($terminal->trading_name)) !== $tradingName) {
+                throw new \InvalidArgumentException('This terminal belongs to a different trading name. Use a separate ERP business account.', 422);
+            }
+        }
+
+        // A taxpayer trading name belongs to exactly one ERP account, including when its terminals are inactive.
+        $ownedElsewhere = DB::table('eis_configurations as configuration')
+            ->join('eis_terminal_configurations as terminal', 'terminal.configuration_id', '=', 'configuration.id')
+            ->where('configuration.business_id', '!=', $businessId)
+            ->whereNull('configuration.deleted_at')->whereNull('terminal.deleted_at')
+            ->where(fn ($query) => $query->whereRaw('TRIM(configuration.tpin) = ?', [$tin])
+                ->orWhere('terminal.taxpayer_id', $taxpayerId))
+            ->whereRaw('LOWER(TRIM(terminal.trading_name)) = ?', [$tradingName])
+            ->exists();
+        if ($ownedElsewhere) {
+            throw new \InvalidArgumentException('This business is already registered in another ERP account. Activate its terminals in that account.', 422);
         }
     }
 
@@ -693,7 +794,9 @@ class EisTerminalActivationService
             'version' => $terminalData->versionNo ?? null,
             'terminal_label' => $terminalData->terminalLabel ?? null,
             'is_active' => true,
-            'is_confirmed' => false,
+            // Reactivation needs a fresh EIS confirmation.
+            'confirmed_at' => null,
+            'confirmation_response' => null,
             'email_address' => $terminalData->emailAddress ?? null,
             'phone_number' => $terminalData->phoneNumber ?? null,
             'trading_name' => $terminalData->tradingName ?? null,
@@ -918,6 +1021,8 @@ class EisTerminalActivationService
             }
 
             if (!$terminal->is_active && !$setting->status) {
+                app(InactiveTerminalStock::class)->clear($businessId, (int) $setting->location_id);
+                app(InactiveTerminalStock::class)->unlinkProducts($businessId, (int) $setting->location_id);
                 return [
                     'success' => true,
                     'message' => 'Terminal is already inactive',
@@ -926,6 +1031,7 @@ class EisTerminalActivationService
             }
 
             DB::transaction(function () use ($terminal, $setting, $deactivatedBy, $reason) {
+                \App\Business::whereKey($setting->business_id)->lockForUpdate()->firstOrFail();
                 $setting->update(['status' => false]);
                 $terminal->update([
                     'is_active' => false,
@@ -935,6 +1041,8 @@ class EisTerminalActivationService
                     'toggled_at' => now(),
                     'toggled_by' => $deactivatedBy,
                 ]);
+                app(InactiveTerminalStock::class)->clear((int) $setting->business_id, (int) $setting->location_id);
+                app(InactiveTerminalStock::class)->unlinkProducts((int) $setting->business_id, (int) $setting->location_id);
             });
 
             Log::info('Terminal deactivated successfully', [
@@ -1017,8 +1125,13 @@ class EisTerminalActivationService
             }
 
             DB::transaction(function () use ($terminal, $setting, $updateData, $newStatus) {
+                \App\Business::whereKey($setting->business_id)->lockForUpdate()->firstOrFail();
                 $setting->update(['status' => $newStatus]);
                 $terminal->update($updateData);
+                if (!$newStatus) {
+                    app(InactiveTerminalStock::class)->clear((int) $setting->business_id, (int) $setting->location_id);
+                    app(InactiveTerminalStock::class)->unlinkProducts((int) $setting->business_id, (int) $setting->location_id);
+                }
             });
 
             Log::info('Terminal status toggled', [

@@ -161,6 +161,18 @@ class ProductUpsertService {
                     $matches = Product::withTrashed()
                         ->where('business_id', $businessId)
                         ->where('name', $name)
+                        ->where(function ($query) use ($eisId) {
+                            $query->whereNull('eis_product_id')
+                                ->orWhere('eis_product_id', '')
+                                ->orWhere('eis_product_id', $eisId);
+                        })
+                        ->whereNotIn('id', EisProductMap::withTrashed()
+                            ->select('product_id')
+                            ->whereNotNull('product_id')
+                            ->where(function ($query) use ($businessId, $eisId) {
+                                $query->where('business_id', '!=', $businessId)
+                                    ->orWhere('eis_product_id', '!=', $eisId);
+                            }))
                         ->limit(2)->get();
                     if ($matches->count() > 1) {
                         throw new \UnexpectedValueException('EIS name matches multiple business products.');
@@ -211,6 +223,14 @@ class ProductUpsertService {
                     'sku' => $item['sku'] ?? null,
                 ]);
                 $product = new Product();
+            }
+
+            if ($product->exists && (
+                (!empty($product->eis_product_id) && (string) $product->eis_product_id !== $eisId)
+                || EisProductMap::withTrashed()->where('product_id', $product->id)
+                    ->where('business_id', $businessId)->where('eis_product_id', '!=', $eisId)->exists()
+            )) {
+                throw new \UnexpectedValueException('EIS product '.$eisId.' matches a product already assigned to another EIS identifier.');
             }
 
             if ($product && $product->trashed()) {

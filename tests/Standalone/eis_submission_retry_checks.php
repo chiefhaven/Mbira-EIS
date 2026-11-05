@@ -5,6 +5,7 @@ require dirname(__DIR__, 2).'/vendor/autoload.php';
 
 use App\Transaction;
 use App\TransactionSellLine;
+use App\Contact;
 use Illuminate\Container\Container;
 use Illuminate\Database\Capsule\Manager as Capsule;
 use Illuminate\Database\Schema\Blueprint;
@@ -50,7 +51,7 @@ $schema->create('transactions', function (Blueprint $t) {
 });
 $schema->create('eis_settings', function (Blueprint $t) {
     $t->increments('id'); $t->integer('business_id'); $t->string('tpin'); $t->string('branch_id'); $t->timestamps();
-    $t->integer('location_id')->default(3); $t->boolean('status')->default(true);
+    $t->integer('location_id')->default(3); $t->boolean('status')->default(true); $t->softDeletes();
 });
 $container->instance('db.schema', $schema);
 (require dirname(__DIR__, 2).'/Modules/EIS/Database/Migrations/2026_07_05_000001_create_eis_sales_table.php')->up();
@@ -66,12 +67,17 @@ $schema->create('business_locations', function (Blueprint $t) {
 DB::table('business_locations')->insert(['id' => 3, 'business_id' => 7, 'eis_site_id' => 'SITE-7', 'default_eis_setting_id' => 1]);
 $schema->create('eis_configurations', function (Blueprint $t) {
     $t->increments('id'); $t->integer('business_id'); $t->integer('eis_setting_id')->unique(); $t->integer('location_id');
+    $t->integer('global_version')->nullable(); $t->integer('terminal_version')->nullable(); $t->integer('taxpayer_version')->nullable();
+    $t->softDeletes();
 });
 $schema->create('eis_terminal_configurations', function (Blueprint $t) {
     $t->increments('id'); $t->integer('configuration_id'); $t->boolean('is_active')->default(true);
-    $t->integer('terminal_position'); $t->integer('taxpayer_id');
+    $t->integer('terminal_position'); $t->integer('taxpayer_id'); $t->softDeletes();
 });
-DB::table('eis_configurations')->insert(['id' => 1, 'business_id' => 7, 'eis_setting_id' => 1, 'location_id' => 3]);
+DB::table('eis_configurations')->insert([
+    'id' => 1, 'business_id' => 7, 'eis_setting_id' => 1, 'location_id' => 3,
+    'global_version' => 12, 'terminal_version' => 34, 'taxpayer_version' => 56,
+]);
 DB::table('eis_terminal_configurations')->insert(['configuration_id' => 1, 'terminal_position' => 3, 'taxpayer_id' => 100]);
 $schema->create('eis_failed_transactions', function (Blueprint $t) {
     $t->increments('id'); $t->integer('business_id'); $t->integer('transaction_id');
@@ -84,6 +90,9 @@ $schema->create('eis_migration_issues', function (Blueprint $t) {
 });
 DB::table('eis_settings')->insert(['business_id' => 7, 'tpin' => 'FIXTURE', 'branch_id' => 'SITE-7']);
 $settings = EisSetting::first();
+$settings->global_version = 1;
+$settings->terminal_version = 1;
+$settings->taxpayer_version = 1;
 $transformer = new class(new EisTaxRate(), new OfflineSignatureService(), new InvoiceNumberGenerator()) extends SaleTransformer {
     public int $signatures = 0;
     public int $offlineQrGenerations = 0;
@@ -199,6 +208,25 @@ checkRetry($first['invoiceSummary']['totalVAT'] === array_sum(array_column($firs
     'Invoice VAT equals the sum of inline item VAT');
 checkRetry(! array_key_exists('offlineSignature', $first['invoiceSummary']), 'First summary omits signature key entirely');
 checkRetry(! isset($first['offlineSignatureData']) && ! isset($first['invoiceSummary']['validationURL']), 'First payload omits offline metadata');
+checkRetry($first['invoiceHeader']['globalConfigVersion'] === 12
+    && $first['invoiceHeader']['taxpayerConfigVersion'] === 56
+    && $first['invoiceHeader']['terminalConfigVersion'] === 34,
+    'Sale payload uses the current per-terminal configuration versions instead of stale setting values');
+checkRetry($first['invoiceHeader']['buyerName'] === 'Walk-in Customer',
+    'Sale payload always includes a buyer name when no named customer is available');
+$buyer = new Contact();
+$buyer->setRawAttributes(['name' => '', 'supplier_business_name' => 'TIN Customer Ltd', 'tax_number' => 'TIN-123'], true);
+$buyer->exists = true;
+$buyerTransaction = submissionFixture();
+$buyerTransaction->setRelation('contact', $buyer);
+$buyerInfoMethod = new ReflectionMethod(SaleTransformer::class, 'getBuyerInfo');
+$buyerInfoMethod->setAccessible(true);
+$buyerInfo = $buyerInfoMethod->invoke($transformer, $buyerTransaction);
+$headerMethod = new ReflectionMethod(SaleTransformer::class, 'buildInvoiceHeader');
+$headerMethod->setAccessible(true);
+$buyerHeader = $headerMethod->invoke($transformer, $buyerTransaction, $settings, 'BUYER-1', 'SITE-7', $buyerInfo);
+checkRetry($buyerHeader['buyerTIN'] === 'TIN-123' && $buyerHeader['buyerName'] === 'TIN Customer Ltd',
+    'Sale payload includes the named customer when their contact has a TIN');
 checkRetry($transformer->signatures === 0, 'First attempt does not generate offline signature');
 $tracking = EisSale::where('transaction_id', $transaction->id)->firstOrFail();
 checkRetry($tracking->status === 'failed' && $tracking->fiscal_invoice_number === 'GENERATED-1', 'Failed invoice persists generated fiscal number');

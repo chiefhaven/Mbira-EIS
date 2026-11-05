@@ -32,7 +32,8 @@ class StockOutboundController extends Controller
             ->join('eis_settings as setting', function ($join) {
                 $join->on('setting.id', '=', 'business_locations.default_eis_setting_id')
                     ->on('setting.business_id', '=', 'business_locations.business_id')
-                    ->on('setting.location_id', '=', 'business_locations.id');
+                    ->on('setting.location_id', '=', 'business_locations.id')
+                    ->whereNull('setting.deleted_at');
             })
             ->orderBy('business_locations.name')
             ->get([

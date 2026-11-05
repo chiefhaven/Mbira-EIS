@@ -117,6 +117,7 @@ final class SavedSaleStockReconciler
             $purchases = $this->db->table('purchase_lines')->where('transaction_id', $receiptId)->orderBy('id')->lockForUpdate()->get();
             if ($purchases->toJson() !== $receiptLines->toJson()) { $this->fail('Receipt lines changed during reconciliation.'); }
             $stockBefore = $this->db->table('variation_location_details')->where('location_id', $receipt->location_id)
+                ->whereNull('deleted_at')
                 ->whereIn('product_id', $receiptLines->pluck('product_id')->all())->orderBy('id')->lockForUpdate()->get()->toJson();
             $realMappings = [];
             $originalGraphs = $graphs;
@@ -215,6 +216,7 @@ final class SavedSaleStockReconciler
                 }
             }
             $stockAfter = $this->db->table('variation_location_details')->where('location_id', $receipt->location_id)
+                ->whereNull('deleted_at')
                 ->whereIn('product_id', $receiptLines->pluck('product_id')->all())->orderBy('id')->get()->toJson();
             if ($stockBefore !== $stockAfter) { $this->fail('Reconciliation must not change available stock.'); }
             return true;

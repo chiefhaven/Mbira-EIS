@@ -25,7 +25,10 @@
 		<!-- Shop & Location Name  -->
 		@if(!empty($receipt_details->display_name))
 			<p>
-				<strong>{{$receipt_details->display_name}}</strong>
+				<strong>{{$receipt_details->business_name ?: $receipt_details->location_name}}</strong>
+				@if(!empty($receipt_details->business_name) && !empty($receipt_details->location_name))
+					<br/><small>{{$receipt_details->location_name}}</small>
+				@endif
 				@if(!empty($receipt_details->address))
 					<br/>{!! $receipt_details->address !!}
 				@endif
@@ -172,7 +175,7 @@
 							{{$loop->iteration}}
 						</td>
 						<td style="word-break: break-all;">
-                            {{$line['name']}} {{$line['variation']}} 
+                            {{$line['name']}} {{$line['variation']}} @if(!empty($line['tax_code']))<b>({{$line['tax_code']}})</b>@endif 
                             @if(!empty($line['sub_sku'])), {{$line['sub_sku']}} @endif @if(!empty($line['brand'])), {{$line['brand']}} @endif
                             @if(!empty($line['sell_line_note']))({{$line['sell_line_note']}}) @endif
                             @if(!empty($line['lot_number']))<br> {{$line['lot_number_label']}}:  {{$line['lot_number']}} @endif 

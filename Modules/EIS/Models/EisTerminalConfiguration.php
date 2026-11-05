@@ -5,9 +5,12 @@ namespace Modules\EIS\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasOne;
+use Illuminate\Database\Eloquent\SoftDeletes;
 
 class EisTerminalConfiguration extends Model
 {
+    use SoftDeletes;
+
     protected $table = 'eis_terminal_configurations';
 
     protected $fillable = [
@@ -44,7 +47,10 @@ class EisTerminalConfiguration extends Model
         'jwt_token',
         'secret_key',
         'confirmed_at',
+        'confirmation_response',
     ];
+
+    protected $appends = ['is_confirmed'];
 
     protected $casts = [
         'version' => 'integer',
@@ -55,8 +61,17 @@ class EisTerminalConfiguration extends Model
         'deactivated_at' => 'datetime',
         'toggled_at' => 'datetime',
         'activation_date' => 'datetime',
-        'last_synced_at' => 'datetime'
+        'last_synced_at' => 'datetime',
+        'confirmed_at' => 'datetime',
     ];
+
+    /**
+     * A terminal is confirmed once EIS acknowledged its activation (there is no is_confirmed column).
+     */
+    public function getIsConfirmedAttribute(): bool
+    {
+        return $this->confirmed_at !== null;
+    }
 
     /**
      * Get the configuration that owns the terminal.

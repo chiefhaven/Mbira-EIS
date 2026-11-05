@@ -4,9 +4,11 @@ namespace Modules\EIS\Services\Configuration;
 
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Schema;
 use Modules\EIS\Models\EisConfiguration;
 use Modules\EIS\Exceptions\SyncException;
 use Modules\EIS\Models\EisOfflineLimit;
+use Modules\EIS\Models\EisSetting;
 use Modules\EIS\Models\EisTaxRate;
 use Modules\EIS\Models\EisTerminalConfiguration;
 use Modules\EIS\Models\EisTerminalSite;
@@ -104,6 +106,11 @@ class ConfigurationSyncService
                     
                     // Update last_synced_at even if unchanged
                     $existingConfig->update(['last_synced_at' => now()]);
+                    $this->syncBusinessTradingName(
+                        $businessId,
+                        $data->terminalConfiguration->tradingName ?? null,
+                        $data->taxpayerConfiguration->tin ?? null
+                    );
                     return $existingConfig;
                 }
 
@@ -361,9 +368,9 @@ class ConfigurationSyncService
             'data' => $data
         ]);
 
-        // Update or create
+        // A configuration belongs to one business, so match without business_id to adopt legacy rows.
         return EisTaxRate::updateOrCreate(
-            [   'business_id' => $configuration->business_id,
+            [
                 'configuration_id' => $configuration->id,
                 'tax_rate_id' => $taxRate->id
             ],
@@ -380,9 +387,45 @@ class ConfigurationSyncService
      */
     private function cleanupTaxRates(EisConfiguration $configuration, array $keepIds): void
     {
-        $deleted = EisTaxRate::where('configuration_id', $configuration->id)
+        $stale = EisTaxRate::where('configuration_id', $configuration->id)
             ->whereNotIn('id', $keepIds)
-            ->delete();
+            ->get(['id', 'tax_rate_id']);
+        $kept = EisTaxRate::whereIn('id', $keepIds)->pluck('id', 'tax_rate_id');
+        $references = [
+            ['products', 'tax'],
+            ['business', 'default_sales_tax'],
+            ['group_sub_taxes', 'tax_id'],
+        ];
+
+        $deleted = 0;
+        foreach ($stale as $rate) {
+            $replacement = $kept[$rate->tax_rate_id] ?? null;
+            $inUse = false;
+            foreach ($references as [$table, $column]) {
+                if (!Schema::hasTable($table) || !Schema::hasColumn($table, $column)) {
+                    continue;
+                }
+                if ($replacement) {
+                    DB::table($table)->where($column, $rate->id)->update([$column => $replacement]);
+                } elseif (DB::table($table)->where($column, $rate->id)->exists()) {
+                    $inUse = true;
+                }
+            }
+            if (Schema::hasTable('group_sub_taxes')
+                && DB::table('group_sub_taxes')->where('group_tax_id', $rate->id)->exists()) {
+                $inUse = true;
+            }
+
+            if ($inUse) {
+                Log::warning('Kept removed EIS tax rate because it is still in use', [
+                    'configuration_id' => $configuration->id,
+                    'tax_rate_id' => $rate->id,
+                ]);
+                continue;
+            }
+
+            $deleted += EisTaxRate::whereKey($rate->id)->delete();
+        }
 
         if ($deleted > 0) {
             Log::debug('Cleaned up old tax rates', [
@@ -463,6 +506,11 @@ class ConfigurationSyncService
                 ['configuration_id' => $configuration->id],
                 $terminalConfigData
             );
+            $this->syncBusinessTradingName(
+                $configuration->business_id,
+                $terminalConfig->trading_name,
+                $data->taxpayerConfiguration->tin ?? null
+            );
 
             // Sync terminal site if present
             if (isset($terminalData->terminalSite)) {
@@ -488,6 +536,26 @@ class ConfigurationSyncService
             
             // Re-throw to be handled by parent
             throw $e;
+        }
+    }
+
+    private function syncBusinessTradingName(int $businessId, mixed $tradingName, mixed $tin = null): void
+    {
+        $updates = [];
+        if (is_string($tradingName) && trim($tradingName) !== '') {
+            $updates['name'] = trim($tradingName);
+        }
+
+        if ((is_string($tin) || is_int($tin)) && trim((string) $tin) !== '') {
+            $updates['tax_number_1'] = trim((string) $tin);
+            $label = DB::table('business')->where('id', $businessId)->value('tax_label_1');
+            if (!is_string($label) || trim($label) === '') {
+                $updates['tax_label_1'] = 'TIN';
+            }
+        }
+
+        if ($updates !== []) {
+            DB::table('business')->where('id', $businessId)->update($updates);
         }
     }
 
@@ -1166,6 +1234,11 @@ class ConfigurationSyncService
             throw new \InvalidArgumentException('Multiple business locations have this EIS site ID; reconcile duplicates before activation.');
         }
         $location = $locations->first();
+        // The business's first terminal adopts the default (oldest) location instead of creating another one.
+        $firstActivation = !EisSetting::where('business_id', $businessId)->exists();
+        if (!$location && $firstActivation) {
+            $location = \App\BusinessLocation::where('business_id', $businessId)->orderBy('id')->lockForUpdate()->first();
+        }
         if ($activatedBy !== null) {
             $user = \App\User::where('business_id', $businessId)->findOrFail($activatedBy);
             $permitted = $user->permitted_locations($businessId);
@@ -1174,7 +1247,21 @@ class ConfigurationSyncService
             }
         }
         if ($location) {
-            $location->update(['name' => $siteName]);
+            $details = ['name' => $siteName];
+            if ($firstActivation) {
+                $terminal = $data->terminalConfiguration;
+                $details += ['eis_site_id' => (string) $siteId, 'location_id' => (string) $siteId];
+                foreach (['phoneNumber' => 'mobile', 'emailAddress' => 'email'] as $remote => $local) {
+                    if (property_exists($terminal, $remote)) {
+                        $details[$local] = $terminal->$remote;
+                    }
+                }
+                if (isset($terminal->addressLines)) {
+                    $lines = array_filter(array_map('trim', array_filter((array) $terminal->addressLines, 'is_string')));
+                    $details['landmark'] = $lines ? implode(', ', $lines) : null;
+                }
+            }
+            $location->update($details);
             return $location;
         }
         \App\Business::findOrFail($businessId);

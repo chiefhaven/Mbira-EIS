@@ -83,7 +83,7 @@ $schema->create('transaction_sell_lines_purchase_lines', function (Blueprint $t)
 $schema->create('variation_location_details', function (Blueprint $t) {
     $t->increments('id');
     foreach (['location_id', 'product_id', 'variation_id', 'product_variation_id'] as $c) { $t->integer($c); }
-    $t->decimal('qty_available', 18, 4); $t->timestamps();
+    $t->decimal('qty_available', 18, 4); $t->timestamps(); $t->softDeletes();
 });
 $schema->create('transaction_payments', function (Blueprint $t) {
     $t->increments('id'); $t->integer('business_id'); $t->integer('transaction_id'); $t->decimal('amount', 18, 4);
@@ -179,7 +179,8 @@ $return = makeReturn(2);
 $row = DB::table('eis_sale_adjustments')->first();
 $payload = json_decode($row->payload, true);
 salesCheck($row->status === 'prepared' && $row->note_type === 'Credit' && (float) $payload['invoiceSummary']['invoiceTotal'] === 115.0
-    && (float) $payload['invoiceSummary']['totalVAT'] === 15.0 && $payload['invoiceSummary']['taxBreakDown'][0]['rateId'] === 'A',
+    && (float) $payload['invoiceSummary']['totalVAT'] === 15.0 && $payload['invoiceSummary']['taxBreakDown'][0]['rateId'] === 'A'
+    && $payload['invoiceHeader']['buyerName'] === 'Walk-in Customer',
     'POS return generates updated remaining invoice with exact VAT and Swagger rateId breakdown');
 salesCheck((float) $return->final_total === 230.0 && (float) DB::table('variation_location_details')->value('qty_available') === 9.0
     && (float) DB::table('purchase_lines')->sum('quantity_sold') === 1.0,

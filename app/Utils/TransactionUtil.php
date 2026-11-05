@@ -1000,10 +1000,22 @@ class TransactionUtil extends Util
         $transaction_type = $transaction->type;
         $is_eis_receipt = $transaction->payment_status === 'paid' && $transaction->eisSale
             && ! empty($transaction->eisSale->eis_invoice_number);
+        $eis_trading_name = null;
+        if ($is_eis_receipt
+            && (int) $transaction->eisSale->business_id === (int) $transaction->business_id
+            && (int) $transaction->eisSale->location_id === (int) $transaction->location_id
+            && ! empty($transaction->eisSale->eis_setting_id)) {
+            $eis_trading_name = DB::table('eis_terminal_configurations as terminal')
+                ->join('eis_configurations as configuration', 'configuration.id', '=', 'terminal.configuration_id')
+                ->where('configuration.business_id', $transaction->business_id)
+                ->where('configuration.location_id', $transaction->location_id)
+                ->where('configuration.eis_setting_id', $transaction->eisSale->eis_setting_id)
+                ->value('terminal.trading_name');
+        }
 
         $output = [
             'header_text' => ($is_eis_receipt ? '<span class="eis-legal-marker" style="font-size:12px; font-weight:normal; line-height:1.4;">****Start of Legal Receipt****</span>'."\n<br>" : '').($il->header_text ?? ''),
-            'business_name' => ($il->show_business_name == 1) ? $business_details->name : '',
+            'business_name' => ($il->show_business_name == 1) ? ($is_eis_receipt && ! empty($eis_trading_name) ? $eis_trading_name : $business_details->name) : '',
             'location_name' => ($il->show_location_name == 1) ? $location_details->name : '',
             'sub_heading_line1' => trim($il->sub_heading_line1),
             'sub_heading_line2' => trim($il->sub_heading_line2),
@@ -2083,6 +2095,7 @@ class TransactionUtil extends Util
             $brand = $line->product->brand;
             $cat = $line->product->category;
             $tax_details = TaxRate::find($line->tax_id);
+            $tax_code_details = ! empty($tax_details) ? $tax_details : (! empty($product->tax) ? TaxRate::find($product->tax) : null);
 
             $unit_name = ! empty($unit->short_name) ? $unit->short_name : '';
             $base_unit_name = $unit_name;
@@ -2114,6 +2127,7 @@ class TransactionUtil extends Util
                 'tax_unformatted' => $line->item_tax,
                 'tax_name' => ! empty($tax_details) ? $tax_details->name : null,
                 'tax_percent' => ! empty($tax_details) ? $tax_details->amount : null,
+                'tax_code' => ! empty($tax_code_details->tax_rate_id) ? $tax_code_details->tax_rate_id : null,
 
                 //Field for 3rd column
                 'unit_price_inc_tax' => $this->num_f($line->unit_price_inc_tax, false, $business_details),
@@ -5097,6 +5111,16 @@ class TransactionUtil extends Util
                     ->whereIn('type', ['sell', 'sales_order'])
                     ->with(['sell_lines', 'payment_lines'])
                     ->first();
+
+        // Sales with recorded payments (fully or partially paid) cannot be deleted.
+        if (! empty($transaction) && $transaction->type == 'sell'
+            && (in_array($transaction->payment_status, ['paid', 'partial'])
+                || $transaction->payment_lines->where('is_return', '!=', 1)->sum('amount') > 0)) {
+            return [
+                'success' => false,
+                'msg' => __('lang_v1.paid_sale_cannot_be_deleted'),
+            ];
+        }
 
          // If ZATCA module is installed and this transaction is successfully synced, prevent deletion
         $moduleUtil = new ModuleUtil();

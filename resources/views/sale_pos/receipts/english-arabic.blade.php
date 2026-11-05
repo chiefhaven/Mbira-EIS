@@ -13,7 +13,10 @@
                 <div>{!! $receipt_details->header_text !!}</div>
             @endif
             @if(!empty($receipt_details->address))
-                <div><b>{{$receipt_details->display_name}}</b>
+                <div><b>{{$receipt_details->business_name ?: $receipt_details->location_name}}</b>
+				@if(!empty($receipt_details->business_name) && !empty($receipt_details->location_name))
+					<br/><small>{{$receipt_details->location_name}}</small>
+				@endif
 				{!! $receipt_details->customer_info_address !!}
 			</div>
             @endif
@@ -158,7 +161,7 @@
                         @endif
                     </td>
                     <td class="print-red" style=" text-align: left;">
-                        {{$line['name']}} {{$line['product_variation']}} {{$line['variation']}}
+                        {{$line['name']}} {{$line['product_variation']}} {{$line['variation']}} @if(!empty($line['tax_code']))<b>({{$line['tax_code']}})</b>@endif
                         @if(!empty($line['sub_sku'])), {{$line['sub_sku']}} @endif 
                         @if(!empty($line['brand'])), {{$line['brand']}} @endif 
                         @if(!empty($line['cat_code'])), {{$line['cat_code']}}@endif

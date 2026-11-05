@@ -1,5 +1,79 @@
 # EIS buyer and relief validation
 
+## Terminal activation ownership
+
+The first activated terminal establishes the ERP business account's EIS taxpayer
+and trading-name identity; the initial ERP business name need not match.
+Additional terminals and reactivations must match the saved taxpayer TIN,
+taxpayer identifier and trading name, including identities on inactive terminals.
+Different sites are permitted for the same identity. Trading-name comparisons
+ignore casing and surrounding whitespace. Missing TIN or trading name blocks
+activation because ownership cannot be verified.
+
+Only VAT-registered taxpayers can activate terminals. If EIS reports
+`isVATRegistered` as false or omits it, activation is rejected (HTTP 422,
+SweetAlert error) before anything is saved locally.
+
+Successful activation turns on "Enable inline tax in purchase and sell"
+(`business.enable_inline_tax`) for the owning business.
+
+A taxpayer trading name (matched by TIN or taxpayer identifier) belongs to only
+one ERP business account. Once any account has registered it, including on
+inactive terminals, other accounts cannot activate its terminals. A terminal ID
+already assigned to another account is also rejected.
+
+The business's first terminal (no non-deleted terminals exist) updates the
+default business location (the oldest one) unless a location already has that
+EIS site ID. That location takes the EIS site ID, site name, phone, email and
+address lines (stored as the landmark) instead of a new location being created. Later
+activations reuse the location with the matching site ID or create one for a
+new site.
+
+Terminals can be soft-deleted (`deleted_at` on `eis_settings`,
+`eis_configurations` and `eis_terminal_configurations`). Soft-deleted terminals
+are ignored by POS routing, offline limits, ownership checks and the
+inactive-terminal stock cleanup, so their device and business identity can be
+activated again in any account. Historical receipts keep their EIS details.
+
+Deactivating a terminal (deactivate or toggle off) removes `product_locations`
+listings of EIS-mapped products at its location, unless another active terminal
+still serves that location. Manual (unmapped) products stay listed.
+
+Product sync reconciles each terminal location against the API catalog. EIS-mapped
+products listed at the location but missing from the catalog are unlinked from it;
+those no longer listed at any location are soft-deleted with their EIS map.
+Products that return in a later sync are restored with the same product, map and
+variation and relisted at the location. A successful empty catalog is applied the
+same way (every EIS product at the location is unlinked or soft-deleted); invalid,
+unsuccessful or incomplete responses abort the sync before anything changes, and
+products without an EIS map are never touched.
+
+Checks run before local locations, credentials, configurations or business names
+are changed, within the business-locked activation transaction. A rejected
+activation does not send activation confirmation or dispatch product sync.
+The terminal management page and business settings show rejected activations in
+a SweetAlert error dialog with the server's message, as well as the inline error.
+The activation code is retained so the administrator can correct it and retry.
+The remote activation response is required to verify identity, so this check
+does not undo any action already performed by the remote activation endpoint.
+Existing mixed-identity accounts must be reconciled before adding terminals;
+existing terminals are not deleted or reassigned automatically.
+
+Successful activation and every latest-configuration fetch set the business name
+to the EIS trading name and the business tax number (`tax_number_1`) to the EIS
+TIN. The tax label defaults to `TIN` only when it is blank.
+
+The first terminal activated at a location becomes that location's default
+terminal. A later activation replaces the default only when the location has none
+or its default terminal is deleted or belongs to another location.
+
+`tests/Standalone/eis_terminal_isolation_checks.php` covers first activation,
+matching identities across sites, foreign TIN/taxpayer/trading-name rejection,
+reactivations, inactive-terminal ownership and unchanged local state on rejection.
+`node tests/Standalone/eis_terminal_activation_alert_checks.js` exercises the real
+activation script with mocked AJAX, DOM and SweetAlert, including HTTP 422 errors,
+failed JSON results, validation errors and successful activation behavior.
+
 ## Receipt identifiers
 
 Browser invoice/receipt layouts and the ESC/POS print server show both

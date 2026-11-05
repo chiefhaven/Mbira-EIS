@@ -85,6 +85,7 @@ class SaleAdjustmentService
         $lines = $this->lines((int) $sale->id);
         foreach ($lines as $line) {
             $stock = DB::table('variation_location_details')->where('location_id', $sale->location_id)
+                ->whereNull('deleted_at')
                 ->where('product_id', $line['product_id'])->where('variation_id', $line['variation_id'])
                 ->lockForUpdate()->first();
             if ($line['enable_stock'] && (!$stock || (float) $stock->qty_available < -0.00001)) {

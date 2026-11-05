@@ -45,12 +45,15 @@ foreach ([
     'eis_configurations' => ['business_id', 'eis_setting_id', 'location_id', 'raw_response', 'last_synced_at'],
     'eis_terminal_configurations' => ['configuration_id', 'terminal_label', 'is_active'],
 ] as $name => $columns) {
-    $schema->create($name, function (Blueprint $table) use ($columns) {
+    $schema->create($name, function (Blueprint $table) use ($name, $columns) {
         $table->increments('id');
         foreach ($columns as $column) {
             $table->text($column)->nullable();
         }
         $table->timestamps();
+        if (str_starts_with($name, 'eis_')) {
+            $table->softDeletes();
+        }
     });
 }
 $db = $capsule->getConnection();
@@ -222,6 +225,13 @@ $result = $controller->activate(managementRequest([
 ]))->getData(true);
 managementCheck($result === ['success' => true, 'message' => 'Activated', 'msg' => 'Activated'],
     'Activation uses authenticated tenant and returns existing message shape without secrets');
+$mismatchMessage = 'This terminal belongs to a different trading name. Use a separate ERP business account.';
+$service->shouldReceive('activateTerminal')->once()->with(1, 'FOREIGN', [], 7)
+    ->andReturn(['success' => false, 'message' => $mismatchMessage, 'status_code' => 422]);
+$mismatchResponse = $controller->activate(managementRequest(['terminal_activation_code' => 'FOREIGN']));
+managementCheck($mismatchResponse->getStatusCode() === 422
+    && $mismatchResponse->getData(true) === ['success' => false, 'message' => $mismatchMessage, 'msg' => $mismatchMessage],
+    'Ownership rejection preserves the server error message for the activation SweetAlert');
 $service->shouldReceive('getLatestConfig')->once()->with(1, 102)->andReturn(['success' => true, 'msg' => 'Synced']);
 managementCheck($controller->latestConfig(managementRequest(['terminal_id' => 201]), 102)->getData(true)['message'] === 'Synced',
     'Latest config pins canonical route terminal ID, not a body override');

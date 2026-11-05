@@ -6,6 +6,8 @@ use Illuminate\Database\Eloquent\Model;
 
 class InvoiceLayout extends Model
 {
+    private const SAMPLE_DEFAULT_ID = 5;
+
     /**
      * The attributes that aren't mass assignable.
      *
@@ -46,5 +48,51 @@ class InvoiceLayout extends Model
                     ->pluck('name', 'id');
 
         return $layouts;
+    }
+
+    public static function createDefaultFromSample(int $businessId): self
+    {
+        $layout = static::sampleDefault()->replicate();
+        $layout->name = 'Default';
+        $layout->business_id = $businessId;
+        $layout->is_default = true;
+        $layout->save();
+
+        return $layout;
+    }
+
+    public static function copySampleSettingsToAllBusinessDefaults(): void
+    {
+        $sample = static::sampleDefault();
+        $settings = $sample->getAttributes();
+        unset($settings['id'], $settings['business_id'], $settings['name'], $settings['is_default'],
+            $settings['created_at'], $settings['updated_at']);
+
+        static::query()->getConnection()->table('business')->orderBy('id')->pluck('id')->each(function ($businessId) use ($sample, $settings) {
+            $layouts = static::where('business_id', $businessId)->where('is_default', true)->get();
+            if ($layouts->isEmpty()) {
+                $layout = $sample->replicate();
+                $layout->name = 'Default';
+                $layout->business_id = $businessId;
+                $layout->is_default = true;
+                $layout->save();
+
+                return;
+            }
+
+            foreach ($layouts as $layout) {
+                $layout->forceFill($settings)->save();
+            }
+        });
+    }
+
+    private static function sampleDefault(): self
+    {
+        $sample = static::findOrFail(self::SAMPLE_DEFAULT_ID);
+        if (! $sample->is_default) {
+            throw new \LogicException('Sample invoice layout #5 must remain the default layout.');
+        }
+
+        return $sample;
     }
 }

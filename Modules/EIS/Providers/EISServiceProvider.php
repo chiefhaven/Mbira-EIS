@@ -35,6 +35,7 @@ class EISServiceProvider extends ServiceProvider
         $this->registerConfig();
         $this->registerViews();
         $this->loadMigrationsFrom(module_path($this->moduleName, 'Database/Migrations'));
+        $this->commands([\Modules\EIS\Console\Commands\ClearInactiveTerminalStockCommand::class]);
         // $this->commands([SyncEisConfiguration::class]); // Command class file not found
         $this->app->booted(function () {
 

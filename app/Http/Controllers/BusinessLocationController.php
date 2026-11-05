@@ -7,9 +7,11 @@ use App\BusinessLocation;
 use App\InvoiceLayout;
 use App\InvoiceScheme;
 use App\SellingPriceGroup;
+use App\Services\LocationProducts;
 use App\Utils\ModuleUtil;
 use App\Utils\Util;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Spatie\Permission\Models\Permission;
 use Yajra\DataTables\Facades\DataTables;
 
@@ -369,8 +371,15 @@ class BusinessLocationController extends Controller
             $business_location = BusinessLocation::where('business_id', $business_id)
                             ->findOrFail($location_id);
 
-            $business_location->is_active = ! $business_location->is_active;
-            $business_location->save();
+            DB::transaction(function () use ($business_location, $business_id) {
+                $business_location->is_active = ! $business_location->is_active;
+                $business_location->save();
+
+                $products = app(LocationProducts::class);
+                $business_location->is_active
+                    ? $products->restore((int) $business_id, (int) $business_location->id)
+                    : $products->retire((int) $business_id, (int) $business_location->id);
+            });
 
             $msg = $business_location->is_active ? __('lang_v1.business_location_activated_successfully') : __('lang_v1.business_location_deactivated_successfully');
 

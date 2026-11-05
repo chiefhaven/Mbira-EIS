@@ -647,7 +647,9 @@ class ReportController extends Controller
             $query = Product::leftjoin('units as u', 'products.unit_id', '=', 'u.id')
                 ->join('variations as v', 'products.id', '=', 'v.product_id')
                 ->join('product_variations as pv', 'pv.id', '=', 'v.product_variation_id')
-                ->leftjoin('variation_location_details as vld', 'v.id', '=', 'vld.variation_id')
+                ->leftjoin('variation_location_details as vld', function ($join) {
+                    $join->on('v.id', '=', 'vld.variation_id')->whereNull('vld.deleted_at');
+                })
                 ->where('products.business_id', $business_id)
                 ->where('products.id', $product_id)
                 ->whereNull('v.deleted_at');
@@ -2722,7 +2724,7 @@ class ReportController extends Controller
                     't.transaction_date as transaction_date',
                     'transaction_sell_lines.parent_sell_line_id',
                     DB::raw('DATE_FORMAT(t.transaction_date, "%Y-%m-%d") as formated_date'),
-                    DB::raw("(SELECT SUM(vld.qty_available) FROM variation_location_details as vld WHERE vld.variation_id=v.id $vld_str) as current_stock"),
+                    DB::raw("(SELECT SUM(vld.qty_available) FROM variation_location_details as vld WHERE vld.deleted_at IS NULL AND vld.variation_id=v.id $vld_str) as current_stock"),
                     DB::raw('SUM(transaction_sell_lines.quantity - transaction_sell_lines.quantity_returned) as total_qty_sold'),
                     'u.short_name as unit',
                     DB::raw('SUM((transaction_sell_lines.quantity - transaction_sell_lines.quantity_returned) * transaction_sell_lines.unit_price_inc_tax) as subtotal')
@@ -2844,7 +2846,7 @@ class ReportController extends Controller
                 ->select(
                     'b.name as brand_name',
                     'cat.name as category_name',
-                    DB::raw("(SELECT SUM(vld.qty_available) FROM variation_location_details as vld WHERE vld.variation_id=transaction_sell_lines.variation_id $vld_str) as current_stock"),
+                    DB::raw("(SELECT SUM(vld.qty_available) FROM variation_location_details as vld WHERE vld.deleted_at IS NULL AND vld.variation_id=transaction_sell_lines.variation_id $vld_str) as current_stock"),
                     DB::raw('SUM(transaction_sell_lines.quantity - transaction_sell_lines.quantity_returned) as total_qty_sold'),
                     DB::raw('SUM((transaction_sell_lines.quantity - transaction_sell_lines.quantity_returned) * transaction_sell_lines.unit_price_inc_tax) as subtotal'),
                     'transaction_sell_lines.parent_sell_line_id'

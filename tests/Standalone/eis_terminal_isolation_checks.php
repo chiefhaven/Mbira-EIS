@@ -5,9 +5,13 @@ require __DIR__.'\eis_location_terminal_checks.php';
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Modules\EIS\Services\EisSubscriptionAccess;
 use Modules\EIS\Services\Terminal\TerminalContext;
 
 // Exercise real activation persistence without calling the activation API.
+$app->instance(EisSubscriptionAccess::class, new class extends EisSubscriptionAccess {
+    public function assertAllowed(int $businessId): void {}
+});
 $app['config']['eis.base_url'] = 'https://eis.invalid';
 $baseUrlMigration = require dirname(__DIR__, 2).'\Modules\EIS\Database\Migrations\2026_10_23_171800_restore_eis_settings_base_url.php';
 $baseUrlMigration->up();
@@ -24,8 +28,36 @@ $app->instance('cache', new class {
     public function __construct() { $this->store = new Illuminate\Cache\ArrayStore(); }
     public function lock($name, $seconds) { return new Illuminate\Cache\ArrayLock($this->store, $name, $seconds); }
 });
-$schema->create('business', function (Blueprint $table) { $table->increments('id'); $table->string('name'); });
+$schema->create('business', function (Blueprint $table) { $table->increments('id'); $table->string('name'); $table->string('tax_label_1')->nullable(); $table->string('tax_number_1')->nullable(); $table->boolean('enable_inline_tax')->default(0); });
 DB::table('business')->insert([['id' => 1, 'name' => 'Business one'], ['id' => 2, 'name' => 'Business two']]);
+$schema->create('products', function (Blueprint $table) {
+    $table->increments('id'); $table->integer('business_id');
+});
+$schema->create('variation_location_details', function (Blueprint $table) {
+    $table->increments('id'); $table->integer('product_id'); $table->integer('location_id');
+    $table->decimal('qty_available', 22, 4); $table->timestamps();
+});
+$stockSoftDeletes = require dirname(__DIR__, 2).'\database\migrations\2026_11_03_150000_add_soft_deletes_to_variation_location_details.php';
+$stockSoftDeletes->up();
+DB::table('products')->insert([['id' => 1, 'business_id' => 1], ['id' => 2, 'business_id' => 2]]);
+$schema->create('product_locations', function (Blueprint $table) {
+    $table->integer('product_id'); $table->integer('location_id');
+});
+$schema->create('eis_product_maps', function (Blueprint $table) {
+    $table->increments('id'); $table->integer('business_id'); $table->integer('product_id');
+    $table->string('eis_product_id'); $table->softDeletes();
+});
+DB::table('products')->insert(['id' => 3, 'business_id' => 1]);
+DB::table('eis_product_maps')->insert(['business_id' => 1, 'product_id' => 1, 'eis_product_id' => 'P1']);
+DB::table('product_locations')->insert([
+    ['product_id' => 1, 'location_id' => 1], ['product_id' => 1, 'location_id' => 2],
+    ['product_id' => 3, 'location_id' => 2], ['product_id' => 2, 'location_id' => 3],
+]);
+DB::table('variation_location_details')->insert([
+    ['product_id' => 1, 'location_id' => 1, 'qty_available' => 12],
+    ['product_id' => 1, 'location_id' => 2, 'qty_available' => 25],
+    ['product_id' => 2, 'location_id' => 3, 'qty_available' => 40],
+]);
 $schema->create('users', function (Blueprint $table) {
     $table->increments('id'); $table->integer('business_id'); $table->softDeletes();
 });
@@ -37,9 +69,13 @@ $gate->shouldReceive('check')->andReturnUsing(function () use (&$allLocations) {
 $app->instance(Illuminate\Contracts\Auth\Access\Gate::class, $gate);
 $schema->table('business_locations', function (Blueprint $table) {
     foreach (['location_id', 'country', 'state', 'city', 'zip_code', 'invoice_scheme_id', 'sale_invoice_scheme_id',
-        'invoice_layout_id', 'sale_invoice_layout_id', 'default_payment_accounts', 'mobile', 'email'] as $column) {
+        'invoice_layout_id', 'sale_invoice_layout_id', 'default_payment_accounts', 'mobile', 'email', 'landmark'] as $column) {
         $table->text($column)->nullable();
     }
+    $table->boolean('is_active')->default(1);
+});
+$schema->table('products', function (Blueprint $table) {
+    $table->softDeletes(); $table->unsignedInteger('retired_by_location_id')->nullable();
 });
 foreach (['invoice_schemes', 'invoice_layouts'] as $name) {
     $schema->create($name, function (Blueprint $table) {
@@ -70,7 +106,8 @@ foreach ([
     'eis_terminal_configurations' => ['version', 'terminal_label', 'email_address', 'phone_number', 'trading_name',
         'max_transaction_age', 'max_cummulative_amount', 'address_lines', 'raw_data', 'last_synced_at',
         'activated_at', 'activated_by', 'deactivated_at', 'deactivated_by', 'deactivation_reason', 'toggled_at',
-        'toggled_by', 'activation_code', 'activation_environment', 'activation_date', 'jwt_token', 'secret_key'],
+        'toggled_by', 'activation_code', 'activation_environment', 'activation_date', 'jwt_token', 'secret_key',
+        'confirmed_at', 'confirmation_response'],
 ] as $name => $columns) {
     $schema->table($name, function (Blueprint $table) use ($columns) {
         foreach ($columns as $column) { $table->text($column)->nullable(); }
@@ -92,32 +129,65 @@ $sync = new class extends Modules\EIS\Services\Configuration\ConfigurationSyncSe
 $activation = new Modules\EIS\Services\Terminal\EisTerminalActivationService($sync);
 $process = new ReflectionMethod($activation, 'processActivationResponse');
 $process->setAccessible(true);
-function activationResponse(string $device, string $site, int $position): object {
+function activationResponse(string $device, string $site, int $position, ?string $tradingName = 'EIS Trading Name'): object {
     return (object) ['statusCode' => 1, 'data' => (object) [
         'activatedTerminal' => (object) ['terminalId' => $device, 'terminalPosition' => $position, 'taxpayerId' => 100,
             'terminalCredentials' => (object) ['jwtToken' => 'jwt-'.$device, 'secretKey' => 'secret-'.$device]],
         'configuration' => (object) [
             'terminalConfiguration' => (object) ['terminalId' => $device, 'isActiveTerminal' => true,
+                'tradingName' => $tradingName,
                 'terminalSite' => (object) ['siteId' => $site, 'siteName' => 'Site '.$site],
                 'offlineLimit' => (object) ['maxTransactionAgeInHours' => 24, 'maxCummulativeAmount' => 100000]],
-            'taxpayerConfiguration' => (object) ['tin' => 'TIN1'],
+            'taxpayerConfiguration' => (object) ['tin' => 'TIN1', 'isVATRegistered' => true],
         ],
     ]];
 }
 $beforeSettings = DB::table('eis_settings')->count();
 $beforeLocations = DB::table('business_locations')->get()->toJson();
+DB::table('business_locations')->where('id', 1)->update(['default_eis_setting_id' => 1]);
 $result = $process->invoke($activation, 1, activationResponse('A2', 'A', 3), 'CODE', [], 1, 1);
 $newId = $result['terminal_setting_id'];
+locationCheck((int) DB::table('business_locations')->where('id', 1)->value('default_eis_setting_id') === 1,
+    'Activating another terminal keeps the location\'s existing valid default');
+DB::table('business_locations')->where('id', 1)->update(['default_eis_setting_id' => null]);
 locationCheck($result['success'] && DB::table('eis_settings')->count() === $beforeSettings + 1, 'New terminal adds rather than replaces another device');
 locationCheck(TerminalContext::settings(1, null, 1)->device_id === 'A1', 'Old device identity and historical sale ownership survive activation');
 locationCheck((int) TerminalContext::settings(1, null, $newId)->location_id === 1, 'New terminal belongs to the chosen existing location');
 locationCheck(DB::table('business_locations')->count() === 5
     && DB::table('business_locations')->where('id', 1)->value('name') === 'Site A',
     'Activation reuses the exact business/site location and syncs its name');
+locationCheck(DB::table('business')->where('id', 1)->value('name') === 'EIS Trading Name'
+    && DB::table('business')->where('id', 2)->value('name') === 'Business two',
+    'Successful activation updates only the owning business name to the EIS trading name');
+locationCheck(DB::table('business')->where('id', 1)->value('tax_number_1') === 'TIN1'
+    && DB::table('business')->where('id', 1)->value('tax_label_1') === 'TIN'
+    && DB::table('business')->where('id', 2)->value('tax_number_1') === null,
+    'Successful activation updates only the owning business tax number to the EIS TIN');
+locationCheck((int) DB::table('business')->where('id', 1)->value('enable_inline_tax') === 1
+    && (int) DB::table('business')->where('id', 2)->value('enable_inline_tax') === 0,
+    'Successful activation enables inline tax only for the owning business');
 locationCheck(DB::table('eis_terminal_sites')->count() === 1 && DB::table('eis_offline_limits')->count() === 1, 'Activation persists site and offline configuration');
 locationCheck(DB::table('eis_settings')->where('id', $newId)->value('base_url') === 'https://eis.invalid', 'New settings include required base URL');
 $again = $process->invoke($activation, 1, activationResponse('A2', 'A', 3), 'CODE', [], 1, 1);
 locationCheck($again['terminal_setting_id'] === $newId && DB::table('eis_settings')->count() === $beforeSettings + 1, 'Reactivation updates the same terminal without duplicating settings');
+$confirmedTerminal = Modules\EIS\Models\EisTerminalConfiguration::where('terminal_id', 'A2')->firstOrFail();
+$confirmedTerminal->update(['confirmed_at' => now(), 'confirmation_response' => '{"statusCode":1}']);
+locationCheck($confirmedTerminal->fresh()->is_confirmed === true && $confirmedTerminal->fresh()->confirmation_response === '{"statusCode":1}',
+    'EIS confirmation is stored and reported as confirmed');
+$process->invoke($activation, 1, activationResponse('A2', 'A', 3), 'CODE', [], 1, 1);
+locationCheck($confirmedTerminal->fresh()->is_confirmed === false && $confirmedTerminal->fresh()->confirmation_response === null,
+    'Reactivation clears the previous confirmation until EIS confirms again');
+DB::beginTransaction();
+DB::table('business_locations')->where('id', 2)->update(['is_active' => 0]);
+DB::table('products')->where('id', 3)->update(['deleted_at' => now(), 'retired_by_location_id' => 2]);
+DB::table('products')->where('id', 1)->update(['deleted_at' => '2026-01-01 00:00:00']);
+$process->invoke($activation, 1, activationResponse('B-REOPEN', 'B', 11), 'CODE', [], 1, 1);
+locationCheck((int) DB::table('business_locations')->where('id', 2)->value('is_active') === 1,
+    'Activating a terminal at a deactivated location reactivates the location');
+locationCheck(DB::table('products')->where('id', 3)->value('deleted_at') === null
+    && DB::table('products')->where('id', 1)->value('deleted_at') !== null,
+    'Location reactivation by terminal activation restores only products retired by deactivation');
+DB::rollBack();
 // Activation must also support installations that use only the environment endpoint.
 DB::beginTransaction();
 $schema->table('eis_settings', fn (Blueprint $table) => $table->dropColumn('base_url'));
@@ -125,6 +195,129 @@ $withoutEndpoint = $process->invoke($activation, 1, activationResponse('NO-DB-UR
 locationCheck($withoutEndpoint['success']
     && TerminalContext::settings(1, null, $withoutEndpoint['terminal_setting_id'])->device_id === 'NO-DB-URL',
     'Activation creates settings successfully when legacy base_url column is absent');
+DB::rollBack();
+function activationSnapshot(): array {
+    $snapshot = [];
+    foreach (['business', 'business_locations', 'eis_settings', 'eis_configurations',
+        'eis_terminal_configurations', 'eis_terminal_sites', 'eis_offline_limits'] as $table) {
+        $snapshot[$table] = DB::table($table)->orderBy('id')->get()->toJson();
+    }
+    return $snapshot;
+}
+$identityBefore = activationSnapshot();
+foreach (['new', 'reactivation'] as $kind) {
+    $device = $kind === 'new' ? 'FOREIGN' : 'A2';
+    $foreignTin = activationResponse($device, 'FOREIGN-SITE', 3);
+    $foreignTin->data->configuration->taxpayerConfiguration->tin = 'TIN-OTHER';
+    locationReject(fn () => $process->invoke($activation, 1, $foreignTin, 'CODE', [], 1),
+        'Different taxpayer TIN is rejected during '.$kind);
+    $foreignTaxpayer = activationResponse($device, 'FOREIGN-SITE', 3);
+    $foreignTaxpayer->data->activatedTerminal->taxpayerId = 999;
+    locationReject(fn () => $process->invoke($activation, 1, $foreignTaxpayer, 'CODE', [], 1),
+        'Different taxpayer identifier is rejected during '.$kind);
+    locationReject(fn () => $process->invoke($activation, 1,
+        activationResponse($device, 'FOREIGN-SITE', 3, 'Another Trading Name'), 'CODE', [], 1),
+        'Different trading name with the same TIN is rejected during '.$kind);
+}
+foreach ([null, '', '   '] as $missingName) {
+    locationReject(fn () => $process->invoke($activation, 1,
+        activationResponse('MISSING-NAME', 'FOREIGN-SITE', 3, $missingName), 'CODE', [], 1),
+        'Unverifiable trading name blocks registration');
+}
+$missingTin = activationResponse('MISSING-TIN', 'FOREIGN-SITE', 3);
+unset($missingTin->data->configuration->taxpayerConfiguration->tin);
+locationReject(fn () => $process->invoke($activation, 1, $missingTin, 'CODE', [], 1),
+    'Unverifiable taxpayer TIN blocks registration');
+foreach ([false, 0, '0', 'false', null] as $vatFlag) {
+    $notVat = activationResponse('NOT-VAT', 'FOREIGN-SITE', 3);
+    $notVat->data->configuration->taxpayerConfiguration->isVATRegistered = $vatFlag;
+    locationReject(fn () => $process->invoke($activation, 1, $notVat, 'CODE', [], 1),
+        'Taxpayer that is not VAT registered cannot activate a terminal');
+}
+$missingVat = activationResponse('MISSING-VAT', 'FOREIGN-SITE', 3);
+unset($missingVat->data->configuration->taxpayerConfiguration->isVATRegistered);
+locationReject(fn () => $process->invoke($activation, 1, $missingVat, 'CODE', [], 1),
+    'Unknown VAT registration blocks activation');
+$vatAsString = activationResponse('A1', 'A', 1);
+$vatAsString->data->configuration->taxpayerConfiguration->isVATRegistered = '1';
+DB::beginTransaction();
+locationCheck($process->invoke($activation, 1, $vatAsString, 'CODE', [], 1)['success'],
+    'VAT registration reported as "1" is accepted');
+DB::rollBack();
+locationCheck(activationSnapshot() === $identityBefore,
+    'Rejected identities preserve business names, sites, credentials and all terminal configuration');
+DB::beginTransaction();
+DB::table('eis_settings')->where('business_id', 1)->update(['status' => false]);
+DB::table('eis_terminal_configurations')->update(['is_active' => false]);
+locationReject(fn () => $process->invoke($activation, 1,
+    activationResponse('FOREIGN-INACTIVE', 'FOREIGN-SITE', 3, 'Another Trading Name'), 'CODE', [], 1),
+    'Inactive terminals still anchor ERP account identity');
+DB::rollBack();
+$crossAccountBefore = activationSnapshot();
+DB::beginTransaction();
+// Give account 2 no EIS identity so only cross-account ownership can reject it.
+$account2Settings = DB::table('eis_settings')->where('business_id', 2)->pluck('id');
+$account2Configs = DB::table('eis_configurations')->where('business_id', 2)->pluck('id');
+DB::table('business_locations')->where('business_id', 2)->update(['default_eis_setting_id' => null]);
+DB::table('eis_terminal_configurations')->whereIn('configuration_id', $account2Configs)->delete();
+DB::table('eis_configurations')->whereIn('id', $account2Configs)->delete();
+DB::table('eis_settings')->whereIn('id', $account2Settings)->delete();
+$crossAccountRejects = function (object $response, string $label) use ($process, $activation) {
+    try {
+        $process->invoke($activation, 2, $response, 'CODE', [], null);
+        locationCheck(false, $label);
+    } catch (Throwable $e) {
+        locationCheck(str_contains($e->getMessage(), 'already registered in another ERP account'), $label);
+    }
+};
+$crossAccountRejects(activationResponse('OTHER-ACCOUNT', 'A', 4, ' EIS TRADING NAME '),
+    'A business already registered in one ERP account cannot activate terminals in another account');
+$byTaxpayer = activationResponse('OTHER-ACCOUNT-TAXPAYER', 'A', 5);
+$byTaxpayer->data->configuration->taxpayerConfiguration->tin = 'TIN-RENAMED';
+$crossAccountRejects($byTaxpayer, 'Cross-account ownership also matches the EIS taxpayer identifier');
+DB::table('eis_settings')->where('business_id', 1)->update(['status' => false]);
+DB::table('eis_terminal_configurations')->update(['is_active' => false]);
+$crossAccountRejects(activationResponse('OTHER-ACCOUNT-INACTIVE', 'A', 6),
+    'Inactive terminals still keep the business in its original ERP account');
+$now = date('Y-m-d H:i:s');
+foreach (['eis_settings', 'eis_configurations'] as $table) {
+    DB::table($table)->where('business_id', 1)->update(['deleted_at' => $now]);
+}
+DB::table('eis_terminal_configurations')->update(['deleted_at' => $now]);
+$afterDelete = $process->invoke($activation, 2, activationResponse('A2', 'A', 7), 'CODE', [], null);
+locationCheck($afterDelete['success'] && (int) DB::table('eis_settings')->where('id', $afterDelete['terminal_setting_id'])->value('business_id') === 2
+    && DB::table('eis_settings')->where('device_id', 'A2')->where('business_id', 1)->whereNotNull('deleted_at')->exists(),
+    'Soft-deleted terminals release the device and business identity for activation in another account');
+DB::rollBack();
+locationCheck(activationSnapshot() === $crossAccountBefore,
+    'Cross-account rejection leaves both ERP accounts unchanged');
+DB::beginTransaction();
+$matchingName = $process->invoke($activation, 1,
+    activationResponse('MATCHING-NAME', 'B', 8, '  eis trading name  '), 'CODE', [], 1);
+locationCheck($matchingName['success']
+    && (int) TerminalContext::settings(1, null, $matchingName['terminal_setting_id'])->location_id === 2,
+    'Matching identity permits another site and ignores trading-name casing and surrounding whitespace');
+DB::rollBack();
+DB::beginTransaction();
+DB::table('business')->insert(['id' => 4, 'name' => 'Initial ERP Name']);
+$first = $process->invoke($activation, 4,
+    activationResponse('FIRST-IDENTITY', 'FIRST-SITE', 1, 'First EIS Identity'), 'CODE', [], null);
+locationCheck($first['success'] && DB::table('business')->where('id', 4)->value('name') === 'First EIS Identity',
+    'First terminal establishes identity without requiring the initial ERP name to match');
+$firstLocation = (int) DB::table('eis_settings')->where('id', $first['terminal_setting_id'])->value('location_id');
+locationCheck((int) DB::table('business_locations')->where('id', $firstLocation)->value('default_eis_setting_id')
+    === (int) $first['terminal_setting_id'],
+    'First terminal activated at a location becomes its default');
+DB::table('eis_settings')->where('id', $first['terminal_setting_id'])->update(['deleted_at' => now()]);
+$replacement = $process->invoke($activation, 4,
+    activationResponse('REPLACEMENT', 'FIRST-SITE', 3, 'First EIS Identity'), 'CODE', [], null);
+locationCheck((int) DB::table('business_locations')->where('id', $firstLocation)->value('default_eis_setting_id')
+    === (int) $replacement['terminal_setting_id'],
+    'A soft-deleted default is replaced by the next activated terminal');
+DB::table('eis_settings')->where('id', $first['terminal_setting_id'])->update(['deleted_at' => null]);
+locationReject(fn () => $process->invoke($activation, 4,
+    activationResponse('SECOND-IDENTITY', 'FIRST-SITE', 2, 'Other EIS Identity'), 'CODE', [], null),
+    'Subsequent terminal must match the identity established by the first terminal');
 DB::rollBack();
 locationCheck(DB::table('eis_configurations')->where('eis_setting_id', $newId)->count() === 1, 'Each terminal has exactly one configuration');
 DB::beginTransaction();
@@ -176,6 +369,39 @@ $freshLocation = $sync->locationForActivation(2, activationResponse('FRESH', 'FI
 locationCheck($freshLocation->business_id === 2 && $freshLocation->invoice_scheme_id && $freshLocation->invoice_layout_id,
     'Businesses without invoice defaults receive usable default schemes and layouts');
 DB::rollBack();
+DB::beginTransaction();
+DB::table('business')->insert(['id' => 4, 'name' => 'Business four']);
+DB::table('business_locations')->insert([
+    ['id' => 90, 'business_id' => 4, 'eis_site_id' => null, 'name' => 'Default shop', 'location_id' => 'BL0001',
+        'mobile' => '', 'email' => '', 'landmark' => 'Old landmark', 'city' => 'Blantyre'],
+    ['id' => 91, 'business_id' => 4, 'eis_site_id' => null, 'name' => 'Second shop', 'location_id' => 'BL0002',
+        'mobile' => '', 'email' => '', 'landmark' => null, 'city' => 'Blantyre'],
+]);
+DB::table('eis_settings')->insert(['id' => 90, 'business_id' => 4, 'branch_id' => 'OLD', 'device_id' => 'OLD4',
+    'jwt_token' => 'token90', 'tpin' => 'TIN4', 'status' => 1, 'deleted_at' => now()]);
+$firstData = activationResponse('FIRST4', 'EIS-SITE', 1)->data->configuration;
+$firstData->terminalConfiguration->phoneNumber = '0888000000';
+$firstData->terminalConfiguration->emailAddress = 'site@example.test';
+$firstData->terminalConfiguration->addressLines = ['Plot 12', ' City Centre '];
+$beforeFirst = DB::table('business_locations')->count();
+$adopted = $sync->locationForActivation(4, $firstData);
+$adoptedRow = DB::table('business_locations')->where('id', 90)->first();
+locationCheck((int) $adopted->id === 90 && DB::table('business_locations')->count() === $beforeFirst,
+    'First terminal activation adopts the default business location instead of creating another');
+locationCheck($adoptedRow->eis_site_id === 'EIS-SITE' && $adoptedRow->location_id === 'EIS-SITE'
+    && $adoptedRow->name === 'Site EIS-SITE' && $adoptedRow->mobile === '0888000000'
+    && $adoptedRow->email === 'site@example.test' && $adoptedRow->landmark === 'Plot 12, City Centre'
+    && $adoptedRow->city === 'Blantyre',
+    'First activation updates default location details to the EIS site data');
+locationCheck(DB::table('business_locations')->where('id', 91)->value('name') === 'Second shop',
+    'First activation leaves other business locations untouched');
+DB::table('eis_settings')->insert(['id' => 91, 'business_id' => 4, 'branch_id' => 'EIS-SITE', 'device_id' => 'FIRST4',
+    'jwt_token' => 'token91', 'tpin' => 'TIN4', 'status' => 1, 'location_id' => 90]);
+$secondSite = $sync->locationForActivation(4, activationResponse('SECOND4', 'OTHER-SITE', 2)->data->configuration);
+locationCheck((int) $secondSite->id !== 90 && $secondSite->eis_site_id === 'OTHER-SITE'
+    && DB::table('business_locations')->where('id', 90)->value('eis_site_id') === 'EIS-SITE',
+    'Later activations for a new site create a location without repurposing the default');
+DB::rollBack();
 $missingSite = activationResponse('MISSING', 'A', 6);
 $missingSite->data->configuration->terminalConfiguration->terminalSite->siteName = '';
 locationReject(fn () => $process->invoke($activation, 1, $missingSite, 'CODE', [], 1),
@@ -194,10 +420,60 @@ $sale->setRawAttributes(['id' => 1, 'business_id' => 1, 'location_id' => 1]);
 locationCheck(TerminalContext::forSale($sale)->id === 1, 'Historical retry does not follow a default-terminal change');
 $deactivated = $activation->deactivate(1, 'Test', 1, $newId);
 locationCheck($deactivated['success'], 'Deactivation targets the selected terminal');
+locationCheck((float) DB::table('variation_location_details')->where('location_id', 1)->value('qty_available') === 12.0,
+    'Deactivation preserves shared location stock while another terminal remains locally enabled');
+DB::beginTransaction();
+$historyBeforeCleanup = DB::table('transactions')->orderBy('id')->get()->toJson();
+$soleDeactivated = $activation->deactivate(1, 'Stock cleanup test', 1, 2);
+locationCheck($soleDeactivated['success']
+    && (float) DB::table('variation_location_details')->where('location_id', 2)->value('qty_available') === 25.0
+    && App\VariationLocationDetails::where('location_id', 2)->count() === 0
+    && App\VariationLocationDetails::onlyTrashed()->where('location_id', 2)->count() === 1,
+    'Deactivating the last enabled terminal soft-deletes stock without changing its quantity');
+locationCheck(!DB::table('product_locations')->where('product_id', 1)->where('location_id', 2)->exists()
+    && DB::table('product_locations')->where('product_id', 3)->where('location_id', 2)->exists()
+    && DB::table('product_locations')->where('product_id', 1)->where('location_id', 1)->exists()
+    && DB::table('product_locations')->where('location_id', 3)->exists(),
+    'Deactivation unlinks EIS products from its location only, keeping manual products and other locations');
+locationCheck(DB::table('products')->count() === 3
+    && DB::table('transactions')->orderBy('id')->get()->toJson() === $historyBeforeCleanup
+    && (float) DB::table('variation_location_details')->where('location_id', 1)->value('qty_available') === 12.0
+    && (float) DB::table('variation_location_details')->where('location_id', 3)->value('qty_available') === 40.0,
+    'Stock cleanup preserves products, transaction history, other locations and tenants');
+DB::table('variation_location_details')->where('location_id', 2)->update(['qty_available' => -5, 'deleted_at' => null]);
+$cleanup = new Modules\EIS\Services\Terminal\InactiveTerminalStock();
+locationCheck($cleanup->clear(1, 2, true) === 1
+    && (float) DB::table('variation_location_details')->where('location_id', 2)->value('qty_available') === -5.0,
+    'Backfill dry run reports stock without mutating negative or positive quantities');
+locationCheck($activation->deactivate(1, null, 1, 2)['success']
+    && (float) DB::table('variation_location_details')->where('location_id', 2)->value('qty_available') === -5.0
+    && App\VariationLocationDetails::where('location_id', 2)->count() === 0
+    && $cleanup->clear(1, 2) === 0,
+    'Repeated deactivation soft-deletes legacy stock idempotently and retains negative quantities');
+locationCheck($activation->toggle(1, 'token2', 1, 2)['success']
+    && App\VariationLocationDetails::where('location_id', 2)->count() === 0,
+    'Reactivation does not automatically restore soft-deleted stock');
+DB::table('variation_location_details')->where('location_id', 2)->update(['qty_available' => 0, 'deleted_at' => null]);
+locationCheck($activation->toggle(1, 'token2', 1, 2)['success']
+    && App\VariationLocationDetails::onlyTrashed()->where('location_id', 2)->count() === 1,
+    'Toggle deactivation also soft-deletes zero-quantity stock records');
+DB::rollBack();
 locationReject(fn () => TerminalContext::forLocation(1, 1, true), 'Deactivated default blocks new submissions');
 locationCheck(TerminalContext::forSale($sale)->id === 1 && TerminalContext::forLocation(1, 2, true)->id === 2, 'Deactivation leaves other terminal/location sales available');
 locationCheck(!TerminalContext::settings(1, null, $newId)->status, 'Deactivation disables scheduled synchronization for the selected settings');
 $selectedConfiguration = Modules\EIS\Models\EisConfiguration::where('eis_setting_id', $newId)->firstOrFail();
+DB::table('business')->where('id', 1)->update(['name' => 'Locally edited name', 'tax_label_1' => 'TPIN', 'tax_number_1' => 'stale']);
+$sync->syncTerminalConfiguration($selectedConfiguration, activationResponse('A2', 'A', 3)->data->configuration);
+locationCheck(DB::table('business')->where('id', 1)->value('name') === 'EIS Trading Name',
+    'Latest terminal configuration refreshes the business name from EIS');
+locationCheck(DB::table('business')->where('id', 1)->value('tax_number_1') === 'TIN1'
+    && DB::table('business')->where('id', 1)->value('tax_label_1') === 'TPIN',
+    'Latest terminal configuration refreshes the tax number and keeps a custom tax label');
+DB::table('business')->where('id', 1)->update(['name' => 'Locally edited name']);
+$withoutTradingName = activationResponse('A2', 'A', 3, null)->data->configuration;
+$sync->syncTerminalConfiguration($selectedConfiguration, $withoutTradingName);
+locationCheck(DB::table('business')->where('id', 1)->value('name') === 'Locally edited name',
+    'Configuration without an EIS trading name preserves the business name');
 $sync->syncTerminalConfiguration($selectedConfiguration, activationResponse('A2', 'A', 3)->data->configuration);
 locationReject(fn () => TerminalContext::forLocation(1, 1, true), 'Remote configuration refresh cannot undo local deactivation');
 $previousEnvironment = $app['config']->get('eis.environment', 'development');
@@ -293,6 +569,23 @@ $app['config']['eis.environment'] = 'development';
 $http = new Illuminate\Http\Client\Factory();
 $http->preventStrayRequests();
 Illuminate\Support\Facades\Http::swap($http);
+Illuminate\Support\Facades\Http::fake(fn () => Illuminate\Support\Facades\Http::response(
+    json_decode(json_encode(activationResponse('PUBLIC-FOREIGN', 'FOREIGN-SITE', 3, 'Other Business')), true)
+));
+$publicBefore = activationSnapshot();
+$publicRejected = $activation->activateTerminal(1, 'TEST', ['platform' => ['osName' => 'Windows']], 1);
+locationCheck(!$publicRejected['success'] && $publicRejected['status_code'] === 422
+    && str_contains($publicRejected['message'], 'different trading name'),
+    'Public activation returns an explicit ownership rejection');
+locationCheck(activationSnapshot() === $publicBefore,
+    'Public activation rejection leaves local business and terminal state unchanged');
+locationCheck(count(Illuminate\Support\Facades\Http::recorded()) === 1
+    && str_ends_with(Illuminate\Support\Facades\Http::recorded()->first()[0]->url(), '/onboarding/activate-terminal'),
+    'Rejected public activation sends no remote activation confirmation');
+
+$http = new Illuminate\Http\Client\Factory();
+$http->preventStrayRequests();
+Illuminate\Support\Facades\Http::swap($http);
 Illuminate\Support\Facades\Http::fake(fn () => Illuminate\Support\Facades\Http::response([
     'data' => ['jwtToken' => 'renewed-jwt', 'secretKey' => 'renewed-secret'],
 ]));
@@ -313,7 +606,7 @@ $configurationClient = new class extends Modules\EIS\Services\Configuration\EisC
     public object $data;
     public int $calls = 0;
     public function __construct() {}
-    public function latest(string $token): Modules\EIS\Services\Configuration\EISConfigurationResponse {
+    public function latest(string $token, int $businessId): Modules\EIS\Services\Configuration\EISConfigurationResponse {
         ++$this->calls;
         return new Modules\EIS\Services\Configuration\EISConfigurationResponse((object) ['statusCode' => 1, 'data' => $this->data]);
     }
@@ -324,11 +617,11 @@ $configurationClient->data->terminalConfiguration->versionNo = 1;
 $configurationClient->data->taxpayerConfiguration->versionNo = 1;
 DB::table('eis_configurations')->where('id', 2)->update([
     'global_version' => 1, 'terminal_version' => 1, 'taxpayer_version' => 1,
-    'tpin' => 'TIN1', 'is_vat_registered' => 0,
+    'tpin' => 'TIN1', 'is_vat_registered' => 1,
     'raw_response' => json_encode(['data' => $configurationClient->data]),
 ]);
 $configurationValidator = Mockery::mock(Modules\EIS\Services\Configuration\Validators\ConfigurationValidator::class);
-$configurationValidator->shouldReceive('validate')->times(5)->andReturnNull();
+$configurationValidator->shouldReceive('validate')->times(6)->andReturnNull();
 $configService = new Modules\EIS\Services\Configuration\ConfigurationSyncService(
     $configurationClient, $configurationValidator
 );
@@ -383,8 +676,11 @@ $configService->sync(1, 'token2', false, 2);
 locationCheck(DB::table('business_locations')->where('id', 2)->value('email') === null
     && json_decode(DB::table('eis_terminal_configurations')->where('configuration_id', 2)->value('address_lines'), true) === [],
     'Explicit EIS field clearing is detected even without version changes');
-locationCheck($configService->sync(1, 'token2', false, 2)->id === 2,
-    'Identical full payload remains a no-op after refreshing all fields');
+DB::table('business')->where('id', 1)->update(['name' => 'Locally edited name', 'tax_number_1' => 'stale']);
+locationCheck($configService->sync(1, 'token2', false, 2)->id === 2
+    && DB::table('business')->where('id', 1)->value('name') === 'Updated trading name'
+    && DB::table('business')->where('id', 1)->value('tax_number_1') !== 'stale',
+    'Unchanged latest configuration still restores the EIS trading name and tax number');
 $schema->create('tax_rates', function (Blueprint $table) {
     $table->increments('id');
     foreach (['business_id', 'configuration_id', 'tax_rate_id', 'name', 'charge_mode', 'ordinal',
@@ -408,6 +704,25 @@ locationCheck((float) $vat->rate === 17.0 && !$vat->is_activated && DB::table('t
     'Existing rate amount and activation update without duplicate rate rows');
 locationCheck(!DB::table('eis_settings')->where('id', 2)->value('status'),
     'Full configuration refresh never re-enables a locally deactivated terminal');
+$schema->table('products', function (Blueprint $table) { $table->integer('tax')->nullable(); });
+DB::table('tax_rates')->where('configuration_id', 2)->delete();
+$legacyVat = DB::table('tax_rates')->insertGetId(['business_id' => 0, 'configuration_id' => 2, 'tax_rate_id' => 'VAT', 'rate' => 1]);
+$removedRate = DB::table('tax_rates')->insertGetId(['business_id' => 0, 'configuration_id' => 2, 'tax_rate_id' => 'OLD', 'rate' => 0]);
+$unusedRate = DB::table('tax_rates')->insertGetId(['business_id' => 1, 'configuration_id' => 2, 'tax_rate_id' => 'GONE', 'rate' => 0]);
+$vatProduct = DB::table('products')->insertGetId(['business_id' => 1, 'tax' => $legacyVat]);
+$oldProduct = DB::table('products')->insertGetId(['business_id' => 1, 'tax' => $removedRate]);
+$configService->sync(1, 'token2', true, 2);
+$vat = DB::table('tax_rates')->where('id', $legacyVat)->first();
+locationCheck((int) $vat->business_id === 1 && (float) $vat->rate === 17.0
+    && DB::table('tax_rates')->where('configuration_id', 2)->where('tax_rate_id', 'VAT')->count() === 1
+    && (int) DB::table('products')->where('id', $vatProduct)->value('tax') === $legacyVat,
+    'Legacy tax rate rows are updated in place instead of duplicated');
+locationCheck(DB::table('tax_rates')->where('id', $removedRate)->exists()
+    && (int) DB::table('products')->where('id', $oldProduct)->value('tax') === $removedRate
+    && !DB::table('tax_rates')->where('id', $unusedRate)->exists(),
+    'Removed tax rates still used by products are kept; unused ones are deleted');
+DB::table('products')->whereIn('id', [$vatProduct, $oldProduct])->delete();
+DB::table('tax_rates')->where('id', $removedRate)->delete();
 DB::table('eis_settings')->where('id', 2)->update(['status' => 1]);
 $configurationClient->data->terminalConfiguration->terminalSite->siteId = 'A';
 $snapshot = DB::table('eis_configurations')->get()->toJson();

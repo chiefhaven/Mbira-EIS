@@ -74,6 +74,9 @@ class StockReconciliationService
                 if (bccomp($delta, '0', 4) !== 0) {
                     $line['transaction_id'] = $this->move($setting, $line, $delta, $actorId, $snapshotId);
                 }
+                $this->db->table('variation_location_details')->where('variation_id', $line['variation_id'])
+                    ->where('location_id', $setting->location_id)->whereNotNull('deleted_at')
+                    ->update(['deleted_at' => null, 'updated_at' => now()]);
             }
             unset($line);
             $this->db->table('eis_stock_reconciliations')->where('id', $snapshotId)->update([
@@ -230,6 +233,7 @@ class StockReconciliationService
                 'product_variation_id' => (int) $variation->product_variation_id,
                 'code' => (string) $map->eis_product_id, 'name' => $product->name,
                 'local' => $local, 'remote' => $inventory[(string) $map->eis_product_id],
+                'stock_deleted_at' => $stocks->first()->deleted_at ?? null,
                 'cost' => $this->decimal($variation->default_purchase_price),
                 'cost_inc' => $this->decimal($variation->dpp_inc_tax), 'tax_id' => $product->tax,
                 'allocation_order' => $allocationOrder,

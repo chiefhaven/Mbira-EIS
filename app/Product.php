@@ -180,6 +180,7 @@ class Product extends Model
 
         return $query->leftJoin('variation_location_details as vld', function ($join) use ($locations) {
             $join->on('vld.variation_id', '=', 'v.id')
+                ->whereNull('vld.deleted_at')
                 ->whereIn('vld.location_id', $locations->select('id'));
         });
     }

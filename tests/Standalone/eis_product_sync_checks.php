@@ -74,7 +74,7 @@ function catalogFixture(): array
             'eis_product_id', 'eis_last_synced_at', 'unit_id', 'expiry_period', 'deleted_at',
             'brand_id', 'category_id', 'sub_category_id', 'alert_quantity', 'image', 'product_custom_field1',
             'woocommerce_media_id', 'woocommerce_product_id'],
-        'eis_settings' => ['business_id', 'location_id', 'status', 'site_id', 'branch_id', 'jwt_token'],
+        'eis_settings' => ['business_id', 'location_id', 'status', 'site_id', 'branch_id', 'jwt_token', 'deleted_at'],
         'product_variations' => ['product_id', 'variation_template_id', 'name', 'is_dummy'],
         'variations' => ['product_id', 'product_variation_id', 'name', 'default_sell_price', 'default_purchase_price',
             'dpp_inc_tax', 'sell_price_inc_tax', 'sub_sku', 'profit_percent', 'deleted_at'],
@@ -82,9 +82,9 @@ function catalogFixture(): array
         'product_locations' => ['product_id', 'location_id'],
         'units' => ['business_id', 'short_name', 'actual_name'],
         'tax_rates' => ['business_id', 'configuration_id', 'tax_rate_id', 'name', 'is_activated', 'rate', 'deleted_at'],
-        'eis_configurations' => ['business_id', 'eis_setting_id', 'location_id'],
+        'eis_configurations' => ['business_id', 'eis_setting_id', 'location_id', 'deleted_at'],
         'eis_product_maps' => ['business_id', 'product_id', 'eis_product_id', 'sku', 'last_synced_at', 'meta', 'deleted_at'],
-        'variation_location_details' => ['product_id', 'product_variation_id', 'variation_id', 'location_id', 'qty_available'],
+        'variation_location_details' => ['product_id', 'product_variation_id', 'variation_id', 'location_id', 'qty_available', 'deleted_at'],
         'transactions' => ['business_id', 'location_id', 'type', 'status', 'payment_status', 'opening_stock_product_id',
             'created_by', 'transaction_date', 'total_before_tax', 'final_total', 'tax_amount', 'additional_notes'],
         'purchase_lines' => ['transaction_id', 'product_id', 'variation_id', 'quantity', 'pp_without_discount',
@@ -257,13 +257,25 @@ $db->table('eis_product_maps')->where('id', $two->id)->update(['deleted_at' => n
 $client->pages = [['data' => [catalogItem('NEW'), catalogItem('ONE', '77'), catalogItem('TWO')]]];
 rejectCatalog($db, $sync, 'Later product import failure');
 $db->table('products')->where('id', $two->product_id)->update(['type' => 'single']);
+// ONE is listed here and at location 3: an empty catalog unlinks it here but keeps it for location 3.
+$db->table('product_locations')->insert(['product_id' => $one->product_id, 'location_id' => 1]);
 $client->pages = [['data' => []]];
 pullCatalog($sync);
-catalogCheck(Product::withTrashed()->where('business_id', 1)->count() === 3
-    && EisProductMap::withTrashed()->where('business_id', 1)->count() === 2
+catalogCheck(!Product::withTrashed()->find($one->product_id)->trashed()
+    && EisProductMap::find($one->id) !== null
+    && !$db->table('product_locations')->where('product_id', $one->product_id)->where('location_id', 1)->exists()
+    && $db->table('product_locations')->where('product_id', $one->product_id)->where('location_id', 3)->exists()
     && !Product::withTrashed()->find(100)->trashed(),
-    'A successful explicit empty catalog preserves existing maps, products and manual business products');
+    'A successful explicit empty catalog unlinks EIS products here, keeps those listed elsewhere and never touches manual products');
 catalogCheck(Product::where('business_id', 2)->count() === 1, 'Empty catalog remains tenant scoped');
+$db->beginTransaction();
+$db->table('product_locations')->where('product_id', $one->product_id)->delete();
+$db->table('product_locations')->insert(['product_id' => $one->product_id, 'location_id' => 1]);
+pullCatalog($sync);
+catalogCheck(Product::withTrashed()->find($one->product_id)->trashed() && EisProductMap::find($one->id) === null
+    && EisProductMap::withTrashed()->find($one->id)->trashed(),
+    'A successful explicit empty catalog soft-deletes EIS products listed only at this location');
+$db->rollBack();
 $client->pages = [['data' => [catalogItem('TWO')]]];
 pullCatalog($sync);
 catalogCheck(Product::find($two->product_id) !== null && EisProductMap::find($two->id) !== null,
@@ -298,6 +310,47 @@ try {
 } finally {
     Illuminate\Support\Facades\DB::swap($manager);
 }
+
+[$db, $client, $sync] = catalogFixture();
+$sameNameItems = [
+    array_merge(catalogItem('2166646075586'), ['productName' => 'Dried Mango']),
+    array_merge(catalogItem('4427567135123'), ['productName' => 'Dried Mango']),
+];
+$client->pages = [['data' => $sameNameItems]];
+pullCatalog($sync);
+$firstMango = EisProductMap::where('eis_product_id', '2166646075586')->firstOrFail();
+$secondMango = EisProductMap::where('eis_product_id', '4427567135123')->firstOrFail();
+catalogCheck($firstMango->product_id !== $secondMango->product_id
+    && Product::where('name', 'Dried Mango')->count() === 2,
+    'Different EIS codes with identical names create separate products and maps');
+$client->pages = [['data' => array_reverse($sameNameItems)]];
+pullCatalog($sync);
+catalogCheck(EisProductMap::count() === 2 && Product::count() === 2
+    && EisProductMap::where('eis_product_id', '2166646075586')->value('product_id') === $firstMango->product_id
+    && EisProductMap::where('eis_product_id', '4427567135123')->value('product_id') === $secondMango->product_id,
+    'Repeated same-name catalog pulls preserve both identities regardless of order');
+$db->table('products')->where('id', $firstMango->product_id)->update(['eis_product_id' => null, 'deleted_at' => now()]);
+$db->table('eis_product_maps')->where('id', $firstMango->id)->update(['deleted_at' => now()]);
+$client->pages = [['data' => [array_merge(catalogItem('THIRD'), ['productName' => 'Dried Mango'])]]];
+pullCatalog($sync);
+catalogCheck(Product::withTrashed()->findOrFail($firstMango->product_id)->trashed()
+    && EisProductMap::withTrashed()->findOrFail($firstMango->id)->trashed()
+    && !in_array(EisProductMap::where('eis_product_id', 'THIRD')->value('product_id'),
+        [$firstMango->product_id, $secondMango->product_id], true),
+    'Name fallback cannot reuse a soft-deleted mapping even if the product identifier is missing');
+$db->table('products')->where('id', $firstMango->product_id)->update(['sku' => 'CONFLICT']);
+$client->pages = [['data' => [catalogItem('CONFLICT')]]];
+rejectCatalog($db, $sync, 'SKU belonging to a different soft-deleted EIS mapping');
+
+[$db, $client, $sync] = catalogFixture();
+$manualMango = $db->table('products')->insertGetId([
+    'business_id' => 1, 'type' => 'single', 'name' => 'Dried Mango', 'sku' => 'MANUAL-MANGO',
+]);
+$client->pages = [['data' => $sameNameItems]];
+pullCatalog($sync);
+catalogCheck((int) EisProductMap::where('eis_product_id', '2166646075586')->value('product_id') === $manualMango
+    && (int) EisProductMap::where('eis_product_id', '4427567135123')->value('product_id') !== $manualMango,
+    'Name fallback still adopts an unmapped manual product once, without merging subsequent EIS codes');
 
 [$db, $client, $sync] = catalogFixture();
 $db->table('business_locations')->where('business_id', 1)->update(['eis_site_id' => 'WRONG']);
@@ -717,5 +770,56 @@ catalogCheck((float) listedStock(1) === 109019.0, 'Ordinary business list sums o
 catalogCheck((float) listedStock(1, 3) === 42.0, 'Ordinary selected-location stock excludes other locations');
 catalogCheck((float) listedStock(1, null, [3]) === 42.0, 'Ordinary total respects permitted locations');
 catalogCheck(listedStock(1, 2) === null, 'Foreign location cannot contribute to a business stock total');
+$db->table('variation_location_details')->where('location_id', 1)->update(['deleted_at' => now()]);
+catalogCheck(listedStock(1, 1) === null && (float) listedStock(1) === 42.0,
+    'Soft-deleted location stock is excluded from both selected and business-wide stock totals');
+catalogCheck((float) $db->table('variation_location_details')->where('location_id', 1)->value('qty_available') === 108977.0
+    && \App\VariationLocationDetails::onlyTrashed()->where('location_id', 1)->count() === 1,
+    'Soft-deleted stock retains its exact quantity and remains available through the archive scope');
+
+// Catalog reconciliation: missing EIS products are removed and returning ones restored.
+[$db, $client, $sync] = catalogFixture();
+$db->table('products')->insert(['id' => 100, 'business_id' => 1, 'name' => 'Manual', 'sku' => 'LOCAL']);
+$db->table('product_locations')->insert(['product_id' => 100, 'location_id' => 1]);
+$client->pages = [['data' => [catalogItem('KEEP'), catalogItem('GONE'), catalogItem('SHARED')]]];
+pullCatalog($sync);
+$gone = EisProductMap::where('eis_product_id', 'GONE')->firstOrFail();
+$shared = EisProductMap::where('eis_product_id', 'SHARED')->firstOrFail();
+$db->table('product_locations')->insert(['product_id' => $shared->product_id, 'location_id' => 3]);
+$client->pages = [['data' => [catalogItem('KEEP')]]];
+pullCatalog($sync);
+catalogCheck(Product::onlyTrashed()->whereKey($gone->product_id)->exists()
+    && EisProductMap::onlyTrashed()->whereKey($gone->id)->exists()
+    && !$db->table('product_locations')->where('product_id', $gone->product_id)->exists(),
+    'EIS products missing from the catalog are unlinked and soft-deleted with their map');
+catalogCheck(!Product::withTrashed()->find($shared->product_id)->trashed()
+    && $db->table('product_locations')->where('product_id', $shared->product_id)->pluck('location_id')->map('intval')->all() === [3],
+    'A missing product still listed at another location is only unlinked from this location');
+catalogCheck(!Product::withTrashed()->find(100)->trashed()
+    && $db->table('product_locations')->where('product_id', 100)->exists(),
+    'Manual products without an EIS map are never removed by catalog sync');
+$client->pages = [['data' => [catalogItem('KEEP'), catalogItem('GONE'), catalogItem('SHARED')]]];
+pullCatalog($sync);
+catalogCheck(Product::whereKey($gone->product_id)->exists() && EisProductMap::whereKey($gone->id)->exists()
+    && $db->table('product_locations')->where('product_id', $gone->product_id)->where('location_id', 1)->exists()
+    && $db->table('product_locations')->where('product_id', $shared->product_id)->where('location_id', 1)->exists(),
+    'Returning catalog products are restored with the same identities and relisted at the location');
+catalogCheck(Product::withTrashed()->where('business_id', 1)->count() === 4,
+    'Restoring returning products does not create duplicates');
+
+// Deactivation unlinks EIS product listings from the terminal location only.
+$db->table('eis_settings')->where('id', 1)->update(['status' => 0]);
+$unlinked = (new \Modules\EIS\Services\Terminal\InactiveTerminalStock())->unlinkProducts(1, 1);
+catalogCheck($unlinked === 3 && !$db->table('product_locations')->where('location_id', 1)
+    ->where('product_id', '!=', 100)->exists(), 'Deactivation removes EIS product listings from the location');
+catalogCheck($db->table('product_locations')->where('product_id', 100)->exists()
+    && $db->table('product_locations')->where('location_id', 3)->exists(),
+    'Deactivation keeps manual products and other locations listed');
+$client->pages = [['data' => [catalogItem('KEEP')]]];
+pullCatalog($sync);
+$db->table('eis_settings')->insert(['business_id' => 1, 'location_id' => 1, 'status' => 1, 'branch_id' => 'SITE-A']);
+catalogCheck((new \Modules\EIS\Services\Terminal\InactiveTerminalStock())->unlinkProducts(1, 1) === 0
+    && $db->table('product_locations')->where('location_id', 1)->where('product_id', '!=', 100)->exists(),
+    'Listings stay while another active terminal serves the location');
 Mockery::close();
 echo "PASS: {$checks} isolated EIS catalog sync, ownership and editor checks; no live sync or network.\n";

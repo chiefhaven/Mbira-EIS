@@ -295,7 +295,9 @@ class SellController extends Controller
                                 }
                             }
 
-                            $delete_link = '<li><a href="'.action([\App\Http\Controllers\SellPosController::class, 'destroy'], [$row->id]).'" class="delete-sale"><i class="fas fa-trash"></i> '.__('messages.delete').'</a></li>';
+                            $delete_link = $row->type == 'sell' && in_array($row->payment_status, ['paid', 'partial'])
+                                ? ''
+                                : '<li><a href="'.action([\App\Http\Controllers\SellPosController::class, 'destroy'], [$row->id]).'" class="delete-sale"><i class="fas fa-trash"></i> '.__('messages.delete').'</a></li>';
                             if ($row->is_direct_sale == 0) {
                                 if (auth()->user()->can('sell.delete')) {
                                     $html .= $delete_link;
@@ -1670,6 +1672,7 @@ class SellController extends Controller
                         )
                         ->leftjoin('variation_location_details AS vld', function ($join) use ($location_id) {
                             $join->on('variations.id', '=', 'vld.variation_id')
+                                ->whereNull('vld.deleted_at')
                                 ->where('vld.location_id', '=', $location_id);
                         })
                         ->leftjoin('units', 'units.id', '=', 'p.unit_id')

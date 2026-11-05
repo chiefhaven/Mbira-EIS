@@ -253,6 +253,9 @@ final class OpeningStockInitializer
             if ((int) $row->location_id !== $locationId) {
                 continue;
             }
+            if ($row->deleted_at !== null) {
+                return $block('soft_deleted_stock_requires_reconciliation');
+            }
             $available = self::decimal($row->qty_available);
             if ($available === null || bccomp($available, '0', 4) !== 0) {
                 return $block('legacy_nonzero_or_invalid_availability');

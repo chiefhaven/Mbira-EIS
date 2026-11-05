@@ -388,11 +388,20 @@ class SaleTransformer
      */
     protected function getBuyerInfo(Transaction $transaction): array
     {
+        $contactInfo = null;
         try {
             if ($transaction->contact && $transaction->contact->exists) {
-                return [
-                    'name' => $transaction->contact->name ?? self::DEFAULT_CUSTOMER_NAME,
-                    'tpin' => trim((string) ($transaction->contact->tax_number ?? '')),
+                $taxNumber = trim((string) ($transaction->contact->tax_number ?? ''));
+                $name = trim((string) ($transaction->contact->name ?? ''));
+                if ($name === '') {
+                    $name = trim((string) ($transaction->contact->supplier_business_name ?? ''));
+                }
+                if ($name === '') {
+                    $name = trim((string) ($transaction->customer_name ?? ''));
+                }
+                $contactInfo = [
+                    'name' => $name,
+                    'tpin' => $taxNumber,
                     'authorization_code' => trim((string) ($transaction->contact->authorization_code ?? '')),
                 ];
             }
@@ -403,10 +412,20 @@ class SaleTransformer
             ]);
         }
 
+        if ($contactInfo !== null) {
+            $contactInfo['name'] = $contactInfo['name'] !== ''
+                ? $contactInfo['name']
+                : self::DEFAULT_CUSTOMER_NAME;
+            return $contactInfo;
+        }
+
         // Fallback to transaction fields
+        $name = trim((string) ($transaction->customer_name ?? ''));
+        $taxNumber = trim((string) ($transaction->customer_tpin ?? ''));
+
         return [
-            'name' => $transaction->customer_name ?? self::DEFAULT_CUSTOMER_NAME,
-            'tpin' => $transaction->customer_tpin ?? '',
+            'name' => $name !== '' ? $name : self::DEFAULT_CUSTOMER_NAME,
+            'tpin' => $taxNumber,
             'authorization_code' => $transaction->customer_authorization_code ?? '',
         ];
     }

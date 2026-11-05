@@ -5,6 +5,7 @@ namespace Modules\EIS\Models;
 use App\Business;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasOne;
+use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Carbon;
 
 /**
@@ -25,6 +26,8 @@ use Illuminate\Support\Carbon;
  */
 class EisConfiguration extends Model
 {
+    use SoftDeletes;
+
     protected $table = 'eis_configurations';
 
     protected $fillable = [

@@ -35,12 +35,15 @@ foreach ([
     'eis_failed_transactions' => ['business_id', 'transaction_id'],
     'transactions' => ['business_id', 'location_id'],
 ] as $name => $columns) {
-    $schema->create($name, function (Blueprint $table) use ($columns) {
+    $schema->create($name, function (Blueprint $table) use ($name, $columns) {
         $table->increments('id');
         foreach ($columns as $column) {
             $table->text($column)->nullable();
         }
         $table->timestamps();
+        if (str_starts_with($name, 'eis_') && $name !== 'eis_sales' && $name !== 'eis_failed_transactions') {
+            $table->softDeletes();
+        }
     });
 }
 DB::table('business_locations')->insert([

@@ -565,7 +565,13 @@ class ImportSalesController extends Controller
             //Begin transaction
             DB::beginTransaction();
             foreach ($sales as $sale) {
-                $this->transactionUtil->deleteSale($business_id, $sale->id);
+                $deleted = $this->transactionUtil->deleteSale($business_id, $sale->id);
+                if (empty($deleted['success'])) {
+                    DB::rollBack();
+
+                    return redirect('import-sales')->with('status', ['success' => 0,
+                        'msg' => ($deleted['msg'] ?? __('messages.something_went_wrong')).' ('.$sale->invoice_no.')', ]);
+                }
             }
 
             DB::commit();

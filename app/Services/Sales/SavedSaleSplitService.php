@@ -1181,6 +1181,7 @@ class SavedSaleSplitService
         ksort($quantities, SORT_NUMERIC);
         foreach ($quantities as $variation => [$product, $quantity]) {
             $stock = $this->db->table('variation_location_details')->where('product_id', $product)
+                ->whereNull('deleted_at')
                 ->where('variation_id', $variation)->where('location_id', $h['location_id'])->orderBy('id')->lockForUpdate()->get();
             if ($stock->count() > 1 || (empty($settings['allow_overselling']) &&
                 ($stock->count() !== 1 || bccomp(self::decimal($stock[0]->qty_available), $quantity, 4) < 0))) {
@@ -1189,10 +1190,12 @@ class SavedSaleSplitService
         }
         foreach ($quantities as $variation => [$product, $quantity]) {
             $beforeValue = $this->db->table('variation_location_details')->where('product_id', $product)
+                ->whereNull('deleted_at')
                 ->where('variation_id', $variation)->where('location_id', $h['location_id'])->value('qty_available');
             $before = $beforeValue === null ? '0.0000' : self::decimal($beforeValue);
             $productUtil->decreaseProductQuantity($product, $variation, $h['location_id'], $quantity, 0, $h['id']);
             $after = self::decimal($this->db->table('variation_location_details')->where('product_id', $product)
+                ->whereNull('deleted_at')
                 ->where('variation_id', $variation)->where('location_id', $h['location_id'])->value('qty_available'));
             if (bccomp($after, bcsub($before, $quantity, 4), 4) !== 0) {
                 $this->fail('checkout_invariant_failed', 'Stock utility did not decrease the exact saved quantity; rolled back.');

@@ -537,6 +537,7 @@ return [
     'total_unit_transfered' => 'Total Unit Transfered',
     'total_unit_adjusted' => 'Total Unit Adjusted',
     'return_exist' => 'Return exist for the Transaction, edit the return instead.',
+    'paid_sale_cannot_be_deleted' => 'Paid or partially paid sales cannot be deleted.',
     'synced_from_woocommerce' => 'Synced from Woocommerce',
     'available_stock_expired' => ' OR available stock has expired.',
     'sell_payments' => 'Permission to Add/Edit/Delete Payments in List Sells / List POS screen.',

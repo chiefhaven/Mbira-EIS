@@ -3,6 +3,7 @@
 namespace Tests\Unit;
 
 use App\BusinessLocation;
+use App\InvoiceLayout;
 use App\Product;
 use App\User;
 use Illuminate\Database\Capsule\Manager as Capsule;
@@ -27,10 +28,17 @@ class LocationStockAndDefaultsTest extends TestCase
         $this->db->bootEloquent();
 
         $schema = $this->db->getConnection()->getSchemaBuilder();
+        $schema->create('business', function (Blueprint $table) {
+            $table->increments('id');
+        });
+        $this->db->getConnection()->table('business')->insert([
+            ['id' => 1], ['id' => 2], ['id' => 3], ['id' => 5],
+        ]);
         $schema->create('business_locations', function (Blueprint $table) {
             $table->increments('id');
             $table->integer('business_id');
             $table->string('eis_site_id')->nullable();
+            $table->boolean('is_active')->default(true);
             $table->text('default_payment_accounts')->nullable();
         });
         foreach (['invoice_schemes', 'invoice_layouts'] as $name) {
@@ -38,6 +46,11 @@ class LocationStockAndDefaultsTest extends TestCase
                 $table->increments('id');
                 $table->integer('business_id');
                 $table->boolean('is_default');
+                $table->string('name')->nullable();
+                $table->string('design')->nullable();
+                $table->text('footer_text')->nullable();
+                $table->string('logo')->nullable();
+                $table->timestamps();
             });
         }
         $schema->create('products', function (Blueprint $table) {
@@ -53,6 +66,7 @@ class LocationStockAndDefaultsTest extends TestCase
             $table->integer('variation_id');
             $table->integer('location_id');
             $table->decimal('qty_available', 22, 4);
+            $table->softDeletes();
         });
 
         $this->db->getConnection()->table('business_locations')->insert([
@@ -120,6 +134,17 @@ class LocationStockAndDefaultsTest extends TestCase
         $this->assertSame(24.0, $this->stock($admin->permitted_locations(1)));
     }
 
+    public function testArchivedStockIsExcludedWithoutChangingOtherLocationTotals(): void
+    {
+        $this->db->getConnection()->table('variation_location_details')->where('location_id', 1)
+            ->update(['deleted_at' => '2026-11-03 15:00:00']);
+
+        $this->assertSame(0.0, $this->stock('all', 1));
+        $this->assertSame(24.0, $this->stock('all'));
+        $this->assertSame(8.0, (float) $this->db->getConnection()->table('variation_location_details')
+            ->where('location_id', 1)->sum('qty_available'));
+    }
+
     public function testExplicitAllLocationsPermissionPreservesAllSemantics(): void
     {
         $user = Mockery::mock(User::class)->makePartial();
@@ -161,5 +186,52 @@ class LocationStockAndDefaultsTest extends TestCase
         $this->db->getConnection()->table('business_locations')->where('id', 1)
             ->update(['default_payment_accounts' => '{}']);
         $this->assertSame([], BusinessLocation::creationDefaults(1, ['cash' => 'Cash'])['default_payment_accounts']);
+    }
+
+    public function testSampleInvoiceSettingsApplyToEveryBusinessDefaultAndMissingDefaults(): void
+    {
+        $table = $this->db->getConnection()->table('invoice_layouts');
+        $table->insert([
+            ['id' => 5, 'business_id' => 5, 'name' => 'Default', 'is_default' => 1,
+                'design' => 'slim', 'footer_text' => 'Sample footer', 'logo' => 'sample.png'],
+            ['id' => 6, 'business_id' => 1, 'name' => 'Default', 'is_default' => 1,
+                'design' => 'classic', 'footer_text' => 'Old footer', 'logo' => null],
+            ['id' => 7, 'business_id' => 1, 'name' => 'Custom', 'is_default' => 0,
+                'design' => 'classic', 'footer_text' => 'Custom footer', 'logo' => null],
+        ]);
+
+        InvoiceLayout::copySampleSettingsToAllBusinessDefaults();
+
+        $existing = $this->db->getConnection()->table('invoice_layouts')->where('id', 6)->first();
+        $custom = $this->db->getConnection()->table('invoice_layouts')->where('id', 7)->first();
+        $newDefault = $this->db->getConnection()->table('invoice_layouts')
+            ->where('business_id', 2)->where('is_default', 1)->first();
+        $this->assertSame('slim', $existing->design);
+        $this->assertSame('Sample footer', $existing->footer_text);
+        $this->assertSame('Default', $existing->name);
+        $this->assertSame('classic', $custom->design);
+        $this->assertSame('Custom footer', $custom->footer_text);
+        $this->assertSame('slim', $newDefault->design);
+        $this->assertSame('sample.png', $newDefault->logo);
+        $this->assertSame(5, $this->db->getConnection()->table('invoice_layouts')
+            ->where('business_id', 5)->where('is_default', 1)->value('id'));
+    }
+
+    public function testNewBusinessDefaultCopiesCurrentSampleLayout(): void
+    {
+        $table = $this->db->getConnection()->table('invoice_layouts');
+        $table->insert([
+            'id' => 5, 'business_id' => 5, 'name' => 'Default', 'is_default' => 1,
+            'design' => 'slim', 'footer_text' => 'Sample footer', 'logo' => 'sample.png',
+        ]);
+
+        $layout = InvoiceLayout::createDefaultFromSample(3);
+
+        $this->assertSame(3, (int) $layout->business_id);
+        $this->assertSame('Default', $layout->name);
+        $this->assertTrue((bool) $layout->is_default);
+        $this->assertSame('slim', $layout->design);
+        $this->assertSame('Sample footer', $layout->footer_text);
+        $this->assertSame('sample.png', $layout->logo);
     }
 }

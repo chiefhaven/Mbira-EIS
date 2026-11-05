@@ -4,6 +4,8 @@ namespace Modules\EIS\Services\Sync;
 
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use App\Product;
+use Modules\EIS\Models\EisProductMap;
 use Modules\EIS\Services\Products\EisProductClient;
 use Modules\EIS\Services\Products\OpeningStockInitializer;
 use Modules\EIS\Services\Products\ProductTransformer;
@@ -128,10 +130,52 @@ class ProductSyncService
                 $this->upserter->upsert($businessId, $data, (string) $eisId, $settings, $locationId);
             }
 
+            $removed = $this->removeMissingProducts($businessId, $locationId, array_keys($catalog));
+
             Log::info('EIS product catalog reconciled', [
                 'business_id' => $businessId, 'site_id' => $requestSite,
                 'location_id' => $locationId, 'product_count' => count($catalog),
+                'removed_count' => $removed,
             ]);
+        });
+    }
+
+    /**
+     * Unlink EIS-mapped products missing from the catalog at this location and soft-delete
+     * those no longer listed at any location. Products without an EIS map are never touched.
+     */
+    private function removeMissingProducts(int $businessId, int $locationId, array $eisIds): int
+    {
+        // Invalid or unsuccessful pages already abort the sync, so a valid empty catalog delists everything here.
+        $present = array_flip(array_map('strval', $eisIds));
+
+        return \App\Services\EisProductPolicy::duringSync($businessId, function () use ($businessId, $locationId, $present) {
+            $maps = EisProductMap::where('business_id', $businessId)
+                ->whereIn('product_id', DB::table('product_locations')->select('product_id')->where('location_id', $locationId))
+                ->lockForUpdate()->get()
+                ->reject(fn ($map) => isset($present[(string) $map->eis_product_id]));
+
+            foreach ($maps as $map) {
+                DB::table('product_locations')->where('product_id', $map->product_id)
+                    ->where('location_id', $locationId)->delete();
+                if (DB::table('product_locations')->where('product_id', $map->product_id)->exists()) {
+                    continue;
+                }
+                $product = Product::where('business_id', $businessId)->find($map->product_id);
+                if ($product) {
+                    $product->delete();
+                }
+                $map->delete();
+            }
+
+            if ($maps->isNotEmpty()) {
+                Log::info('EIS products missing from catalog removed', [
+                    'business_id' => $businessId, 'location_id' => $locationId,
+                    'eis_product_ids' => $maps->pluck('eis_product_id')->all(),
+                ]);
+            }
+
+            return $maps->count();
         });
     }
 

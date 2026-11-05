@@ -139,6 +139,8 @@ class SaleSubmissionService
             // ----------------------------
             // TRANSFORM WITH EIS Number
             // ----------------------------
+            $this->applyConfigurationVersions($eisSetting);
+
             // Fiscal creation has its own date; retries retain the invoice date already sent.
             $fiscalTransaction = clone $transaction;
             $fiscalTransaction->transaction_date = $existing?->request_payload['invoiceHeader']['invoiceDateTime']
@@ -276,6 +278,25 @@ class SaleSubmissionService
         $status = (int) ($response['status'] ?? 0);
         return in_array($errorCode, ['CONNECTION_ERROR', 'REQUEST_ERROR', 'UNEXPECTED_ERROR'], true)
             || ($errorCode === 'HTTP_ERROR_'.$status && $status >= 500 && $status < 600);
+    }
+
+    private function applyConfigurationVersions(EisSetting $settings): void
+    {
+        $configuration = \Modules\EIS\Models\EisConfiguration::where('business_id', $settings->business_id)
+            ->where('eis_setting_id', $settings->id)
+            ->firstOrFail();
+
+        foreach ([
+            'global_version',
+            'taxpayer_version',
+            'terminal_version',
+        ] as $field) {
+            if ($configuration->$field === null) {
+                throw new EisSaleException("EIS configuration is missing {$field} for this terminal.");
+            }
+
+            $settings->setAttribute($field, $configuration->$field);
+        }
     }
 
     private function storedOfflineSignatureData(?array $payload): ?array

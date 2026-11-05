@@ -25,7 +25,7 @@ $schema->table('stock_adjustment_lines', function (Blueprint $t) { $t->text('uni
 $schema->table('transaction_sell_lines_purchase_lines', function (Blueprint $t) { $t->integer('stock_adjustment_line_id')->nullable(); });
 $schema->table('eis_settings', function (Blueprint $t) { $t->boolean('status')->default(true); $t->string('tpin')->default('TIN'); });
 $schema->create('eis_terminal_configurations', function (Blueprint $t) {
-    $t->increments('id'); $t->integer('configuration_id'); $t->boolean('is_active');
+    $t->increments('id'); $t->integer('configuration_id'); $t->boolean('is_active'); $t->softDeletes();
 });
 $db->table('eis_terminal_configurations')->insert(['configuration_id' => 1, 'is_active' => true]);
 $schema->create('eis_sales', function (Blueprint $t) {
@@ -88,6 +88,17 @@ $preview = $service->preview(1, 1, 7);
 $before = graph($db);
 $service->apply(1, $preview->id, 7);
 verify(graph($db) === $before, 'Already-equal stock produces no movement');
+$db->table('variation_location_details')->where('location_id', 2)->update(['deleted_at' => now()]);
+$preview = $service->preview(1, 1, 7);
+$movementCount = $db->table('transactions')->count();
+verify(App\VariationLocationDetails::where('location_id', 2)->count() === 0,
+    'Soft-deleted stock is excluded from active stock queries');
+$service->apply(1, $preview->id, 7);
+verify(App\VariationLocationDetails::where('location_id', 2)->count() === 1
+    && $db->table('variation_location_details')->where('location_id', 2)->value('qty_available') === '12.0000'
+    && $db->table('transactions')->count() === $movementCount,
+    'Explicit reconciliation restores archived stock without inventing a quantity delta or ledger movement');
+$before = graph($db);
 $preview = $service->preview(1, 1, 7);
 $client->inventory['EIS-ONE'] = '13.0000';
 stockReject(fn () => $service->apply(1, $preview->id, 7), 'Changed remote snapshot requires fresh comparison');

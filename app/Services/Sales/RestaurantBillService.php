@@ -422,6 +422,7 @@ class RestaurantBillService
             foreach ($waste as $variationId => $quantity) {
                 $productId = $before['lines']->firstWhere('variation_id', $variationId)->product_id;
                 $stock = $this->db->table('variation_location_details')->where('product_id', $productId)
+                    ->whereNull('deleted_at')
                     ->where('variation_id', $variationId)->where('location_id', $before['header']->location_id)->lockForUpdate()->get();
                 if (!$this->db->table('products')->where('id', $productId)->value('enable_stock')) { continue; }
                 if ($stock->count() !== 1) { $this->fail('Waste requires an unambiguous stock row.'); }

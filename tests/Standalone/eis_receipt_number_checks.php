@@ -77,6 +77,24 @@ $harness->printer->output = '';
 $print((object) ['invoice_no' => 'TXN-100']);
 checkReceiptNumber($harness->printer->output === '', 'No invented raw thermal EIS identity');
 $util = file_get_contents($root.'/app/Utils/TransactionUtil.php');
+checkReceiptNumber(str_contains($util, "->where('configuration.eis_setting_id', \$transaction->eisSale->eis_setting_id)")
+    && str_contains($util, "->where('configuration.location_id', \$transaction->location_id)")
+    && str_contains($util, "->where('configuration.business_id', \$transaction->business_id)"),
+    'EIS trading name is resolved from the sale terminal, business, and location');
+$businessNameExpression = "(\$il->show_business_name == 1) ? (\$is_eis_receipt && ! empty(\$eis_trading_name) ? \$eis_trading_name : \$business_details->name) : ''";
+checkReceiptNumber(str_contains($util, "'business_name' => ".$businessNameExpression.','),
+    'Receipt business name uses the EIS trading name when available');
+foreach ([
+    [true, 'EIS Trading Name', 'Business Name', 1, 'EIS Trading Name'],
+    [false, 'EIS Trading Name', 'Business Name', 1, 'Business Name'],
+    [true, null, 'Business Name', 1, 'Business Name'],
+    [true, 'EIS Trading Name', 'Business Name', 0, ''],
+] as [$is_eis_receipt, $eis_trading_name, $businessName, $showBusinessName, $expectedBusinessName]) {
+    $il = (object) ['show_business_name' => $showBusinessName];
+    $business_details = (object) ['name' => $businessName];
+    $actualBusinessName = eval('return '.$businessNameExpression.';');
+    checkReceiptNumber($actualBusinessName === $expectedBusinessName, 'Receipt business name honors EIS trading-name and layout rules');
+}
 preg_match("/'header_text' => (.*),/", $util, $headerMatch);
 foreach ([null, '', 'Configured header'] as $configuredHeader) {
     $is_eis_receipt = true;

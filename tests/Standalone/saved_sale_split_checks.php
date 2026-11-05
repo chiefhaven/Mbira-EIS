@@ -99,9 +99,9 @@ function fixture()
         'units' => ['business_id', 'allow_decimal'], 'tax_rates' => ['business_id', 'is_tax_group'],
         'reference_counts' => ['business_id', 'ref_type', 'ref_count'],
         'invoice_schemes' => ['business_id', 'is_default', 'scheme_type', 'prefix', 'number_type', 'start_number', 'invoice_count', 'total_digits'],
-        'variation_location_details' => ['qty_available', 'product_id', 'product_variation_id', 'variation_id', 'location_id', 'created_at', 'updated_at'],
-        'eis_settings' => ['business_id', 'tpin', 'location_id', 'status'],
-        'eis_configurations' => ['business_id', 'location_id', 'eis_setting_id'], 'eis_terminal_configurations' => ['configuration_id', 'taxpayer_id', 'terminal_position', 'max_cummulative_amount', 'max_transaction_age', 'is_active'],
+        'variation_location_details' => ['qty_available', 'product_id', 'product_variation_id', 'variation_id', 'location_id', 'created_at', 'updated_at', 'deleted_at'],
+        'eis_settings' => ['business_id', 'tpin', 'location_id', 'status', 'deleted_at'],
+        'eis_configurations' => ['business_id', 'location_id', 'eis_setting_id', 'deleted_at'], 'eis_terminal_configurations' => ['configuration_id', 'taxpayer_id', 'terminal_position', 'max_cummulative_amount', 'max_transaction_age', 'is_active', 'deleted_at'],
         'eis_offline_limits' => ['terminal_configuration_id', 'max_cumulative_amount', 'max_transaction_age_hours']] as $table => $columns) {
         $schema->create($table, function (Blueprint $t) use ($columns) {
             $t->increments('id'); foreach (array_unique(array_merge($columns, ['created_at', 'updated_at'])) as $c) { $t->text($c)->nullable(); }

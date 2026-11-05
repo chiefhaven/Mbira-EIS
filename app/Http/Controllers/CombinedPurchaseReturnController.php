@@ -199,6 +199,7 @@ class CombinedPurchaseReturnController extends Controller
                         )
                         ->leftjoin('variation_location_details AS vld', function ($join) use ($location_id) {
                             $join->on('variations.id', '=', 'vld.variation_id')
+                                ->whereNull('vld.deleted_at')
                                 ->where('vld.location_id', '=', $location_id);
                         })
                         ->leftjoin('units', 'units.id', '=', 'p.unit_id')

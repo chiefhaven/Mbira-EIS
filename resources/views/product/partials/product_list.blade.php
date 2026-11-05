@@ -42,15 +42,7 @@
         <tr>
             <td colspan="{{$colspan}}">
             <div style="display: flex; width: 100%;">
-                @if (!$eis_managed)
-                @can('product.delete')
-                    {!! Form::open(['url' => action([\App\Http\Controllers\ProductController::class, 'massDestroy']), 'method' => 'post', 'id' => 'mass_delete_form' ]) !!}
-                    {!! Form::hidden('selected_rows', null, ['id' => 'selected_rows']); !!}
-                    {!! Form::submit(__('lang_v1.delete_selected'), array('class' => 'tw-dw-btn tw-dw-btn-outline tw-dw-btn-xs tw-dw-btn-error', 'id' => 'delete-selected')) !!}
-                    {!! Form::close() !!}
-                @endcan
-                @endif
-
+                
                 
                     @can('product.update')
                     

@@ -225,8 +225,12 @@
 			<!-- Shop & Location Name  -->
 			<p>
 				@if(!empty($receipt_details->display_name))
-					{{$receipt_details->display_name}}
+					{{$receipt_details->business_name ?: $receipt_details->location_name}}
 					<br/>
+					@if(!empty($receipt_details->business_name) && !empty($receipt_details->location_name))
+						<small>{{$receipt_details->location_name}}</small>
+						<br/>
+					@endif
 				@endif
 				@if(!empty($receipt_details->address))
 					<br/>{!! $receipt_details->address !!}
@@ -453,7 +457,7 @@
 							@if(!empty($line['image']))
 								<img src="{{$line['image']}}" alt="Image" width="50" style="float: left; margin-right: 8px;">
 							@endif
-                            {{$line['name']}} {{$line['product_variation']}} {{$line['variation']}} 
+                            {{$line['name']}} {{$line['product_variation']}} {{$line['variation']}} @if(!empty($line['tax_code']))<b>({{$line['tax_code']}})</b>@endif 
                             @if(!empty($line['sub_sku'])), {{$line['sub_sku']}} @endif @if(!empty($line['brand'])), {{$line['brand']}} @endif
                             @if(!empty($line['product_description']))
                             	<small>

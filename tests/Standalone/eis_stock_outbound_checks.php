@@ -101,12 +101,15 @@ foreach (['business_locations' => ['business_id', 'default_eis_setting_id', 'eis
     'eis_settings' => ['business_id', 'location_id', 'branch_id', 'device_id', 'jwt_token', 'status'],
     'eis_configurations' => ['business_id', 'eis_setting_id'],
     'eis_terminal_configurations' => ['configuration_id', 'is_active']] as $tableName => $columns) {
-    $schema->create($tableName, function (Blueprint $table) use ($columns) {
+    $schema->create($tableName, function (Blueprint $table) use ($tableName, $columns) {
         $table->increments('id');
         foreach ($columns as $column) {
             $table->text($column)->nullable();
         }
         $table->timestamps();
+        if (str_starts_with($tableName, 'eis_')) {
+            $table->softDeletes();
+        }
     });
 }
 $schema->create('transactions', function (Blueprint $table) {

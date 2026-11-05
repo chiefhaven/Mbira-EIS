@@ -17,7 +17,8 @@ pagination; an absent flag means a single/final page under the existing API cont
 HTTP errors, missing/malformed data, explicit error responses, empty nonfinal pages,
 repeated pages/identifiers, invalid quantities or conflicting sites abort the pull.
 No partial catalog is used for deletion. An explicitly successful empty catalog
-retires all business products/maps; it is not treated as a failed response.
+unlinks every EIS-mapped product from the terminal location and soft-deletes those
+not listed at any other location; it is not treated as a failed response.
 Rejected product quantities/sites produce an `EIS product catalog validation failed`
 log entry with the product identifier, reason, page, request site, stock/site field
 types and bounded values, and PHP serialization precision. Credentials and the
@@ -65,6 +66,41 @@ php tests\Standalone\eis_product_sync_checks.php
 
 This uses real transformer/upserter/models with an isolated SQLite database and
 synthetic multi-page responses/HTTP fakes; no live product import or API calls.
+
+Product names are not EIS identities: different product codes with the same name
+retain separate products and maps. Name fallback may adopt an unassigned manual
+product, but cannot reuse a product assigned to another EIS code, including through
+a soft-deleted map. A conflicting SKU assignment fails explicitly and rolls back
+the catalog pull instead of overwriting an existing identity.
+
+## Deactivated terminal stock
+
+Local terminal deactivation (including the legacy toggle) soft-deletes stock records
+at its location only when no other terminal there is locally enabled. Quantities
+are preserved, including zero and negative quantities. Products, mappings and
+transaction history are retained. Archived stock is excluded from active stock
+relations, product/POS queries and stock totals. Remote EIS activity flags do not
+trigger cleanup. Reactivation does not automatically restore stock records;
+explicit stock reconciliation restores them using the retained quantities as its
+ledger baseline, without fabricating a stock movement when quantities match.
+
+Run the `2026_11_03_150000_add_soft_deletes_to_variation_location_details`
+migration before deploying the stock soft-delete queries. The earlier zeroing
+cleanup did not retain the previous quantities; this migration does not invent
+replacements for those values.
+
+Existing locally deactivated locations can be previewed and cleaned with:
+
+```powershell
+php artisan eis:clear-inactive-stock --business-id=3 --dry-run
+php artisan eis:clear-inactive-stock --business-id=3
+```
+
+Omit `--business-id` to process all businesses. Only locations with existing locally
+disabled terminal settings are eligible; deleted settings with no remaining
+location association are not guessed. Shared enabled locations and other tenants
+are preserved. Cleanup and deactivation are transactional, and applied cleanup
+counts are logged.
 
 ## EIS-only product editing
 

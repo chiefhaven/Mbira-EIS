@@ -13,17 +13,24 @@ $(function() {
         'default': @json(route('eis.terminals.default', ['terminalId' => 0]))
     };
 
-    function eisMessage(message, error) {
+    function eisMessage(message, error, activation) {
         $('#eis-management-message')
             .attr('class', 'alert ' + (error ? 'alert-danger' : 'alert-success'))
             .text(message);
+        if (error && activation === true) {
+            swal({
+                title: 'Terminal activation failed',
+                text: message,
+                icon: 'error'
+            });
+        }
     }
 
-    function eisError(xhr) {
+    function eisError(xhr, activation) {
         var result = xhr.responseJSON || {};
         var errors = result.errors || {};
         var field = Object.keys(errors)[0];
-        eisMessage(field ? errors[field][0] : (result.msg || result.message || 'Unable to complete terminal action.'), true);
+        eisMessage(field ? errors[field][0] : (result.msg || result.message || 'Unable to complete terminal action.'), true, activation);
     }
 
     function eisControls() {
@@ -91,13 +98,15 @@ $(function() {
             dataType: 'json',
             headers: {'X-CSRF-TOKEN': $('meta[name="csrf-token"]').attr('content')}
         }).done(function(result) {
-            eisMessage(result.msg || result.message || 'Terminal updated.', !result.success);
+            eisMessage(result.msg || result.message || 'Terminal updated.', !result.success, activated);
             if (result.success) {
                 if (result.data && result.data.globalConfiguration) showEisConfiguration(result.data);
                 if (activated) $('#eis-activation-code').val('');
                 reload = true;
             }
-        }).fail(eisError).always(function() {
+        }).fail(function(xhr) {
+            eisError(xhr, activated);
+        }).always(function() {
             if (reload) {
                 loadEisTerminals();
             } else {
@@ -114,7 +123,7 @@ $(function() {
         if (eisBusy) return;
         var code = $('#eis-activation-code').val().trim();
         if (!code) {
-            eisMessage('Enter an activation code.', true);
+            eisMessage('Enter an activation code.', true, true);
             return;
         }
         eisAction(eisUrls.activate, {

@@ -80,6 +80,7 @@ class EisSale extends Model
                 : \Modules\EIS\Services\Terminal\TerminalContext::forLocation((int) $business_id, $location_id, true);
             $eisConfigurations = DB::table('eis_configurations')
                 ->where('business_id', $business_id)->where('eis_setting_id', $settings->id)
+                ->whereNull('deleted_at')
                 ->first();
                 
             if (!$eisConfigurations) {
@@ -99,6 +100,7 @@ class EisSale extends Model
             // Get terminal configuration
             $terminalConfig = DB::table('eis_terminal_configurations')
                 ->where('configuration_id', $eisConfigurations->id)
+                ->whereNull('deleted_at')
                 ->first();
                 
             if (!$terminalConfig) {
@@ -195,11 +197,11 @@ class EisSale extends Model
                 ];
             }
             
-            // Check cumulative amount limit (max_cummulative_amount)
+            // Check cumulative amount limit (max_cummulative_amount) only while EIS is offline
             if ($offlineLimit > 0) {
                 $totalAfterSale = $totalUnsubmitted + $sale_amount;
                 
-                if ($totalAfterSale > $offlineLimit) {
+                if ($totalAfterSale > $offlineLimit && ! self::isEisOnline((int) $business_id, $settings)) {
                     $remaining = $offlineLimit - $totalUnsubmitted;
                     
                     \Log::warning('Cumulative amount limit exceeded', [
@@ -266,6 +268,23 @@ class EisSale extends Model
                     'fallback' => 'fail-open'
                 ]
             ];
+        }
+    }
+
+    /**
+     * Same health signal as the header EIS status badge; any failure counts as offline.
+     */
+    protected static function isEisOnline(int $business_id, $settings): bool
+    {
+        $token = (string) ($settings->jwt_token ?? '');
+        if (empty($settings->status) || $token === '') {
+            return false;
+        }
+
+        try {
+            return app(\Modules\EIS\Services\Http\EisHealthService::class)->isOnline($business_id, $token);
+        } catch (\Throwable $e) {
+            return false;
         }
     }
 

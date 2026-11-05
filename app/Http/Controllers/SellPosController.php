@@ -992,6 +992,7 @@ class SellPosController extends Controller
             )
             ->leftjoin('variation_location_details AS vld', function ($join) use ($location_id) {
                 $join->on('variations.id', '=', 'vld.variation_id')
+                    ->whereNull('vld.deleted_at')
                     ->where('vld.location_id', '=', $location_id);
             })
             ->leftjoin('units', 'units.id', '=', 'p.unit_id')
@@ -1961,7 +1962,7 @@ class SellPosController extends Controller
                 ->leftjoin(
                     'variation_location_details AS VLD',
                     function ($join) use ($location_id) {
-                        $join->on('variations.id', '=', 'VLD.variation_id');
+                        $join->on('variations.id', '=', 'VLD.variation_id')->whereNull('VLD.deleted_at');
 
                         //Include Location
                         if (!empty($location_id)) {
@@ -2329,7 +2330,8 @@ class SellPosController extends Controller
                                 $html .= '<a target="_blank" class="tw-dw-btn tw-dw-btn-xs tw-dw-btn-outline tw-dw-btn-primary" href="' . action([\App\Http\Controllers\SellController::class, 'edit'], [$row->id]) . '"><i class="glyphicon glyphicon-edit"></i> ' . __('messages.edit') . '</a>';
                             }
 
-                            if (auth()->user()->can('direct_sell.delete') || auth()->user()->can('sell.delete')) {
+                            if ((auth()->user()->can('direct_sell.delete') || auth()->user()->can('sell.delete'))
+                                && !in_array($row->payment_status, ['paid', 'partial'])) {
                                 $html .= '&nbsp;<a href="' . action([\App\Http\Controllers\SellPosController::class, 'destroy'], [$row->id]) . '" class="delete-sale tw-dw-btn tw-dw-btn-outline tw-dw-btn-xs tw-dw-btn-error"><i class="fas fa-trash"></i> ' . __('messages.delete') . '</a>';
                             }
                         }
@@ -3121,6 +3123,7 @@ class SellPosController extends Controller
             )
             ->leftjoin('variation_location_details AS vld', function ($join) use ($location_id) {
                 $join->on('variations.id', '=', 'vld.variation_id')
+                    ->whereNull('vld.deleted_at')
                     ->where('vld.location_id', '=', $location_id);
             })
             ->leftjoin('units', 'units.id', '=', 'p.unit_id')

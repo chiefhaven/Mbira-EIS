@@ -185,6 +185,7 @@ class TerminalManagementController extends Controller
                 ->where('configuration.eis_setting_id', $settings->id)
                 ->where('configuration.business_id', $settings->business_id)
                 ->where('configuration.location_id', $location->id)
+                ->whereNull('configuration.deleted_at')->whereNull('terminal.deleted_at')
                 ->value('terminal.is_active');
             if (!TerminalContext::isOperational((bool) $settings->status, $remoteActive)) {
                 return false;

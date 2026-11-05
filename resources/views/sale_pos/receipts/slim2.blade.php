@@ -27,9 +27,13 @@
 					<!-- business information here -->
 					@if(!empty($receipt_details->display_name))
 						<span class="headings">
-							{{$receipt_details->display_name}}
+							{{$receipt_details->business_name ?: $receipt_details->location_name}}
 						</span>
 						<br/>
+						@if(!empty($receipt_details->business_name) && !empty($receipt_details->location_name))
+							<small>{{$receipt_details->location_name}}</small>
+							<br/>
+						@endif
 					@endif
 					
 					@if(!empty($receipt_details->address))
@@ -363,7 +367,7 @@
 	                        <td class="description">
 	                        	<div style="display:flex; width: 100%;">
 	                        		<p class="m-0 mt-5" style="white-space: nowrap;">#{{$loop->iteration}}.&nbsp;</p>
-	                        		<p class="text-left m-0 mt-5 pull-left">{{$line['name']}}  
+	                        		<p class="text-left m-0 mt-5 pull-left">{{$line['name']}} @if(!empty($line['tax_code']))<b>({{$line['tax_code']}})</b>@endif 
 			                        	@if(!empty($line['sub_sku'])), {{$line['sub_sku']}} @endif @if(!empty($line['brand'])), {{$line['brand']}} @endif @if(!empty($line['cat_code'])), {{$line['cat_code']}}@endif
 			                        	@if(!empty($line['product_custom_fields'])), {{$line['product_custom_fields']}} @endif
 			                        	@if(!empty($line['product_description']))
