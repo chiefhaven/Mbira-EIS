@@ -645,7 +645,13 @@ class SubscriptionController extends BaseController
 
             $data = $response->json();
 
-            Log::info('OneKhusa Initiate Response', $data);
+            Log::info('OneKhusa Initiate Response', [
+                'http_status' => $response->status(),
+                'successful' => $response->successful(),
+                'payment_transaction_id_present' => !empty(
+                    $data['paymentTransactionId'] ?? $data['data']['paymentTransactionId'] ?? null
+                ),
+            ]);
 
             // Step 2: Extract REAL paymentTransactionId from response
             $paymentTransactionId =
@@ -654,7 +660,10 @@ class SubscriptionController extends BaseController
                 ?? null;
 
             if (!$paymentTransactionId) {
-                Log::error('OneKhusa: Missing paymentTransactionId', $data);
+                Log::error('OneKhusa: Missing paymentTransactionId', [
+                    'http_status' => $response->status(),
+                    'successful' => $response->successful(),
+                ]);
 
                 return response()->json([
                     'success' => false,
@@ -768,7 +777,7 @@ class SubscriptionController extends BaseController
      */
     public function oneKhusaFailed()
     {
-        \Log::warning('OneKhusa Payment Failed or Cancelled', request()->all());
+        \Log::warning('OneKhusa Payment Failed or Cancelled');
 
         return redirect()
             ->action([\Modules\Superadmin\Http\Controllers\SubscriptionController::class, 'index'])
@@ -782,7 +791,9 @@ class SubscriptionController extends BaseController
     {
         $payload = $request->all();
 
-        Log::info('OneKhusa Webhook Received', $payload);
+        Log::info('OneKhusa Webhook Received', [
+            'payment_transaction_id_present' => !empty($payload['paymentTransactionId'] ?? null),
+        ]);
 
     }
 

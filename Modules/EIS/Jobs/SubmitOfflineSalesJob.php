@@ -103,7 +103,6 @@ class SubmitOfflineSalesJob implements ShouldQueue
 
             Log::info('Submitting transaction to EIS', [
                 'transaction_id' => $this->transactionId,
-                'invoice_no' => $transaction->invoice_no
             ]);
 
             $result = $submissionService->submit($transaction, $settings, $this->requiresOfflineSubmission());

@@ -28,13 +28,23 @@ class SaleOutcomeRecoveryService
         $data = $lookup['response']['data'] ?? [];
         
         Log::info('EIS invoice lookup completed', [
-            'invoice_number' => $invoiceNumber,
             'outcome' => $lookup['outcome'] ?? null,
             'http_status' => $lookup['http_status'] ?? null,
         ]);
         
-        if (($lookup['outcome'] ?? null) !== 'accepted' || !$this->matches($data, $payload, $setting)) {
-            throw new \UnexpectedValueException('EIS did not return an invoice that exactly matches this saved sale. No local data was changed.');
+        if (($lookup['outcome'] ?? null) !== 'accepted') {
+            throw new \UnexpectedValueException('EIS did not confirm the invoice lookup. No local data was changed.');
+        }
+        $mismatches = $this->matchFailureReasons($data, $payload, $setting);
+        if ($mismatches !== []) {
+            Log::warning('EIS invoice lookup did not match saved sale', [
+                'eis_sale_id' => $sale->id,
+                'mismatch_fields' => $mismatches,
+            ]);
+            throw new \UnexpectedValueException(
+                'EIS returned an invoice, but these details did not match the saved sale: '
+                    .implode(', ', $mismatches).'. No local data was changed.'
+            );
         }
 
         $url = array_key_exists('validationURL', $data)
@@ -184,51 +194,65 @@ class SaleOutcomeRecoveryService
 
     private function matches(array $data, array $payload, EisSetting $setting): bool
     {
+        return $this->matchFailureReasons($data, $payload, $setting) === [];
+    }
+
+    private function matchFailureReasons(array $data, array $payload, EisSetting $setting): array
+    {
         $expectedHeader = $payload['invoiceHeader'] ?? [];
         $header = $data['invoiceHeader'] ?? [];
-        if (($header['invoiceNumber'] ?? null) !== ($expectedHeader['invoiceNumber'] ?? null)
-            || (string) ($header['sellerTIN'] ?? '') !== (string) ($expectedHeader['sellerTIN'] ?? '')
-            || (string) ($header['siteId'] ?? '') !== (string) TerminalContext::site($setting)
-            || !$this->sameDate($header['invoiceDateTime'] ?? null, $expectedHeader['invoiceDateTime'] ?? null)) {
-            return false;
+        $mismatches = [];
+        if (($header['invoiceNumber'] ?? null) !== ($expectedHeader['invoiceNumber'] ?? null)) {
+            $mismatches[] = 'invoice number';
+        }
+        if ((string) ($header['sellerTIN'] ?? '') !== (string) ($expectedHeader['sellerTIN'] ?? '')) {
+            $mismatches[] = 'seller TIN';
+        }
+        if ((string) ($header['siteId'] ?? '') !== (string) TerminalContext::site($setting)) {
+            $mismatches[] = 'site';
+        }
+        if (!$this->sameDate($header['invoiceDateTime'] ?? null, $expectedHeader['invoiceDateTime'] ?? null)) {
+            $mismatches[] = 'invoice date';
         }
 
         $expectedLines = $payload['invoiceLineItems'] ?? null;
         $actualLines = $data['invoiceLineItems'] ?? null;
-        if (!is_array($expectedLines) || !is_array($actualLines) || count($expectedLines) !== count($actualLines)) {
-            return false;
-        }
-        if ($this->normalizeLines($expectedLines) !== $this->normalizeLines($actualLines)) {
-            return false;
+        $expectedNormalizedLines = is_array($expectedLines) ? $this->normalizeLines($expectedLines) : null;
+        $actualNormalizedLines = is_array($actualLines) ? $this->normalizeLines($actualLines) : null;
+        if (!is_array($expectedLines) || !is_array($actualLines)
+            || count($expectedLines) !== count($actualLines)
+            || $expectedNormalizedLines === null || $actualNormalizedLines === null
+            || $expectedNormalizedLines !== $actualNormalizedLines) {
+            $mismatches[] = 'line items';
         }
 
         $expectedSummary = $payload['invoiceSummary'] ?? [];
         $summary = $data['invoiceSummary'] ?? [];
-        foreach (['invoiceTotal', 'totalVAT'] as $field) {
+        foreach (['invoiceTotal' => 'invoice total', 'totalVAT' => 'total VAT'] as $field => $label) {
             if (!is_numeric($expectedSummary[$field] ?? null) || !is_numeric($summary[$field] ?? null)
                 || round((float) $expectedSummary[$field], 2) !== round((float) $summary[$field], 2)) {
-                return false;
+                $mismatches[] = $label;
             }
         }
-        return true;
+        return $mismatches;
     }
 
-    private function normalizeLines(array $lines): array
+    private function normalizeLines(array $lines): ?array
     {
         $normalized = [];
         foreach ($lines as $line) {
             if (!is_array($line)) {
-                return [];
+                return null;
             }
             foreach (['productCode', 'quantity', 'unitPrice', 'discount', 'total', 'taxRateId', 'isProduct'] as $field) {
                 if (!array_key_exists($field, $line)) {
-                    return [];
+                    return null;
                 }
             }
             if (!is_numeric($line['quantity']) || !is_numeric($line['unitPrice'])
                 || ($line['discount'] !== null && !is_numeric($line['discount']))
                 || !is_numeric($line['total']) || !is_bool($line['isProduct'])) {
-                return [];
+                return null;
             }
             $normalized[] = [
                 'productCode' => (string) $line['productCode'],
@@ -255,8 +279,26 @@ class SaleOutcomeRecoveryService
             if ($actualHasTimezone && $expectedHasTimezone) {
                 return Carbon::parse($actual)->timestamp === Carbon::parse($expected)->timestamp;
             }
-            return Carbon::parse($actual)->format('Y-m-d H:i:s')
-                === Carbon::parse($expected)->format('Y-m-d H:i:s');
+            if (!$actualHasTimezone && !$expectedHasTimezone) {
+                return Carbon::parse($actual)->format('Y-m-d H:i:s')
+                    === Carbon::parse($expected)->format('Y-m-d H:i:s');
+            }
+
+            $zoned = Carbon::parse($actualHasTimezone ? $actual : $expected);
+            $withoutTimezone = $actualHasTimezone ? $expected : $actual;
+            $timezones = array_unique([
+                // EIS returns timezone-less invoice timestamps in Malawi local time.
+                'Africa/Blantyre',
+                'UTC',
+                $zoned->getTimezone()->getName(),
+                (string) config('app.timezone', 'UTC'),
+            ]);
+            foreach ($timezones as $timezone) {
+                if (Carbon::parse($withoutTimezone, $timezone)->timestamp === $zoned->timestamp) {
+                    return true;
+                }
+            }
+            return false;
         } catch (\Throwable) {
             return false;
         }

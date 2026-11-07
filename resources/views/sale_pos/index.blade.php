@@ -67,6 +67,10 @@
     aria-labelledby="gridSystemModalLabel">
 </div>
 
+@if ($canUseEis && auth()->user()->can('sell.delete'))
+    @include('sell.partials.eis_cancel_receipt_modal')
+@endif
+
 <!-- This will be printed -->
 <section class="invoice print_section" id="receipt_section">
 </section> 
@@ -80,5 +84,8 @@
 @include('sale_pos.partials.eis_submit_bills_javascript')
 @include('sell.partials.eis_void_tools_javascript')
 @include('sell.partials.eis_sale_sync_javascript')
+@if ($canUseEis && auth()->user()->can('sell.delete'))
+    @include('sell.partials.eis_cancel_receipt_javascript')
+@endif
 <script src="{{ asset('js/payment.js?v=' . $asset_v) }}"></script>
 @endsection

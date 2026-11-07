@@ -31,17 +31,13 @@ class DataController extends Controller
 
         $canManage = $user->can('business_settings.access');
         $canReconcile = $canManage || $user->can('stock_adjustment.view');
-        $canUseOutbound = $canManage
-            || $user->can('stock_adjustment.create')
-            || $user->can('stock_transfer.create')
-            || $user->can('purchase.create');
-        if (!$canManage && !$canReconcile && !$canUseOutbound) {
+        if (!$canManage && !$canReconcile) {
             return;
         }
 
         $homeRoute = $canManage
             ? 'eis.terminals.page'
-            : ($canReconcile ? 'eis.stock.index' : 'eis.stock.outbound.index');
+            : 'eis.stock.index';
 
         Menu::modify('admin-sidebar-menu', function ($menu) use ($homeRoute) {
             $menu->url(

@@ -196,17 +196,6 @@ class OfflineSignatureService
             $offlineBaseURL = "https://dev-eis-portal.mra.mw/ReceiptValidation/Validate/";
             $validationURL = $offlineBaseURL . "?" . $param . "&S=" . $offlineDataSignature;
             
-            Log::debug('Offline signature generated', [
-                'taxpayer_id' => $taxpayerId,
-                'position' => $position,
-                'julian_date' => $julianDate,
-                'julian_date_64' => $julianDateTo64,
-                'combined_string' => $combinedString,
-                'param' => $param,
-                'signature' => $offlineDataSignature,
-                'validation_url' => $validationURL
-            ]);
-            
             return [
                 'offlineDataSignature' => $offlineDataSignature,
                 'validationURL' => $validationURL,
@@ -218,8 +207,7 @@ class OfflineSignatureService
             
         } catch (\Exception $e) {
             Log::error('Failed to generate offline signature', [
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
+                'exception' => get_class($e),
             ]);
             
             throw new \Exception('Failed to generate offline signature: ' . $e->getMessage());

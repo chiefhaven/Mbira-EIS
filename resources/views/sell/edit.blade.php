@@ -337,7 +337,7 @@
 										@lang('restaurant.service_staff')
 									</th>
 								@endif
-								<th class="@if(!auth()->user()->can('edit_product_price_from_sale_screen')) hide @endif">
+								<th class="@if(!$edit_price) hide @endif">
 									@lang('sale.unit_price')
 								</th>
 								<th class="@if(!auth()->user()->can('edit_product_discount_from_sale_screen')) hide @endif">

@@ -372,7 +372,7 @@ class SellController extends Controller
 
                             if (auth()->user()->can('business_settings.access')) {
                                 $fiscalSale = $row->relationLoaded('eisSale') ? $row->eisSale : null;
-                                $eisInvoiceNumber = $fiscalSale ? $fiscalSale->getRawOriginal('fiscal_invoice_number') : null;
+                                $eisInvoiceNumber = $fiscalSale ? $fiscalSale->eis_invoice_number : null;
                                 if ($fiscalSale && in_array($fiscalSale->status, ['pending', 'failed', 'submitted'], true)
                                     && $eisInvoiceNumber && $fiscalSale->eis_setting_id) {
                                     $html .= '<li><a href="#" class="eis-sale-sync" data-sync-url="'
@@ -382,15 +382,17 @@ class SellController extends Controller
                             }
                             if ($canUseEis && auth()->user()->can('sell.delete')) {
                                 $fiscalSale = $row->relationLoaded('eisSale') ? $row->eisSale : null;
-                                $eisInvoiceNumber = $fiscalSale ? $fiscalSale->getRawOriginal('fiscal_invoice_number') : null;
-                                $receiptNumber = $fiscalSale
-                                    ? ($fiscalSale->getRawOriginal('receipt_number') ?: $eisInvoiceNumber)
-                                    : null;
+                                $eisInvoiceNumber = $fiscalSale ? $fiscalSale->eis_invoice_number : null;
                                 if ($fiscalSale && $fiscalSale->status === 'submitted'
-                                    && $eisInvoiceNumber && $receiptNumber && $fiscalSale->eis_setting_id) {
+                                    && $eisInvoiceNumber && $fiscalSale->eis_setting_id) {
                                     $html .= '<li><a href="#" class="eis-cancel-receipt" data-terminal-id="'
                                         .e((string) $fiscalSale->eis_setting_id).'" data-invoice-number="'
-                                        .e($receiptNumber).'"><i class="fas fa-ban"></i> Request EIS receipt cancellation</a></li>';
+                                        .e($eisInvoiceNumber).'" data-pos-invoice-number="'
+                                        .e((string) ($row->invoice_no ?? '')).'" data-invoice-date="'
+                                        .e((string) ($row->transaction_date ?? '')).'" data-customer="'
+                                        .e(trim((!empty($row->supplier_business_name) ? $row->supplier_business_name.' - ' : '').($row->name ?? ''))).'" data-location="'
+                                        .e((string) ($row->business_location ?? '')).'" data-total="'
+                                        .e((string) ($row->final_total ?? '')).'"><i class="fas fa-ban"></i> Request EIS receipt cancellation</a></li>';
                                     if (auth()->user()->can('business_settings.access')) {
                                         $html .= '<li><a href="#" class="eis-void-sync" data-terminal-id="'
                                             .e((string) $fiscalSale->eis_setting_id).'" data-invoice-number="'
@@ -740,6 +742,7 @@ class SellController extends Controller
         $users = config('constants.enable_contact_assign') ? User::forDropdown($business_id, false, false, false, true) : [];
 
         $change_return = $this->dummyPaymentLine;
+        $edit_price = false;
 
         return view('sell.create')
             ->with(compact(
@@ -768,7 +771,8 @@ class SellController extends Controller
                 'is_order_request_enabled',
                 'users',
                 'default_price_group_id',
-                'change_return'
+                'change_return',
+                'edit_price'
             ));
     }
 
@@ -1854,7 +1858,7 @@ class SellController extends Controller
         }
 
         $edit_discount = auth()->user()->can('edit_product_discount_from_sale_screen');
-        $edit_price = auth()->user()->can('edit_product_price_from_sale_screen');
+        $edit_price = false;
 
         //Accounts
         $accounts = [];

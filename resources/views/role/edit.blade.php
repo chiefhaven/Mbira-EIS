@@ -754,14 +754,6 @@
                 <div class="col-md-12">
                     <div class="checkbox">
                       <label>
-                        {!! Form::checkbox('permissions[]', 'edit_product_price_from_pos_screen', in_array('edit_product_price_from_pos_screen', $role_permissions), ['class' => 'input-icheck']); !!}
-                        {{ __('lang_v1.edit_product_price_from_pos_screen') }}
-                      </label>
-                    </div>
-                </div>
-                <div class="col-md-12">
-                    <div class="checkbox">
-                      <label>
                         {!! Form::checkbox('permissions[]', 'edit_product_discount_from_pos_screen', in_array('edit_product_discount_from_pos_screen', $role_permissions), ['class' => 'input-icheck']); !!}
                         {{ __('lang_v1.edit_product_discount_from_pos_screen') }}
                       </label>
@@ -966,14 +958,6 @@
               <label>
                 {!! Form::checkbox('permissions[]', 'delete_sell_payment', in_array('delete_sell_payment', $role_permissions), ['class' => 'input-icheck']); !!}
                 {{ __('lang_v1.delete_sell_payment') }}
-              </label>
-            </div>
-          </div>
-          <div class="col-md-12">
-            <div class="checkbox">
-              <label>
-                {!! Form::checkbox('permissions[]', 'edit_product_price_from_sale_screen', in_array('edit_product_price_from_sale_screen', $role_permissions), ['class' => 'input-icheck']); !!}
-                {{ __('lang_v1.edit_product_price_from_sale_screen') }}
               </label>
             </div>
           </div>

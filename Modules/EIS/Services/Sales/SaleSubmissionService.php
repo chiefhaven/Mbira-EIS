@@ -365,7 +365,6 @@ class SaleSubmissionService
 
             Log::debug('EIS Number generated', [
                 'transaction_id' => $transaction->id,
-                'invoice_number' => $invoiceNumber,
             ]);
 
             return $invoiceNumber;
@@ -373,7 +372,7 @@ class SaleSubmissionService
         } catch (\Exception $e) {
             Log::error('Failed to generate EIS Number', [
                 'transaction_id' => $transaction->id,
-                'error' => $e->getMessage()
+                'exception' => get_class($e),
             ]);
 
             throw new EisSaleException('Unable to allocate an invoice for the selected terminal: '.$e->getMessage(), 0, $e);

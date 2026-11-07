@@ -106,7 +106,6 @@ class EisSaleClient
                 Log::error('EIS request failed', [
                     'url' => $url,
                     'status' => $status,
-                    'response' => $body,
                 ]);
 
                 $errorMessage = $this->parseErrorMessage($response);
@@ -132,19 +131,18 @@ class EisSaleClient
             }
 
             $responseData = $response->json();
-            $invoiceNumber = $payload['invoiceHeader']['invoiceNumber'] ?? null;
             
             Log::info('EIS invoice submitted successfully.', [
                 'url' => $url,
-                'invoice' => $invoiceNumber,
-                'response' => $responseData
+                'http_status' => $response->status(),
+                'status_code' => $responseData['statusCode'] ?? null,
             ]);
 
             return [
                 'success' => true,
                 'data' => $responseData,
                 'reference' => $responseData['reference'] ?? null,
-                'invoice_number' => $invoiceNumber,
+                'invoice_number' => $payload['invoiceHeader']['invoiceNumber'] ?? null,
                 'status' => $response->status(),
             ];
 

@@ -131,6 +131,8 @@ utilityCheck($client->send($setting, 'get-terminal-blocking-message', ['terminal
 utilityReject(fn () => $service->prepare($setting, 'cancel-receipt', $examples['cancel-receipt'], 5), 'Disabled terminals cannot prepare mutations');
 $setting->status = true;
 $receipt = $service->prepare($setting, 'cancel-receipt', $examples['cancel-receipt'], 5);
+utilityCheck(json_decode($receipt->payload, true)['receiptNumber'] === 'INVOICE-800',
+    'Cancellation request uses the stored EIS invoice identity, not the QR receipt alias');
 DB::beginTransaction();
 utilityReject(fn () => $service->submit($setting, $receipt->id, 5), 'Mutation claim cannot be rolled back by an outer transaction after HTTP');
 DB::rollBack();
@@ -150,6 +152,30 @@ utilityCheck($submitted->created_by === 5 && $submitted->submitted_by === 6 && $
 $service->submit($setting, $receipt->id, 5);
 utilityCheck(count($requests) === $before + 1 && DB::table('transactions')->where('id', 800)->value('type') === 'sell',
     'Replaying void never resends or alters the sale');
+$changedAfterAcceptance = $same; $changedAfterAcceptance['reason'] = 'Do not send a second void';
+utilityCheck($service->prepare($setting, 'cancel-receipt', $changedAfterAcceptance, 5)->id === $receipt->id,
+    'Accepted void requests cannot be replaced with a second request');
+$rejectedPayload = $examples['cancel-receipt'];
+$rejectedPayload['receiptNumber'] = 'RECEIPT-801';
+$rejected = $service->prepare($setting, 'cancel-receipt', $rejectedPayload, 5);
+$responseBody = ['statusCode' => 0, 'remark' => 'Rejected', 'data' => null, 'errors' => []];
+$responseStatus = 200;
+$rejected = $service->submit($setting, $rejected->id, 6);
+utilityCheck($rejected->status === 'rejected', 'Definitive EIS rejection is saved before retry');
+$retryPayload = $rejectedPayload;
+$retryPayload['reason'] = 'Corrected cancellation reason';
+$retry = $service->prepare($setting, 'cancel-receipt', $retryPayload, 5);
+utilityCheck($retry->id !== $rejected->id
+    && json_decode($retry->payload, true)['receiptNumber'] === 'INVOICE-801'
+    && $retry->status === 'prepared',
+    'A changed request can be reviewed again after definitive rejection using the canonical EIS invoice number');
+$responseBody = ['statusCode' => 1, 'data' => ['invoiceNumber' => 'INVOICE-801', 'approvalStatus' => 'Pending']];
+$responseStatus = 200;
+$retried = $service->submit($setting, $retry->id, 6);
+utilityCheck($retried->status === 'accepted', 'Corrected retry is separately confirmed and submitted once');
+$blockedRetry = $retryPayload; $blockedRetry['reason'] = 'Do not duplicate accepted request';
+utilityCheck($service->prepare($setting, 'cancel-receipt', $blockedRetry, 5)->id === $retry->id,
+    'An accepted retry cannot be duplicated');
 $initialRow = $service->prepare($setting, 'taxpayer-initial-inventory-upload', $initial, 5);
 $config->set('eis.base_url', 'https://other.invalid/api/v1');
 utilityReject(fn () => $service->submit($setting, $initialRow->id, 5), 'Endpoint change invalidates the reviewed request before HTTP');
@@ -374,11 +400,15 @@ $prepared = $controller->execute(utilityRequest([
 ]), $client, $service)->getData(true);
 utilityCheck($prepared['prepared'] && count($requests) === $before && $prepared['data']['status'] === 'prepared',
     'Controller creates a reviewable void payload without sending HTTP');
+utilityCheck(($prepared['data']['sale']['fiscal_invoice_number'] ?? null) === 'INVOICE-800'
+    && !isset($prepared['data']['payload'], $prepared['data']['endpoint'], $prepared['data']['device_id']),
+    'Cancellation review returns readable invoice details without technical request data');
 $id = $prepared['data']['id'];
 utilityReject(fn () => $controller->submit(utilityRequest([]), $id, $service), 'Controller requires explicit confirmation before mutation');
 $shown = $controller->show(utilityRequest([]), $id)->getData(true)['data'];
-utilityCheck($shown['payload']['receiptNumber'] === 'RECEIPT-800' && !isset($shown['jwt_token']),
-    'Review response contains exact saved fields, not terminal credentials');
+utilityCheck(($shown['sale']['fiscal_invoice_number'] ?? null) === 'INVOICE-800'
+    && !isset($shown['payload'], $shown['endpoint'], $shown['jwt_token']),
+    'Cancellation request status shows invoice details only, not the technical payload');
 $user->locations = [1];
 DB::table('eis_utility_requests')->where('id', $id)->update(['location_id' => 2]);
 utilityReject(fn () => $controller->show(utilityRequest([]), $id), 'Historical audit review honors saved location even when terminal ownership changes');

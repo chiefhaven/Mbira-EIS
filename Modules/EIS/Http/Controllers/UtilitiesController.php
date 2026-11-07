@@ -175,7 +175,7 @@ class UtilitiesController extends Controller
 
     private function reviewData(object $row): array
     {
-        return [
+        $data = [
             'id' => $row->id, 'terminal_id' => $row->eis_setting_id, 'operation' => $row->operation,
             'location_id' => $row->location_id, 'endpoint' => $row->endpoint, 'tin' => $row->tin,
             'site_id' => $row->site_id, 'device_id' => $row->device_id,
@@ -184,6 +184,75 @@ class UtilitiesController extends Controller
             'status' => $row->status, 'payload' => json_decode($row->payload, true, 512, JSON_THROW_ON_ERROR),
             'response' => $row->response === null ? null : json_decode($row->response, true, 512, JSON_THROW_ON_ERROR),
             'message' => $row->result_message,
+        ];
+        if ($row->operation === 'cancel-receipt') {
+            $payload = $data['payload'];
+            $transactionId = UtilityRequestService::assertReceipt(
+                EisSetting::where('business_id', $row->business_id)->findOrFail($row->eis_setting_id),
+                $payload['receiptNumber']
+            );
+            $data = [
+                'id' => $row->id,
+                'status' => $row->status,
+                'message' => $row->result_message,
+                'reason' => $payload['reason'],
+                'sale' => $this->cancellationSaleDetails($row, $transactionId, $payload['receiptNumber']),
+            ];
+        }
+
+        return $data;
+    }
+
+    private function cancellationSaleDetails(object $request, int $transactionId, string $invoiceNumber): array
+    {
+        $transaction = DB::table('transactions')->where('id', $transactionId)
+            ->where('business_id', $request->business_id)->where('location_id', $request->location_id)
+            ->first();
+        abort_unless($transaction, 404);
+
+        $customer = null;
+        if (!empty($transaction->contact_id) && DB::getSchemaBuilder()->hasTable('contacts')) {
+            $contact = DB::table('contacts')->where('business_id', $request->business_id)
+                ->where('id', $transaction->contact_id)->first(['name', 'supplier_business_name']);
+            if ($contact) {
+                $customer = trim(($contact->supplier_business_name ? $contact->supplier_business_name.' - ' : '').$contact->name);
+            }
+        }
+
+        $locationName = DB::table('business_locations')->where('business_id', $request->business_id)
+            ->where('id', $request->location_id)->value('name');
+
+        $items = [];
+        if (DB::getSchemaBuilder()->hasTable('transaction_sell_lines')) {
+            $lines = DB::table('transaction_sell_lines as line')
+                ->leftJoin('products as product', 'product.id', '=', 'line.product_id')
+                ->leftJoin('variations as variation', 'variation.id', '=', 'line.variation_id')
+                ->where('line.transaction_id', $transactionId)
+                ->when(DB::getSchemaBuilder()->hasColumn('transaction_sell_lines', 'children_type'),
+                    fn ($query) => $query->where(function ($query) {
+                        $query->whereNull('line.children_type')->orWhere('line.children_type', '!=', 'modifier');
+                    }))
+                ->get(['product.name as product_name', 'variation.name as variation_name',
+                    'line.quantity', 'line.unit_price_inc_tax']);
+            foreach ($lines as $line) {
+                $items[] = [
+                    'description' => trim(($line->product_name ?? 'Item')
+                        .(!empty($line->variation_name) ? ' - '.$line->variation_name : '')),
+                    'quantity' => (float) $line->quantity,
+                    'unit_price' => (float) $line->unit_price_inc_tax,
+                    'total' => (float) $line->quantity * (float) $line->unit_price_inc_tax,
+                ];
+            }
+        }
+
+        return [
+            'invoice_number' => $transaction->invoice_no ?? '',
+            'fiscal_invoice_number' => $invoiceNumber,
+            'date' => $transaction->transaction_date ?? '',
+            'customer' => $customer ?: 'Walk-in customer',
+            'location' => $locationName ?: '',
+            'total' => (float) ($transaction->final_total ?? 0),
+            'items' => $items,
         ];
     }
 

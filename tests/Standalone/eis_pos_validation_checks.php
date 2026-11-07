@@ -47,6 +47,7 @@ $container->instance('log', new Psr\Log\NullLogger());
 $schema->create('contacts', function (Blueprint $t) {
     $t->increments('id'); $t->integer('business_id'); $t->string('name')->nullable();
     $t->string('tax_number')->nullable(); $t->string('authorization_code')->nullable(); $t->softDeletes();
+    $t->string('type')->default('customer'); $t->string('contact_status')->default('active');
 });
 $schema->create('eis_settings', function (Blueprint $t) {
     $t->increments('id'); $t->integer('business_id'); $t->boolean('status'); $t->string('jwt_token');
@@ -79,6 +80,8 @@ $schema->create('transactions', function (Blueprint $t) use ($matches) {
 });
 $migration = require $root.'/database/migrations/2026_10_14_000003_add_vat5_certificate_details_to_transactions_table.php';
 $migration->up(); $migration->up();
+$authorizationCodeMigration = require $root.'/Modules/EIS/Database/Migrations/2026_11_07_000001_add_customer_authorization_code_to_transactions.php';
+$authorizationCodeMigration->up(); $authorizationCodeMigration->up();
 DB::table('contacts')->insert([
     ['id' => 1, 'business_id' => 7, 'tax_number' => ' TIN1 ', 'authorization_code' => ' CODE1 '],
     ['id' => 2, 'business_id' => 7, 'tax_number' => 'TIN2', 'authorization_code' => null],
@@ -151,6 +154,16 @@ checkEis(count(Http::recorded()) === 1, 'No unnecessary authorization or VAT5 ca
 fakeEis();
 checkEis($service->validate(7, ['contact_id' => 3]) === null, 'Ordinary buyer without TIN');
 checkEis(count(Http::recorded()) === 0, 'No remote calls without buyer TIN or relief');
+fakeEis();
+$requirement = $service->checkAuthorizationRequirement(7, 2, 2);
+checkEis($requirement['checked'] && !$requirement['requires_authorization_code'], 'TIN lookup allows checkout when EIS does not require a code');
+fakeEis();
+$requirement = $service->checkAuthorizationRequirement(7, 1, 2);
+checkEis($requirement['checked'] && $requirement['requires_authorization_code'] && $requirement['has_saved_authorization_code'],
+    'TIN lookup requests a code when EIS requires it and reports a saved code without exposing its value');
+fakeEis();
+$service->validate(7, ['contact_id' => 2, 'buyerAuthorizationCode' => 'POS-CODE']);
+checkEis($service->validatedAuthorizationCode() === 'POS-CODE', 'POS authorization code is validated and returned for sale persistence');
 DB::table('contacts')->where('id', 3)->update(['authorization_code' => 'INVALID']);
 fakeEis(fn () => Http::response(['statusCode' => 1, 'data' => ['authorizationCode' => 'INVALID', 'isValidAuthorizationCode' => false]]));
 rejectsEis(fn () => $service->validate(7, ['contact_id' => 3]), 'buyerAuthorizationCode');
@@ -204,8 +217,13 @@ $input = ['type' => 'sell', 'status' => 'draft', 'location_id' => 2, 'contact_id
     'discount_amount' => 0, 'commission_agent' => null, 'pay_term_number' => 1, 'pay_term_type' => 'days'];
 $totals = ['total_before_tax' => 100, 'tax' => 0];
 fakeEis();
-$transaction = $util->createSellTransaction(7, $input + ['is_relief' => 1, 'vat5_certificate_details' => $service->validate(7, $relief)], $totals, 1, false)->fresh();
+$transaction = $util->createSellTransaction(7, $input + [
+    'is_relief' => 1,
+    'vat5_certificate_details' => $service->validate(7, $relief),
+    'customer_authorization_code' => 'POS-CODE',
+], $totals, 1, false)->fresh();
 checkEis($transaction->vat5_certificate_details === $certificate, 'JSON certificate persisted/cast');
+checkEis($transaction->customer_authorization_code === 'POS-CODE', 'POS authorization code is persisted with the sale');
 $service->assertSaleUnchanged(clone $transaction, clone $transaction);
 checkEis(true, 'Unchanged locked snapshot accepted');
 foreach (['is_relief' => false, 'contact_id' => 2, 'vat5_certificate_details' => null] as $field => $value) {
@@ -213,15 +231,21 @@ foreach (['is_relief' => false, 'contact_id' => 2, 'vat5_certificate_details' =>
     rejectsEis(fn () => $service->assertSaleUnchanged($transaction, $locked), 'is_relief');
 }
 checkEis($service->validate(7, ['contact_id' => 1], $transaction) === $certificate, 'Omitted edit fields revalidate saved relief details');
+checkEis($service->validatedAuthorizationCode() === 'POS-CODE', 'Sale edits reuse the sale-level buyer authorization code');
 rejectsEis(fn () => $service->validate(8, [], $transaction), 'contact_id');
 rejectsEis(fn () => $service->validate(7, ['contact_id' => 2], $transaction), 'projectNumber');
 $transaction = $util->updateSellTransaction($transaction, 7, $input, $totals, 1, false)->fresh();
 checkEis($transaction->vat5_certificate_details === $certificate, 'Unrelated update preserves certificate');
+checkEis($transaction->customer_authorization_code === 'POS-CODE', 'Unrelated sale updates preserve the validated buyer code');
 $transformer = (new ReflectionClass(SaleTransformer::class))->newInstanceWithoutConstructor();
 $header = new ReflectionMethod(SaleTransformer::class, 'buildInvoiceHeader');
 $header->setAccessible(true);
 $result = $header->invoke($transformer, $transaction, $settings, 'FIXTURE', '00', []);
 checkEis($result['vat5CertificateDetails'] === $certificate && ! isset($result['vat5CertificateDetails']['id']), 'EIS uses persisted details without invented ID');
+$buyerInfo = new ReflectionMethod(SaleTransformer::class, 'getBuyerInfo');
+$buyerInfo->setAccessible(true);
+checkEis($buyerInfo->invoke($transformer, $transaction)['authorization_code'] === 'POS-CODE',
+    'Fiscal invoice uses the sale-level authorization code instead of changing the customer profile');
 $transaction = $util->updateSellTransaction($transaction, 7, $input + ['is_relief' => 0], $totals, 1, false)->fresh();
 checkEis($transaction->vat5_certificate_details === null, 'Uncheck clears stale certificate');
 $result = $header->invoke($transformer, $transaction, $settings, 'FIXTURE', '00', []);
@@ -263,6 +287,18 @@ $blade = new Illuminate\View\Compilers\BladeCompiler(new Illuminate\Filesystem\F
 $vat5Source = file_get_contents($root.'/resources/views/sale_pos/partials/vat5_fields.blade.php');
 token_get_all($blade->compileString($vat5Source), TOKEN_PARSE);
 checkEis(true, 'VAT5 Blade syntax');
+$posBuyerView = file_get_contents($root.'/resources/views/sale_pos/partials/pos_form.blade.php');
+token_get_all($blade->compileString($posBuyerView), TOKEN_PARSE);
+checkEis(true, 'POS buyer authorization Blade syntax');
+$posBuyerScript = file_get_contents($root.'/public/js/pos.js');
+$posBuyerController = file_get_contents($root.'/Modules/EIS/Http/Controllers/PosBuyerController.php');
+$posBuyerRoutes = file_get_contents($root.'/Modules/EIS/Routes/web.php');
+checkEis(str_contains($posBuyerView, 'buyerAuthorizationCode')
+    && str_contains($posBuyerView, "route('eis.pos.buyer-authorization-requirement')")
+    && str_contains($posBuyerScript, 'checkEisBuyerAuthorization')
+    && str_contains($posBuyerController, 'checkAuthorizationRequirement')
+    && str_contains($posBuyerRoutes, 'eis/pos/buyer-authorization-requirement'),
+    'POS customer selection checks EIS and conditionally renders the authorization code field');
 $container->instance('session', $session);
 $container->instance('request', $request);
 foreach ([false, true] as $only_payment) {

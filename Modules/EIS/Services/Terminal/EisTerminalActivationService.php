@@ -156,7 +156,7 @@ class EisTerminalActivationService
                 Log::error('Activation confirmation failed', [
                     'terminal_id' => $terminalId,
                     'status' => $response->status(),
-                    'response' => $response->body()
+                    'response_present' => $response->body() !== '',
                 ]);
                 return false;
             }
@@ -165,7 +165,7 @@ class EisTerminalActivationService
 
             Log::info('Activation confirmation sent successfully', [
                 'terminal_id' => $terminalId,
-                'response' => $responseData
+                'response_data_present' => is_array($responseData) && !empty($responseData),
             ]);
 
             // Update terminal as confirmed
@@ -421,40 +421,31 @@ class EisTerminalActivationService
         if (!$response->successful()) {
             Log::error('EIS activation API error', [
                 'status' => $response->status(),
-                'response' => $response->body(),
                 'business_id' => $businessId
             ]);
 
-            throw new \Exception('EIS activation API failed: ' . $response->body(), $response->status());
+            throw new \Exception('EIS activation API failed', $response->status());
         }
 
         $responseData = $response->object();
 
         Log::debug('EIS activation API response', [
             'business_id' => $businessId,
-            'response' => $responseData
+            'status_code' => $responseData->statusCode ?? null,
+            'data_present' => isset($responseData->data),
         ]);
 
         // Check if response has error (statusCode: 1 = success, other = error)
         if (isset($responseData->statusCode) && $responseData->statusCode !== 1) {
-            $errorMessage = $responseData->remark ?? 'Unknown error';
-            
-            if (!empty($responseData->errors)) {
-                $errors = [];
-                foreach ($responseData->errors as $error) {
-                    $errors[] = $error->errorMessage ?? 'Unknown error';
-                }
-                $errorMessage .= ': ' . implode(', ', $errors);
-            }
-
-            throw new \Exception($errorMessage, $responseData->statusCode);
+            throw new \Exception('EIS activation was rejected', (int) $responseData->statusCode);
         }
 
         // Check if data exists
         if (!isset($responseData->data) || !isset($responseData->data->activatedTerminal)) {
             Log::error('EIS activation API response missing data', [
                 'business_id' => $businessId,
-                'response' => $responseData
+                'status_code' => $responseData->statusCode ?? null,
+                'data_present' => isset($responseData->data),
             ]);
             throw new \Exception('EIS activation API response missing terminal data');
         }
@@ -516,7 +507,7 @@ class EisTerminalActivationService
                 if (!$activatedTerminal) {
                     Log::error('No activated terminal data in response', [
                         'business_id' => $businessId,
-                        'response' => json_encode($response)
+                        'response_present' => $response->body() !== ''
                     ]);
                     throw new \Exception('No activated terminal data in response');
                 }
@@ -524,7 +515,7 @@ class EisTerminalActivationService
                 if (!$configurationData) {
                     Log::error('No configuration data in response', [
                         'business_id' => $businessId,
-                        'response' => json_encode($response)
+                        'response_present' => $response->body() !== ''
                     ]);
                     throw new \Exception('No configuration data in response');
                 }
@@ -1416,13 +1407,9 @@ class EisTerminalActivationService
                 Log::error('EIS regenerate credentials API error', [
                     'business_id' => $businessId,
                     'status' => $response->status(),
-                    'response' => $response->body()
+                    'response_present' => $response->body() !== ''
                 ]);
-
-                return [
-                    'success' => false,
-                    'message' => 'Failed to regenerate credentials: ' . $response->body()
-                ];
+                return ['success' => false, 'message' => 'Failed to regenerate credentials'];
             }
 
             $responseData = $response->json();

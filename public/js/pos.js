@@ -1,7 +1,72 @@
 var global_brand_id = null;
 var global_p_category_id = null;
 var global_is_clear_local_storage = false;
+var eisBuyerCheckSequence = 0;
+var eisBuyerCheckRequest = null;
+
+function resetEisBuyerAuthorization() {
+    eisBuyerCheckSequence++;
+    if (eisBuyerCheckRequest) {
+        eisBuyerCheckRequest.abort();
+        eisBuyerCheckRequest = null;
+    }
+    $('#buyer_authorization_code').val('').prop('required', false);
+    $('#buyer_authorization_code_container').prop('hidden', true);
+    $('#eis_buyer_authorization_status').prop('hidden', true);
+    $('#buyer_authorization_code_help').text('EIS requires an authorization code for this buyer TIN.');
+}
+
+function checkEisBuyerAuthorization(contactId) {
+    var url = $('#eis_buyer_authorization_requirement_url').val();
+    if (!url || !contactId) {
+        return;
+    }
+
+    var sequence = eisBuyerCheckSequence;
+    $('#eis_buyer_authorization_status').prop('hidden', false);
+    eisBuyerCheckRequest = $.ajax({
+        url: url,
+        method: 'POST',
+        dataType: 'json',
+        headers: {'X-CSRF-TOKEN': $('meta[name="csrf-token"]').attr('content')},
+        data: {contact_id: contactId, location_id: $('#location_id').val()}
+    }).done(function(result) {
+        if (sequence !== eisBuyerCheckSequence) {
+            return;
+        }
+        $('#eis_buyer_authorization_status').prop('hidden', true);
+        if (!result.success || !result.data) {
+            return;
+        }
+        if (result.data.requires_authorization_code) {
+            $('#buyer_authorization_code_container').prop('hidden', false);
+            $('#buyer_authorization_code').prop('required', !result.data.has_saved_authorization_code);
+            if (result.data.has_saved_authorization_code) {
+                $('#buyer_authorization_code_help').text('This buyer has a saved code on file. Enter a different code only if needed.');
+            }
+        }
+    }).fail(function(xhr, status) {
+        if (status === 'abort' || sequence !== eisBuyerCheckSequence) {
+            return;
+        }
+        $('#eis_buyer_authorization_status').prop('hidden', true);
+        var body = xhr.responseJSON || {};
+        toastr.error(body.message || 'EIS could not check the buyer TIN. The sale will be checked again when submitted.');
+    }).always(function() {
+        if (sequence === eisBuyerCheckSequence) {
+            eisBuyerCheckRequest = null;
+        }
+    });
+}
+
 $(document).ready(function() {
+    $('#add_sell_form, #add_pos_sell_form').on('submit', function(event) {
+        if (eisBuyerCheckRequest) {
+            event.preventDefault();
+            toastr.info('Wait for the EIS buyer TIN check to finish before completing the sale.');
+            return false;
+        }
+    });
     $(document).on('change', '#isRelief', function() {
         $('#pos_vat5_fields').toggleClass('hide', !this.checked);
     });
@@ -416,19 +481,15 @@ $(document).ready(function() {
 
     //If change in unit price update price including tax and line total
     $('table#pos_table tbody').on('change', 'input.pos_unit_price', function() {
-        var unit_price = __read_number($(this));
         var tr = $(this).parents('tr');
 
         //calculate discounted unit price
         var discounted_unit_price = calculate_discounted_unit_price(tr);
 
-        var tax_rate = tr
-            .find('select.tax_id')
-            .find(':selected')
-            .data('rate');
         var quantity = __read_number(tr.find('input.pos_quantity'));
 
-        var unit_price_inc_tax = __add_percent(discounted_unit_price, tax_rate);
+        var item_tax = __read_number(tr.find('input.item_tax'));
+        var unit_price_inc_tax = discounted_unit_price + item_tax;
         var line_total = quantity * unit_price_inc_tax;
 
         __write_number(tr.find('input.pos_unit_price_inc_tax'), unit_price_inc_tax);
@@ -439,20 +500,18 @@ $(document).ready(function() {
         round_row_to_iraqi_dinnar(tr);
     });
 
-    //If change in tax rate then update unit price according to it.
+    //Refresh the per-unit tax from the selected database rate.
     $('table#pos_table tbody').on('change', 'select.tax_id', function() {
         var tr = $(this).parents('tr');
+        var tax_rate = $(this).find(':selected').data('rate') || 0;
+        var discounted_unit_price = calculate_discounted_unit_price(tr);
+        var item_tax = __calculate_amount('percentage', tax_rate, discounted_unit_price);
+        var multiplier = parseFloat(tr.find('input.base_unit_multiplier').val()) || 1;
 
-        var tax_rate = tr
-            .find('select.tax_id')
-            .find(':selected')
-            .data('rate');
-        var unit_price_inc_tax = __read_number(tr.find('input.pos_unit_price_inc_tax'));
-
-        var discounted_unit_price = __get_principle(unit_price_inc_tax, tax_rate);
-        var unit_price = get_unit_price_from_discounted_unit_price(tr, discounted_unit_price);
-        __write_number(tr.find('input.pos_unit_price'), unit_price);
+        __write_number(tr.find('input.item_tax'), item_tax);
+        __write_number(tr.find('input.hidden_base_unit_item_tax'), item_tax / multiplier);
         pos_each_row(tr);
+        pos_total_row();
     });
 
     //If change in unit price including tax, update unit price
@@ -466,14 +525,10 @@ $(document).ready(function() {
 
         var tr = $(this).parents('tr');
 
-        var tax_rate = tr
-            .find('select.tax_id')
-            .find(':selected')
-            .data('rate');
         var quantity = __read_number(tr.find('input.pos_quantity'));
 
         var line_total = quantity * unit_price_inc_tax;
-        var discounted_unit_price = __get_principle(unit_price_inc_tax, tax_rate);
+        var discounted_unit_price = unit_price_inc_tax - __read_number(tr.find('input.item_tax'));
         var unit_price = get_unit_price_from_discounted_unit_price(tr, discounted_unit_price);
 
         __write_number(tr.find('input.pos_unit_price'), unit_price);
@@ -557,13 +612,10 @@ $(document).ready(function() {
             //calculate discounted unit price
             var discounted_unit_price = calculate_discounted_unit_price(tr);
 
-            var tax_rate = tr
-                .find('select.tax_id')
-                .find(':selected')
-                .data('rate');
             var quantity = __read_number(tr.find('input.pos_quantity'));
 
-            var unit_price_inc_tax = __add_percent(discounted_unit_price, tax_rate);
+            var item_tax = __read_number(tr.find('input.item_tax'));
+            var unit_price_inc_tax = discounted_unit_price + item_tax;
             var line_total = quantity * unit_price_inc_tax;
 
             __write_number(tr.find('input.pos_unit_price_inc_tax'), unit_price_inc_tax);
@@ -1501,6 +1553,9 @@ $(document).ready(function() {
 
         var unit_sp = base_unit_selling_price * multiplier;
 
+        var base_unit_item_tax = __read_number(tr.find('input.hidden_base_unit_item_tax'));
+        __write_number(tr.find('input.item_tax'), base_unit_item_tax * multiplier);
+
         var sp_element = tr.find('input.pos_unit_price');
         __write_number(sp_element, unit_sp);
 
@@ -2001,16 +2056,9 @@ function pos_product_row(variation_id = null, purchase_line_id = null, weighing_
 
 //Update values for each row
 function pos_each_row(row_obj) {
-    var unit_price = __read_number(row_obj.find('input.pos_unit_price'));
-
     var discounted_unit_price = calculate_discounted_unit_price(row_obj);
-    var tax_rate = row_obj
-        .find('select.tax_id')
-        .find(':selected')
-        .data('rate');
-
-    var unit_price_inc_tax =
-        discounted_unit_price + __calculate_amount('percentage', tax_rate, discounted_unit_price);
+    var item_tax = __read_number(row_obj.find('input.item_tax'));
+    var unit_price_inc_tax = discounted_unit_price + item_tax;
     __write_number(row_obj.find('input.pos_unit_price_inc_tax'), unit_price_inc_tax);
 
     var discount = __read_number(row_obj.find('input.row_discount_amount'));
@@ -2020,10 +2068,6 @@ function pos_each_row(row_obj) {
         var line_total = qty * unit_price_inc_tax;
         __write_number(row_obj.find('input.pos_line_total'), line_total);
     }
-
-    //var unit_price_inc_tax = __read_number(row_obj.find('input.pos_unit_price_inc_tax'));
-
-    __write_number(row_obj.find('input.item_tax'), unit_price_inc_tax - discounted_unit_price);
 }
 
 function pos_total_row() {
@@ -2645,6 +2689,7 @@ function updateRedeemedAmount(argument) {
 }
 
 $(document).on('change', 'select#customer_id', function(){
+    resetEisBuyerAuthorization();
     var default_customer_id = $('#default_customer_id').val();
     if ($(this).val() == default_customer_id) {
         //Disable reward points for walkin customers
@@ -2664,6 +2709,18 @@ $(document).on('change', 'select#customer_id', function(){
     }
 
     get_sales_orders();
+    if ($(this).val() && $(this).val() != default_customer_id) {
+        checkEisBuyerAuthorization($(this).val());
+    }
+});
+
+$(document).on('change', 'select#select_location_id', function() {
+    var contactId = $('#customer_id').val();
+    if (contactId && contactId != $('#default_customer_id').val()) {
+        $('#location_id').val($(this).val());
+        resetEisBuyerAuthorization();
+        checkEisBuyerAuthorization(contactId);
+    }
 });
 
 $(document).on('change', '#rp_redeemed_modal', function(){

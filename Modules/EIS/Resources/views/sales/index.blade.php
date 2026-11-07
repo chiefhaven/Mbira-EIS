@@ -71,6 +71,47 @@ $(function() {
         if (['pending', 'prepared', 'queued', 'submitting', 'sending'].indexOf(status) !== -1) return 'eis-status-warning';
         return 'eis-status-danger';
     }
+    function printReceiptInWindow(printWindow, receipt) {
+        if (!receipt || !receipt.html_content) {
+            printWindow.close();
+            $('#eis-sales-message').attr('class', 'alert alert-danger').text('The POS receipt could not be loaded for printing.');
+            return;
+        }
+
+        var $receipt = $('<div>').html(receipt.html_content);
+        __currency_convert_recursively($receipt);
+        var parsedReceipt = new DOMParser().parseFromString($receipt.html(), 'text/html');
+        var printDocument = printWindow.document;
+
+        printWindow.onload = function() {
+            printWindow.focus();
+            printWindow.print();
+        };
+        printDocument.open();
+        printDocument.write('<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title></title></head><body></body></html>');
+        printDocument.title = receipt.print_title || parsedReceipt.title || document.title;
+
+        $('link[rel="stylesheet"]').each(function() {
+            var stylesheet = this.cloneNode(true);
+            stylesheet.href = this.href;
+            printDocument.head.appendChild(stylesheet);
+        });
+        parsedReceipt.querySelectorAll('style, link[rel="stylesheet"]').forEach(function(style) {
+            var receiptStyle = style.cloneNode(true);
+            if (receiptStyle.nodeName === 'LINK') {
+                receiptStyle.href = new URL(style.getAttribute('href'), document.baseURI).href;
+            }
+            printDocument.head.appendChild(receiptStyle);
+        });
+        Array.prototype.forEach.call(parsedReceipt.body.childNodes, function(node) {
+            if (node.nodeName !== 'STYLE' && node.nodeName !== 'LINK' && node.nodeName !== 'SCRIPT') {
+                printDocument.body.appendChild(printDocument.importNode(node, true));
+            }
+        });
+        printDocument.close();
+        $('#eis-sales-message').attr('class', 'alert alert-success').text('The receipt opened in a new window for printing.');
+    }
+
     function request(url, method, data) {
         reset();
         $('#eis-sales-submit, .eis-sales-review, .eis-sale-sync-print').prop('disabled', true);
@@ -106,6 +147,11 @@ $(function() {
     $('.eis-sale-sync-print').on('click', function() {
         var button = $(this);
         var saleId = button.attr('data-id');
+        var printWindow = window.open('', '_blank');
+        if (!printWindow) {
+            $('#eis-sales-message').attr('class', 'alert alert-danger').text('Allow pop-ups for this site to print the receipt.');
+            return;
+        }
         button.prop('disabled', true);
         $('#eis-sales-message').attr('class', 'alert alert-info').text('Verifying the saved invoice with EIS before printing…');
         $.ajax({
@@ -124,13 +170,23 @@ $(function() {
             $('#eis-sales-message').attr('class', 'alert alert-success').text(
                 (result.message || 'Invoice synchronized with EIS.') + ' Preparing the POS receipt to print.'
             );
-            $('<a>', {
-                'class': 'print-invoice',
-                'data-href': button.attr('data-print-url'),
-                'aria-hidden': 'true',
-                tabindex: -1
-            }).hide().appendTo('body').trigger('click').remove();
+            $.ajax({
+                url: button.attr('data-print-url'),
+                method: 'GET',
+                dataType: 'json'
+            }).done(function(printResult) {
+                if (printResult.success === 1 && printResult.receipt) {
+                    printReceiptInWindow(printWindow, printResult.receipt);
+                } else {
+                    printWindow.close();
+                    $('#eis-sales-message').attr('class', 'alert alert-danger').text(printResult.msg || 'The POS receipt could not be loaded for printing.');
+                }
+            }).fail(function() {
+                printWindow.close();
+                $('#eis-sales-message').attr('class', 'alert alert-danger').text('The POS receipt could not be loaded for printing.');
+            });
         }).fail(function(xhr) {
+            printWindow.close();
             var result = xhr.responseJSON || {};
             $('#eis-sales-message').attr('class', 'alert alert-danger').text(
                 result.message || 'EIS verification failed. The POS receipt was not opened for printing.'

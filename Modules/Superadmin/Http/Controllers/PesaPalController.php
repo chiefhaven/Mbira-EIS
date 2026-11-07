@@ -12,7 +12,11 @@ class PesaPalController extends Controller
     {
         $subscription = Subscription::where('payment_transaction_id', $transaction_id)->first();
 
-        \Log::emergency('subscription transaction_id:'.$transaction_id.'status:'.$status.'payment_method:'.$payment_method);
+        \Log::info('PesaPal subscription payment confirmation received', [
+            'status_received' => is_scalar($status),
+            'payment_method_received' => is_scalar($payment_method),
+            'transaction_id_present' => $transaction_id !== '',
+        ]);
 
         if ($status == 'COMPLETED') {
             if ($subscription->status != 'approved') {

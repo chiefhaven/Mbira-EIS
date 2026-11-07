@@ -5,8 +5,8 @@ use Modules\EIS\Http\Controllers\StockOutboundController;
 use Modules\EIS\Http\Controllers\TerminalManagementController;
 use Modules\EIS\Http\Controllers\UtilitiesController;
 use Modules\EIS\Http\Controllers\SalesController;
-use Modules\EIS\Http\Controllers\StockToolsController;
 use Modules\EIS\Http\Controllers\ProductStatusController;
+use Modules\EIS\Http\Controllers\PosBuyerController;
 
 Route::prefix('eis')->middleware('auth')->group(function () {
     Route::get('install', [\Modules\EIS\Http\Controllers\InstallController::class, 'index'])
@@ -15,14 +15,6 @@ Route::prefix('eis')->middleware('auth')->group(function () {
         ->withoutMiddleware(\Modules\EIS\Http\Middleware\EnforceTerminalBusiness::class);
     Route::get('install/uninstall', [\Modules\EIS\Http\Controllers\InstallController::class, 'uninstall'])
         ->withoutMiddleware(\Modules\EIS\Http\Middleware\EnforceTerminalBusiness::class);
-});
-
-Route::prefix('eis/stock/tools')->middleware('auth')->name('eis.stock.tools.')->group(function () {
-    Route::get('/', [StockToolsController::class, 'index'])->name('index');
-    Route::post('execute', [StockToolsController::class, 'execute'])->name('execute');
-    Route::get('requests/{id}', [StockToolsController::class, 'show'])->whereNumber('id')->name('show');
-    Route::post('requests/{id}/submit', [StockToolsController::class, 'submit'])->whereNumber('id')->name('submit');
-    Route::post('requests/{id}/verify', [StockToolsController::class, 'verify'])->whereNumber('id')->name('verify');
 });
 
 Route::prefix('eis/sales')->middleware('auth')->name('eis.sales.')->group(function () {
@@ -35,6 +27,9 @@ Route::prefix('eis/sales')->middleware('auth')->name('eis.sales.')->group(functi
 
 Route::post('eis/products/{productId}/status', [ProductStatusController::class, 'show'])
     ->whereNumber('productId')->middleware('auth')->name('eis.products.status');
+
+Route::post('eis/pos/buyer-authorization-requirement', [PosBuyerController::class, 'authorizationRequirement'])
+    ->middleware('auth')->name('eis.pos.buyer-authorization-requirement');
 
 Route::prefix('eis/sales/operations')->middleware('auth')->name('eis.sales.operations.')->group(function () {
     Route::post('execute', [UtilitiesController::class, 'execute'])->name('execute');
@@ -51,12 +46,6 @@ Route::get('eis', function () {
 
     if ($user->can('stock_adjustment.view')) {
         return redirect()->route('eis.stock.index');
-    }
-
-    if ($user->can('stock_adjustment.create')
-        || $user->can('stock_transfer.create')
-        || $user->can('purchase.create')) {
-        return redirect()->route('eis.stock.outbound.index');
     }
 
     abort(403);
@@ -88,13 +77,5 @@ Route::prefix('eis/terminals')->middleware(['web', 'auth'])->name('eis.terminals
         ->whereNumber('terminalId')->name('default');
 });
 
-Route::prefix('eis/stock/outbound')->middleware(['web', 'auth'])->name('eis.stock.outbound.')->group(function () {
-    Route::get('/', [StockOutboundController::class, 'index'])->name('index');
-    Route::post('/', [StockOutboundController::class, 'store'])->name('store');
-    Route::post('{operationId}/dispatch', [StockOutboundController::class, 'dispatchQueued'])
-        ->whereNumber('operationId')->name('dispatch');
-    Route::post('{operationId}/verify', [StockOutboundController::class, 'verify'])
-        ->whereNumber('operationId')->name('verify');
-    Route::get('locations/{locationId}/adjustment-reasons', [StockOutboundController::class, 'reasons'])
-        ->whereNumber('locationId')->name('reasons');
-});
+Route::get('eis/stock/outbound/locations/{locationId}/adjustment-reasons', [StockOutboundController::class, 'reasons'])
+    ->whereNumber('locationId')->middleware(['web', 'auth'])->name('eis.stock.outbound.reasons');

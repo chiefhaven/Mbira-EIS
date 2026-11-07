@@ -147,6 +147,18 @@ function checkRetry(bool $condition, string $message): void {
     if (! $condition) { throw new RuntimeException($message); }
     ++$checks;
 }
+$sameInvoiceDate = new ReflectionMethod(SaleOutcomeRecoveryService::class, 'sameDate');
+$sameInvoiceDate->setAccessible(true);
+checkRetry($sameInvoiceDate->invoke($recovery, '2026-11-07T19:30:00', '2026-11-07T21:30:00+02:00'),
+    'Invoice lookup treats timezone-less UTC timestamps as the same instant as offset timestamps');
+checkRetry($sameInvoiceDate->invoke($recovery, '2026-11-07T23:57:15', '2026-11-08T03:27:15+05:30'),
+    'Invoice lookup interprets timezone-less EIS timestamps in the EIS timezone');
+checkRetry(!$sameInvoiceDate->invoke($recovery, '2026-11-07T23:57:16', '2026-11-08T03:27:15+05:30'),
+    'Invoice lookup still requires exact instants when applying the EIS timezone');
+checkRetry($sameInvoiceDate->invoke($recovery, '2026-11-07T21:30:00', '2026-11-07T21:30:00+02:00'),
+    'Invoice lookup accepts timezone-less timestamps expressed in the submitted offset');
+checkRetry(!$sameInvoiceDate->invoke($recovery, '2026-11-07T20:30:00', '2026-11-07T21:30:00+02:00'),
+    'Invoice lookup still rejects invoice timestamps that do not match in UTC, submitted offset or app timezone');
 function fixtureSale(): Transaction {
     $id = DB::table('transactions')->insertGetId(['business_id' => 7, 'invoice_no' => 'POS-ORIGINAL',
         'type' => 'sell', 'status' => 'final', 'payment_status' => 'paid']);
@@ -407,6 +419,8 @@ try {
     $recovery->sync($afterNoReceiptSync, $settings);
     throw new RuntimeException('Mismatched invoice was synchronized');
 } catch (\UnexpectedValueException $exception) {
+    checkRetry(str_contains($exception->getMessage(), 'invoice total'),
+        'Manual sync identifies the mismatched invoice field without disclosing invoice values');
     checkRetry($afterNoReceiptSync->fresh()->getRawOriginal() === $beforeMismatchSync,
         'Individual sync rejects mismatched totals without changing any saved field');
 }

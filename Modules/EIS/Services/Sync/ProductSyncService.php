@@ -138,6 +138,11 @@ class ProductSyncService
                 'removed_count' => $removed,
             ]);
         });
+
+        \Modules\EIS\Models\EisSetting::where('business_id', $businessId)
+            ->whereKey($settings->id)
+            ->where('location_id', $locationId)
+            ->update(['products_last_synced_at' => now()]);
     }
 
     /**

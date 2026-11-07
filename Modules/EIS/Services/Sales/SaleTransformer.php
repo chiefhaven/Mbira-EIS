@@ -402,7 +402,8 @@ class SaleTransformer
                 $contactInfo = [
                     'name' => $name,
                     'tpin' => $taxNumber,
-                    'authorization_code' => trim((string) ($transaction->contact->authorization_code ?? '')),
+                    'authorization_code' => trim((string) ($transaction->customer_authorization_code
+                        ?: ($transaction->contact->authorization_code ?? ''))),
                 ];
             }
         } catch (\Exception $e) {
@@ -505,8 +506,6 @@ class SaleTransformer
             
             Log::debug('Offline signature generated successfully', [
                 'transaction_id' => $transaction->id,
-                'invoice_number' => $eisInvoiceNumber,
-                'validation_url' => $result['validationURL'] ?? ''
             ]);
             
             return $result;
@@ -514,9 +513,7 @@ class SaleTransformer
         } catch (\Exception $e) {
             Log::error('Failed to generate offline signature', [
                 'transaction_id' => $transaction->id,
-                'invoice_number' => $eisInvoiceNumber,
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
+                'exception' => get_class($e),
             ]);
             
             return [

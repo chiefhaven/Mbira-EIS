@@ -22,16 +22,52 @@ class UtilityRequestService
         $payload = UtilityOperations::payload($setting, $operation, $payload);
         TerminalContext::assertActive($setting);
         $receiptId = $operation === 'cancel-receipt' ? self::assertReceipt($setting, $payload['receiptNumber']) : null;
+        if ($operation === 'cancel-receipt') {
+            $payload['receiptNumber'] = self::canonicalReceiptNumber($setting, $receiptId);
+        }
         return DB::transaction(function () use ($setting, $operation, $payload, $actorId, $receiptId) {
             DB::table('business')->where('id', $setting->business_id)->lockForUpdate()->first();
             if ($operation === 'cancel-receipt' && DB::getSchemaBuilder()->hasTable('eis_sale_adjustments')
                 && DB::table('eis_sale_adjustments')->where('business_id', $setting->business_id)->where('sale_id', $receiptId)->exists()) {
                 throw new \InvalidArgumentException('This sale has a linked fiscal return adjustment. Do not void the original invoice; verify its note chain with MRA.');
             }
+            $latestReceiptRequest = null;
+            if ($operation === 'cancel-receipt') {
+                $requests = DB::table('eis_utility_requests')->where('business_id', $setting->business_id)
+                    ->where('location_id', $setting->location_id)->where('eis_setting_id', $setting->id)
+                    ->where('operation', $operation)->orderByDesc('id')->lockForUpdate()->get();
+                foreach ($requests as $candidate) {
+                    $candidatePayload = json_decode($candidate->payload, true, 512, JSON_THROW_ON_ERROR);
+                    if (!is_string($candidatePayload['receiptNumber'] ?? null)) {
+                        continue;
+                    }
+                    try {
+                        if (self::assertReceipt($setting, $candidatePayload['receiptNumber']) === $receiptId) {
+                            $latestReceiptRequest = $candidate;
+                            break;
+                        }
+                    } catch (\InvalidArgumentException $exception) {
+                        continue;
+                    }
+                }
+                if ($latestReceiptRequest && $latestReceiptRequest->status !== 'rejected') {
+                    return $latestReceiptRequest;
+                }
+                if ($latestReceiptRequest) {
+                    $previousPayload = json_decode($latestReceiptRequest->payload, true, 512, JSON_THROW_ON_ERROR);
+                    if ($this->canonical($previousPayload) === $this->canonical($payload)) {
+                        return $latestReceiptRequest;
+                    }
+                }
+            }
             $identityPayload = $operation === 'cancel-receipt' ? ['transaction_id' => $receiptId] : $payload;
             $identity = hash('sha256', json_encode([
                 $setting->business_id, $this->endpoint(), $setting->tpin, $operation, $this->canonical($identityPayload),
             ], JSON_THROW_ON_ERROR));
+            if ($latestReceiptRequest) {
+                $identity = hash('sha256', $identity.':retry:'.$latestReceiptRequest->id.':'
+                    .hash('sha256', json_encode($this->canonical($payload), JSON_THROW_ON_ERROR)));
+            }
             $existing = DB::table('eis_utility_requests')->where('identity', $identity)->first();
             if ($existing) { return $existing; }
             $id = DB::table('eis_utility_requests')->insertGetId([
@@ -171,6 +207,29 @@ class UtilityRequestService
             throw new \InvalidArgumentException('Select a submitted receipt belonging to this terminal and location.');
         }
         return (int) $receipt->transaction_id;
+    }
+
+    private static function canonicalReceiptNumber(EisSetting $setting, int $transactionId): string
+    {
+        $columns = ['fiscal_invoice_number'];
+        if (DB::getSchemaBuilder()->hasColumn('eis_sales', 'eis_invoice_number')) {
+            $columns[] = 'eis_invoice_number';
+        }
+        if (DB::getSchemaBuilder()->hasColumn('eis_sales', 'request_payload')) {
+            $columns[] = 'request_payload';
+        }
+        $sale = DB::table('eis_sales')->where('business_id', $setting->business_id)
+            ->where('location_id', $setting->location_id)->where('eis_setting_id', $setting->id)
+            ->where('transaction_id', $transactionId)->where('status', 'submitted')->first($columns);
+        if (!$sale) {
+            throw new \InvalidArgumentException('The submitted EIS sale no longer matches this terminal and location.');
+        }
+        $requestPayload = isset($sale->request_payload) ? json_decode($sale->request_payload, true) : [];
+        $number = $requestPayload['invoiceHeader']['invoiceNumber'] ?? $sale->eis_invoice_number ?? $sale->fiscal_invoice_number ?? null;
+        if (!is_string($number) || trim($number) === '') {
+            throw new \InvalidArgumentException('The submitted EIS sale has no stored fiscal invoice number.');
+        }
+        return trim($number);
     }
 
     private function canonical(array $value): array

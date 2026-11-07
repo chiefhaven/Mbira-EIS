@@ -14,10 +14,73 @@ use Modules\EIS\Services\EisSubscriptionAccess;
 
 class PosBuyerValidationService
 {
+    private ?string $validatedAuthorizationCode = null;
+
     public function __construct(
         private EisValidationClient $client,
         protected EisHealthService $healthService
     ) {}
+
+    public function checkAuthorizationRequirement(int $businessId, int $contactId, int $locationId): array
+    {
+        $contact = Contact::where('business_id', $businessId)
+            ->whereIn('type', ['customer', 'both'])
+            ->where('contact_status', 'active')
+            ->find($contactId);
+
+        if (! $contact) {
+            throw ValidationException::withMessages([
+                'contact_id' => 'Select an active buyer from this business.',
+            ]);
+        }
+
+        $tin = trim((string) $contact->tax_number);
+        $result = [
+            'has_tin' => $tin !== '',
+            'requires_authorization_code' => false,
+            'has_saved_authorization_code' => trim((string) $contact->authorization_code) !== '',
+            'checked' => false,
+        ];
+
+        if ($tin === '' || ! app(EisSubscriptionAccess::class)->allows($businessId)) {
+            return $result;
+        }
+
+        $hasEis = EisSetting::where('business_id', $businessId)
+            ->where('location_id', $locationId)->exists();
+        if (! $hasEis) {
+            return $result;
+        }
+
+        try {
+            $settings = \Modules\EIS\Services\Terminal\TerminalContext::forLocation($businessId, $locationId, true);
+        } catch (\InvalidArgumentException | \Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            throw ValidationException::withMessages(['location_id' => $e->getMessage()]);
+        }
+
+        if (! $this->healthService->isOnline($businessId, $settings->jwt_token)) {
+            return $result;
+        }
+
+        $requirement = $this->client->checkTinAuthorizationRequirement($settings, $tin);
+        if (($requirement['tinExists'] ?? null) !== true
+            || ! is_bool($requirement['requiresAuthorizationCode'] ?? null)
+            || ($requirement['tin'] ?? null) !== $tin) {
+            throw ValidationException::withMessages([
+                'buyerTIN' => 'EIS could not confirm the buyer TIN.',
+            ]);
+        }
+
+        $result['requires_authorization_code'] = $requirement['requiresAuthorizationCode'];
+        $result['checked'] = true;
+
+        return $result;
+    }
+
+    public function validatedAuthorizationCode(): ?string
+    {
+        return $this->validatedAuthorizationCode;
+    }
 
     /**
      * Validate buyer information for POS sales.
@@ -37,6 +100,7 @@ class PosBuyerValidationService
         array $input,
         ?Transaction $existing = null
     ): ?array {
+        $this->validatedAuthorizationCode = null;
 
         /*
         |--------------------------------------------------------------------------
@@ -92,7 +156,13 @@ class PosBuyerValidationService
 
         $tin = trim((string) $contact->tax_number);
 
-        $code = trim((string) $contact->authorization_code);
+        $submittedCode = $input['buyerAuthorizationCode'] ?? null;
+        $existingCode = $existing && (int) $contact->id === (int) $existing->contact_id
+            ? trim((string) $existing->customer_authorization_code)
+            : '';
+        $code = is_string($submittedCode) && trim($submittedCode) !== ''
+            ? trim($submittedCode)
+            : ($existingCode !== '' ? $existingCode : trim((string) $contact->authorization_code));
 
         if (!app(EisSubscriptionAccess::class)->allows($businessId)) {
             if ($relief) {
@@ -323,7 +393,7 @@ class PosBuyerValidationService
             ) {
                 throw ValidationException::withMessages([
                     'buyerAuthorizationCode' =>
-                        'This buyer TIN requires an EIS authorization code. Edit the customer to add it.',
+                        'This buyer TIN requires an EIS verification code. Enter it on the POS screen.',
                 ]);
             }
 
@@ -363,6 +433,8 @@ class PosBuyerValidationService
                 $certificate
             );
         }
+
+        $this->validatedAuthorizationCode = $code !== '' ? $code : null;
 
         /*
         |--------------------------------------------------------------------------

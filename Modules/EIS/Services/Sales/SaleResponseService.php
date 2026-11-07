@@ -68,8 +68,6 @@ class SaleResponseService
         // -------------------------
         Log::info('EIS sale completed successfully', [
             'transaction_id' => $transaction->id,
-            'receipt_number' => $receiptNumber,
-            'validation_url' => $validationUrl,
         ]);
     }
 
@@ -100,7 +98,6 @@ class SaleResponseService
         Log::error('EIS sale failed', [
             'transaction_id' => $transaction->id,
             'status_code' => $response['data']['statusCode'] ?? null,
-            'error' => $errorMessage,
         ]);
     }
 

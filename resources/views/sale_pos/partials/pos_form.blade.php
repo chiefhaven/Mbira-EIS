@@ -23,6 +23,13 @@
 					<button type="button" class="btn btn-default bg-white btn-flat add_new_customer" data-name=""  @if(!auth()->user()->can('customer.create')) disabled @endif><i class="fa fa-plus-circle text-primary fa-lg"></i></button>
 				</span>
 			</div>
+			<div id="buyer_authorization_code_container" class="form-group" hidden>
+				<label for="buyer_authorization_code">EIS verification code</label>
+				<input type="text" name="buyerAuthorizationCode" id="buyer_authorization_code" class="form-control" maxlength="1000" autocomplete="off">
+				<small id="buyer_authorization_code_help" class="help-block">EIS requires an authorization code for this buyer TIN.</small>
+			</div>
+			<small id="eis_buyer_authorization_status" class="text-info" hidden>Checking buyer TIN with EIS...</small>
+			<input type="hidden" id="eis_buyer_authorization_requirement_url" value="{{ route('eis.pos.buyer-authorization-requirement') }}">
 			<small class="text-danger hide contact_due_text"><strong>@lang('account.customer_due'):</strong> <span></span></small>
 		</div>
 	</div>

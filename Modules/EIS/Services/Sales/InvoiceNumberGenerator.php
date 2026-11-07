@@ -156,16 +156,6 @@ class InvoiceNumberGenerator
 
                 Log::info('Invoice number generated successfully', [
                     'business_id' => $businessId,
-                    'invoice_number' => $invoiceNumber,
-                    'components' => [
-                        'taxpayer_id' => $taxpayerId,
-                        'terminal_position' => $terminalPos,
-                        'julian_date' => $julianDate,
-                        'encoded_taxpayer_id' => $encodedTaxpayerId,
-                        'encoded_terminal_pos' => $encodedTerminalPos,
-                        'encoded_julian_date' => $encodedJulianDate,
-                        'encoded_count' => $encodedCount,
-                    ]
                 ]);
 
                 return $invoiceNumber;
@@ -174,8 +164,7 @@ class InvoiceNumberGenerator
         } catch (\Exception $e) {
             Log::error('Failed to generate invoice number', [
                 'business_id' => $businessId,
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
+                'exception' => get_class($e),
             ]);
 
             throw $e;
@@ -415,8 +404,7 @@ class InvoiceNumberGenerator
 
         } catch (\Exception $e) {
             Log::error('Failed to parse invoice number', [
-                'invoice_number' => $invoiceNumber,
-                'error' => $e->getMessage()
+                'exception' => get_class($e),
             ]);
             return null;
         }

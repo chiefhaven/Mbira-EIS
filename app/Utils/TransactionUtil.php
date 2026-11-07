@@ -136,6 +136,7 @@ class TransactionUtil extends Util
             'is_relief' => filter_var($input['is_relief'] ?? false, FILTER_VALIDATE_BOOLEAN),
             'vat5_certificate_details' => filter_var($input['is_relief'] ?? false, FILTER_VALIDATE_BOOLEAN)
                 ? ($input['vat5_certificate_details'] ?? null) : null,
+            'customer_authorization_code' => $input['customer_authorization_code'] ?? null,
             'export_custom_fields_info' => (! empty($input['is_export']) && ! empty($input['export_custom_fields_info'])) ? $input['export_custom_fields_info'] : null,
             'additional_expense_value_1' => isset($input['additional_expense_value_1']) ? $uf_data ? $this->num_uf($input['additional_expense_value_1']) : $input['additional_expense_value_1'] : 0,
             'additional_expense_value_2' => isset($input['additional_expense_value_2']) ? $uf_data ? $this->num_uf($input['additional_expense_value_2']) : $input['additional_expense_value_2'] : 0,
@@ -261,6 +262,8 @@ class TransactionUtil extends Util
                 : $transaction->is_relief,
             'vat5_certificate_details' => (array_key_exists('is_relief', $input) ? filter_var($input['is_relief'], FILTER_VALIDATE_BOOLEAN) : $transaction->is_relief)
                 ? (array_key_exists('vat5_certificate_details', $input) ? $input['vat5_certificate_details'] : $transaction->vat5_certificate_details) : null,
+            'customer_authorization_code' => array_key_exists('customer_authorization_code', $input)
+                ? $input['customer_authorization_code'] : $transaction->customer_authorization_code,
             'export_custom_fields_info' => (! empty($input['is_export']) && ! empty($input['export_custom_fields_info'])) ? $input['export_custom_fields_info'] : null,
             'additional_expense_value_1' => isset($input['additional_expense_value_1']) ? $uf_data ? $this->num_uf($input['additional_expense_value_1']) : $input['additional_expense_value_1'] : 0,
             'additional_expense_value_2' => isset($input['additional_expense_value_2']) ? $uf_data ? $this->num_uf($input['additional_expense_value_2']) : $input['additional_expense_value_2'] : 0,
@@ -1730,7 +1733,10 @@ class TransactionUtil extends Util
             if ($transaction->status == 'final') {
 
                 $qr_code_text = $transaction->eisSale->qr_code ?? 'Null';
-                Log::info('Transation: ', [$transaction]);
+                Log::info('Transaction QR code generated', [
+                    'transaction_id_present' => !empty($transaction->id),
+                    'qr_code_present' => $qr_code_text !== 'Null',
+                ]);
                 $output['qr_code_text'] = $qr_code_text;
             }
         // add this seprate for sell retuen qr text of zatca

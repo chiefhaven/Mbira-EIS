@@ -30,6 +30,7 @@ class EisSetting extends Model
         'secret_key',
         'status',
         'last_sync_at',
+        'products_last_synced_at',
         'sync_status',
         'sync_error',
         'sync_error_retry_after',
@@ -47,6 +48,7 @@ class EisSetting extends Model
     protected $casts = [
         'status' => 'boolean',
         'last_sync_at' => 'datetime',
+        'products_last_synced_at' => 'datetime',
         'sync_error_retry_after' => 'datetime',
         'last_sync_attempt' => 'datetime',
         'successful_syncs' => 'integer',

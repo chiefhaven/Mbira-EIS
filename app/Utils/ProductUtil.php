@@ -2629,6 +2629,10 @@ class ProductUtil extends Util
             }
         }
 
+        $product->item_tax = !empty($product->tax_id)
+            ? $product->sell_price_inc_tax - $product->default_sell_price
+            : 0;
+
         $warranties = $this->getWarrantiesForDropdown();
 
         $output['success'] = true;
@@ -2657,11 +2661,10 @@ class ProductUtil extends Util
 
             if ($is_direct_sell) {
                 $edit_discount = auth()->user()->can('edit_product_discount_from_sale_screen');
-                $edit_price = auth()->user()->can('edit_product_price_from_sale_screen');
             } else {
                 $edit_discount = auth()->user()->can('edit_product_discount_from_pos_screen');
-                $edit_price = auth()->user()->can('edit_product_price_from_pos_screen');
             }
+            $edit_price = false;
 
             $output['html_content'] = view('sale_pos.product_row')
                 ->with(compact('product', 'row_count', 'tax_dropdown', 'enabled_modules', 'pos_settings', 'sub_units', 'discount', 'waiters', 'edit_discount', 'edit_price', 'purchase_line_id', 'warranties', 'quantity', 'is_direct_sell', 'so_line', 'is_sales_order', 'last_sell_line', 'is_serial_no', 'waiters_enabled'))

@@ -74,7 +74,8 @@ function catalogFixture(): array
             'eis_product_id', 'eis_last_synced_at', 'unit_id', 'expiry_period', 'deleted_at',
             'brand_id', 'category_id', 'sub_category_id', 'alert_quantity', 'image', 'product_custom_field1',
             'woocommerce_media_id', 'woocommerce_product_id'],
-        'eis_settings' => ['business_id', 'location_id', 'status', 'site_id', 'branch_id', 'jwt_token', 'deleted_at'],
+        'eis_settings' => ['business_id', 'location_id', 'status', 'site_id', 'branch_id', 'jwt_token',
+            'products_last_synced_at', 'deleted_at'],
         'product_variations' => ['product_id', 'variation_template_id', 'name', 'is_dummy'],
         'variations' => ['product_id', 'product_variation_id', 'name', 'default_sell_price', 'default_purchase_price',
             'dpp_inc_tax', 'sell_price_inc_tax', 'sub_sku', 'profit_percent', 'deleted_at'],
@@ -140,10 +141,13 @@ function catalogSnapshot($db): array
 function rejectCatalog($db, $sync, string $message): void
 {
     $before = catalogSnapshot($db);
+    $lastSyncedAt = $db->table('eis_settings')->where('id', 1)->value('products_last_synced_at');
     try {
         pullCatalog($sync);
     } catch (Throwable $e) {
         catalogCheck(catalogSnapshot($db) === $before, $message.' preserves all committed data');
+        catalogCheck($db->table('eis_settings')->where('id', 1)->value('products_last_synced_at') === $lastSyncedAt,
+            $message.' does not advance product freshness');
         return;
     }
     throw new RuntimeException($message.' should fail');
@@ -158,6 +162,8 @@ $client->pages = [['data' => [catalogItem('ONE')], 'has_more' => true],
     ['data' => [catalogItem('TWO', '0')], 'has_more' => false]];
 pullCatalog($sync);
 catalogCheck($client->requests === [1, 2], 'All catalog pages are fetched');
+catalogCheck($db->table('eis_settings')->where('id', 1)->value('products_last_synced_at') !== null,
+    'Successful catalog sync records its terminal freshness timestamp');
 catalogCheck(Product::where('business_id', 1)->count() === 3
     && !Product::withTrashed()->find(100)->trashed(), 'Unmapped manual business products are retained');
 catalogCheck(!Product::findOrFail(101)->trashed(), 'Other businesses remain unchanged');

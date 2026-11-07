@@ -125,6 +125,7 @@ class SellPosController extends Controller
         }
 
         $business_id = request()->session()->get('user.business_id');
+        $canUseEis = \App\Services\EisProductPolicy::configured($business_id);
 
         $business_locations = BusinessLocation::forDropdown($business_id, false);
         $customers = Contact::customersDropdown($business_id, false);
@@ -149,7 +150,7 @@ class SellPosController extends Controller
         $is_types_service_enabled = $this->moduleUtil->isModuleEnabled('types_of_service');
 
         $shipping_statuses = $this->transactionUtil->shipping_statuses();
-        return view('sale_pos.index')->with(compact('business_locations', 'customers', 'sales_representative', 'is_cmsn_agent_enabled', 'commission_agents', 'service_staffs', 'is_tables_enabled', 'is_service_staff_enabled', 'is_types_service_enabled', 'shipping_statuses'));
+        return view('sale_pos.index')->with(compact('business_locations', 'customers', 'sales_representative', 'is_cmsn_agent_enabled', 'commission_agents', 'service_staffs', 'is_tables_enabled', 'is_service_staff_enabled', 'is_types_service_enabled', 'shipping_statuses', 'canUseEis'));
     }
 
     /**
@@ -170,13 +171,6 @@ class SellPosController extends Controller
             return $this->moduleUtil->expiredResponse(action([\App\Http\Controllers\HomeController::class, 'index']));
         } elseif (!$this->moduleUtil->isQuotaAvailable('invoices', $business_id)) {
             return $this->moduleUtil->quotaExpiredResponse('invoices', $business_id, action([\App\Http\Controllers\SellPosController::class, 'index']));
-        }
-
-        try {
-            dispatch(new \Modules\EIS\Jobs\SyncProductsJob($business_id))
-                ->onQueue('eis-products');
-        } catch (\Exception $e) {
-            Log::error('EIS SyncProductsJob failed: ' . $e->getMessage());
         }
 
         //like:repair
@@ -218,6 +212,35 @@ class SellPosController extends Controller
                 $default_location = BusinessLocation::find($id);
                 if (!empty($default_location)) {
                     break;
+                }
+            }
+        }
+
+        if (!empty($default_location) && !empty($default_location->default_eis_setting_id)) {
+            $eis_setting = \Modules\EIS\Models\EisSetting::where('business_id', $business_id)
+                ->where('location_id', $default_location->id)
+                ->whereKey($default_location->default_eis_setting_id)
+                ->where('status', true)
+                ->whereNotNull('jwt_token')
+                ->where('jwt_token', '!=', '')
+                ->first();
+
+            if ($eis_setting
+                && (empty($eis_setting->products_last_synced_at)
+                    || $eis_setting->products_last_synced_at->lt(now()->subHour()))
+                && app(\Modules\EIS\Services\EisSubscriptionAccess::class)->allows((int) $business_id)
+                && app(\Modules\EIS\Services\Http\EisHealthService::class)
+                    ->isOnline((int) $business_id, $eis_setting->jwt_token)) {
+                try {
+                    dispatch(new \Modules\EIS\Jobs\SyncProductsJob(
+                        (int) $business_id,
+                        (int) $eis_setting->id
+                    ))->onQueue('eis-products');
+                } catch (\Throwable $exception) {
+                    Log::error('EIS SyncProductsJob failed: '.$exception->getMessage(), [
+                        'business_id' => $business_id,
+                        'terminal_id' => $eis_setting->id,
+                    ]);
                 }
             }
         }
@@ -277,7 +300,7 @@ class SellPosController extends Controller
         $default_invoice_schemes = InvoiceScheme::getDefault($business_id);
 
         $edit_discount = auth()->user()->can('edit_product_discount_from_pos_screen');
-        $edit_price = auth()->user()->can('edit_product_price_from_pos_screen');
+        $edit_price = false;
 
         //Added check because $users is of no use if enable_contact_assign if false
         $users = config('constants.enable_contact_assign') ? User::forDropdown($business_id, false, false, false, true) : [];
@@ -342,7 +365,10 @@ class SellPosController extends Controller
             abort(403, 'Unauthorized action.');
         }
 
-        $request->validate(['is_relief' => 'sometimes|boolean']);
+        $request->validate([
+            'is_relief' => 'sometimes|boolean',
+            'buyerAuthorizationCode' => 'nullable|string|max:1000',
+        ]);
 
         $is_direct_sale = false;
         if (!empty($request->input('is_direct_sale'))) {
@@ -413,8 +439,9 @@ class SellPosController extends Controller
                 $invoice_total = $this->productUtil->calculateInvoiceTotal($input['products'], $input['tax_rate_id'], $discount);
 
                 try {
-                    $input['vat5_certificate_details'] = app(\Modules\EIS\Services\Sales\PosBuyerValidationService::class)
-                        ->validate((int) $business_id, $input);
+                    $buyerValidation = app(\Modules\EIS\Services\Sales\PosBuyerValidationService::class);
+                    $input['vat5_certificate_details'] = $buyerValidation->validate((int) $business_id, $input);
+                    $input['customer_authorization_code'] = $buyerValidation->validatedAuthorizationCode();
                 } catch (\Illuminate\Validation\ValidationException $e) {
                     $output = ['success' => 0, 'msg' => implode(' ', \Illuminate\Support\Arr::flatten($e->errors()))];
                     return $is_direct_sale ? back()->withInput()->with('status', $output) : $output;
@@ -1190,7 +1217,7 @@ class SellPosController extends Controller
         }
 
         $edit_discount = auth()->user()->can('edit_product_discount_from_pos_screen');
-        $edit_price = auth()->user()->can('edit_product_price_from_pos_screen');
+        $edit_price = false;
         $shipping_statuses = $this->transactionUtil->shipping_statuses();
 
         $warranties = $this->productUtil->getWarrantiesForDropdown();
@@ -1242,7 +1269,10 @@ class SellPosController extends Controller
             abort(403, 'Unauthorized action.');
         }
 
-        $request->validate(['is_relief' => 'sometimes|boolean']);
+        $request->validate([
+            'is_relief' => 'sometimes|boolean',
+            'buyerAuthorizationCode' => 'nullable|string|max:1000',
+        ]);
 
         try {
             $input = $request->except('_token');
@@ -1329,8 +1359,13 @@ class SellPosController extends Controller
                     if (!$is_direct_sale && !auth()->user()->can('sell.update') && auth()->user()->can('edit_pos_payment')) {
                         $validation_input = ['contact_id' => $transaction_before->contact_id];
                     }
-                    $input['vat5_certificate_details'] = app(\Modules\EIS\Services\Sales\PosBuyerValidationService::class)
+                    $buyerValidation = app(\Modules\EIS\Services\Sales\PosBuyerValidationService::class);
+                    $input['vat5_certificate_details'] = $buyerValidation
                         ->validate((int) $business_id, $validation_input, $transaction_before);
+                    $validatedAuthorizationCode = $buyerValidation->validatedAuthorizationCode();
+                    $input['customer_authorization_code'] = $validatedAuthorizationCode
+                        ?? ((int) $input['contact_id'] === (int) $transaction_before->contact_id
+                            ? $transaction_before->customer_authorization_code : null);
                 } catch (\Illuminate\Validation\ValidationException $e) {
                     $output = ['success' => 0, 'msg' => implode(' ', \Illuminate\Support\Arr::flatten($e->errors()))];
                     return $is_direct_sale ? back()->withInput()->with('status', $output) : $output;

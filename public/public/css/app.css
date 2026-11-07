@@ -851,6 +851,33 @@ table.table-text-center td, table.table-text-center th{
 .eq-height-col{
     display: flex;
 }
+.eq-height-row > .product_list{
+    display: flex;
+}
+.eq-height-row .product_box{
+    flex: 1;
+    height: 60px;
+    box-sizing: border-box;
+}
+.eq-height-row .product_box .text_div{
+    width: 100%;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    margin-top: 0;
+}
+.eq-height-row .product_box .text{
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: normal;
+    line-height: 14px;
+    max-height: 28px;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+}
 
 .product_box .text_div{
     margin-top: 3px;

@@ -60,17 +60,21 @@
 	        }
 	        
 			$tax_id = $product->tax_id;
-			$item_tax = !empty($product->item_tax) ? $product->item_tax : 0;
+			$base_item_tax = $product->item_tax ?? 0;
+			$item_tax = $base_item_tax * $multiplier;
 			$unit_price_inc_tax = $product->sell_price_inc_tax;
 
 			if($hide_tax == 'hide'){
 				$tax_id = null;
+				$base_item_tax = 0;
+				$item_tax = 0;
 				$unit_price_inc_tax = $product->default_sell_price;
 			}
 
 			if(!empty($so_line) && $action !== 'edit') {
 				$tax_id = $so_line->tax_id;
-				$item_tax = $so_line->item_tax;
+				$base_item_tax = $so_line->item_tax;
+				$item_tax = $base_item_tax * $multiplier;
 				$unit_price_inc_tax = $so_line->unit_price_inc_tax;
 			}
 
@@ -295,6 +299,7 @@
 		<input type="hidden" class="base_unit_multiplier" name="products[{{$row_count}}][base_unit_multiplier]" value="{{$multiplier}}">
 
 		<input type="hidden" class="hidden_base_unit_sell_price" value="{{$product->default_sell_price / $multiplier}}">
+		<input type="hidden" class="hidden_base_unit_item_tax" value="{{$base_item_tax}}">
 		
 		{{-- Hidden fields for combo products --}}
 		@if($product->product_type == 'combo'&& !empty($product->combo_products))
@@ -353,8 +358,8 @@
 				$pos_unit_price = $so_line->unit_price_before_discount;
 			}
 		@endphp
-		<td class="@if(!auth()->user()->can('edit_product_price_from_sale_screen')) hide @endif">
-			<input type="text" name="products[{{$row_count}}][unit_price]" class="form-control pos_unit_price input_number mousetrap" value="{{@num_format($pos_unit_price)}}" @if(!empty($pos_settings['enable_msp'])) data-rule-min-value="{{$pos_unit_price}}" data-msg-min-value="{{__('lang_v1.minimum_selling_price_error_msg', ['price' => @num_format($pos_unit_price)])}}" @endif> 
+		<td class="@if(!$edit_price) hide @endif">
+			<input type="text" name="products[{{$row_count}}][unit_price]" class="form-control pos_unit_price input_number mousetrap" value="{{@num_format($pos_unit_price)}}" readonly @if(!empty($pos_settings['enable_msp'])) data-rule-min-value="{{$pos_unit_price}}" data-msg-min-value="{{__('lang_v1.minimum_selling_price_error_msg', ['price' => @num_format($pos_unit_price)])}}" @endif>
 
 			@if(!empty($last_sell_line))
 				<br>
@@ -398,7 +403,7 @@
 		@endif
 	@endif
 	<td class="{{$hide_tax}}">
-		<input type="text" style="width: auto" name="products[{{$row_count}}][unit_price_inc_tax]" class="form-control pos_unit_price_inc_tax input_number" value="{{@num_format($unit_price_inc_tax)}}" @if(!$edit_price) readonly @endif @if(!empty($pos_settings['enable_msp'])) data-rule-min-value="{{$unit_price_inc_tax}}" data-msg-min-value="{{__('lang_v1.minimum_selling_price_error_msg', ['price' => @num_format($unit_price_inc_tax)])}}" @endif>
+		<input type="text" style="width: auto" name="products[{{$row_count}}][unit_price_inc_tax]" class="form-control pos_unit_price_inc_tax input_number" value="{{@num_format($unit_price_inc_tax)}}" readonly @if(!empty($pos_settings['enable_msp'])) data-rule-min-value="{{$unit_price_inc_tax}}" data-msg-min-value="{{__('lang_v1.minimum_selling_price_error_msg', ['price' => @num_format($unit_price_inc_tax)])}}" @endif>
 	</td>
 	@if(!empty($common_settings['enable_product_warranty']) && !empty($is_direct_sell))
 		<td>

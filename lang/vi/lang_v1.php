@@ -359,7 +359,7 @@ return [
     'expiry' => 'Hết hạn',
     'lot' => 'Nhiều',
     'lot_n_expiry' => 'Rất nhiều và hết hạn',
-    'pos_edit_product_price_help' => 'Chỉnh sửa đơn giá sản phẩm và thuế',
+    'pos_edit_product_price_help' => 'Chỉnh sửa chiết khấu, thuế và mô tả sản phẩm',
     'name' => 'Tên',
     'payment_type' => 'Tiểu Kiến thanh',
     'manage_payment_account' => 'Quản lý tài khoản thanh toán của bạn',

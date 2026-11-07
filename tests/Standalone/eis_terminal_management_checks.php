@@ -360,9 +360,10 @@ managementCheck(str_contains($salesView, 'EisResultTables.render')
 managementCheck(!str_contains($salesView, 'Normal sales use the existing POS fiscal submission workflow')
     && !str_contains($salesView, 'eis-sales-terminal')
     && str_contains($salesView, 'Sync &amp; Print')
-    && str_contains($salesScript, "data-href': button.attr('data-print-url')")
-    && str_contains($salesScript, "trigger('click').remove()"),
-    'EIS sales removes the manual lookup section and syncs each sale before invoking POS receipt printing');
+    && str_contains($salesScript, "window.open('', '_blank')")
+    && str_contains($salesScript, 'printReceiptInWindow(printWindow, printResult.receipt)')
+    && str_contains($salesScript, 'printWindow.print()'),
+    'EIS sales syncs each sale and prints only its POS receipt in a new window');
 $routeProviderSource = file_get_contents(dirname(__DIR__, 2).'\Modules\EIS\Providers\RouteServiceProvider.php');
 managementCheck(str_contains($routeProviderSource, "'SetSessionData'")
     && str_contains($routeProviderSource, "'AdminSidebarMenu'"),
@@ -374,11 +375,15 @@ managementCheck(str_contains($menuSource, '$menu->url')
     'EIS sidebar uses one direct module link without a redundant submenu');
 $navigationSource = file_get_contents(dirname(__DIR__, 2).'\Modules\EIS\Resources\views\shared\navigation.blade.php');
 managementCheck(str_contains($navigationSource, 'navbar navbar-default bg-white')
-    && str_contains($navigationSource, "request()->routeIs('eis.stock.outbound.*')")
+    && !str_contains($navigationSource, 'eis.stock.outbound')
+    && !str_contains($navigationSource, 'eis.stock.tools')
     && str_contains($navigationSource, "auth()->user()->can('business_settings.access')")
+    && !str_contains(file_get_contents(dirname(__DIR__, 2).'\Modules\EIS\Routes\web.php'), "name('eis.stock.tools.")
+    && !str_contains(file_get_contents(dirname(__DIR__, 2).'\Modules\EIS\Routes\web.php'), "name('eis.stock.outbound.index')")
+    && str_contains(file_get_contents(dirname(__DIR__, 2).'\Modules\EIS\Routes\web.php'), "name('eis.stock.outbound.reasons')")
     && !str_contains(file_get_contents(dirname(__DIR__, 2).'\Modules\EIS\Routes\web.php'), 'eis/utilities')
     && !file_exists(dirname(__DIR__, 2).'\Modules\EIS\Resources\views\utilities\index.blade.php'),
-    'EIS module navigation follows the HRM navbar pattern without a generic Utilities tab');
+    'EIS module navigation excludes outbound and tools while retaining ERP adjustment-reason lookup');
 $productControllerSource = file_get_contents(dirname(__DIR__, 2).'\app\Http\Controllers\ProductController.php');
 $productViewSource = file_get_contents(dirname(__DIR__, 2).'\resources\views\product\index.blade.php');
 $productStatusSource = file_get_contents(dirname(__DIR__, 2).'\Modules\EIS\Http\Controllers\ProductStatusController.php');
@@ -389,12 +394,31 @@ managementCheck(str_contains($productControllerSource, 'eis-product-status')
     && str_contains($productStatusSource, "permitted_locations((int) \$user->business_id) === 'all'"),
     'Mapped EIS products have an all-location-guarded product status lookup in their action menu');
 $sellControllerSource = file_get_contents(dirname(__DIR__, 2).'\app\Http\Controllers\SellController.php');
+$sellPosControllerSource = file_get_contents(dirname(__DIR__, 2).'\app\Http\Controllers\SellPosController.php');
+$posIndexSource = file_get_contents(dirname(__DIR__, 2).'\resources\views\sale_pos\index.blade.php');
 $cancelScriptSource = file_get_contents(dirname(__DIR__, 2).'\resources\views\sell\partials\eis_cancel_receipt_javascript.blade.php');
+$cancelModalSource = file_get_contents(dirname(__DIR__, 2).'\resources\views\sell\partials\eis_cancel_receipt_modal.blade.php');
 managementCheck(str_contains($sellControllerSource, 'eis-cancel-receipt')
+    && str_contains($sellControllerSource, '$fiscalSale->eis_invoice_number')
+    && !str_contains($sellControllerSource, "$fiscalSale->getRawOriginal('receipt_number')")
+    && str_contains($sellControllerSource, 'data-pos-invoice-number=')
+    && str_contains($sellControllerSource, 'data-total=')
     && str_contains($cancelScriptSource, "operation: 'cancel-receipt'")
     && str_contains($cancelScriptSource, "data: {confirmed: 1}")
-    && str_contains($cancelScriptSource, 'approval is separate'),
-    'POS sales actions prepare and explicitly confirm EIS receipt void requests');
+    && str_contains($cancelScriptSource, 'approval is separate')
+    && str_contains($cancelScriptSource, "result.data.status === 'accepted'")
+    && str_contains($cancelScriptSource, "toastr.success(message)")
+    && str_contains($cancelScriptSource, "modal.modal('hide')")
+    && str_contains($sellPosControllerSource, '$canUseEis = \App\Services\EisProductPolicy::configured($business_id)')
+    && str_contains($sellPosControllerSource, "'canUseEis'")
+    && str_contains($posIndexSource, "@include('sell.partials.eis_cancel_receipt_modal')")
+    && str_contains($posIndexSource, "@include('sell.partials.eis_cancel_receipt_javascript')")
+    && str_contains($cancelScriptSource, 'function renderSaleDetails')
+    && !str_contains($cancelScriptSource, "EisResultTables.render('#eis-cancel")
+    && str_contains($cancelScriptSource, "['Fiscal invoice', sale.fiscal_invoice_number]")
+    && str_contains($cancelScriptSource, "['Cancellation reason', data.reason]")
+    && str_contains($cancelModalSource, 'eis-cancel-review-details'),
+    'POS cancellation review shows invoice details instead of the technical request payload');
 $moduleViews = [
     'terminals\index.blade.php', 'sales\index.blade.php',
     'stock\tools.blade.php', 'stock\outbound.blade.php', 'stock\reconcile.blade.php',

@@ -659,7 +659,11 @@ class BusinessController extends Controller
 
             $data = $response->json();
 
-            \Log::info('EIS Terminal Activation Response', ['response' => $data]);
+            \Log::info('EIS Terminal Activation Response', [
+                'http_status' => $response->status(),
+                'successful' => $response->successful(),
+                'response_data_present' => is_array($data) && !empty($data),
+            ]);
 
             /**
              * STEP 2: HTTP CHECK

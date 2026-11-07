@@ -148,7 +148,7 @@
 								<button type="button" class="btn btn-default bg-white btn-flat add_new_customer" data-name=""><i class="fa fa-plus-circle text-primary fa-lg"></i></button>
 							</span>
 						</div>
-						<small class="text-danger hide contact_due_text"><strong>@lang('account.customer_due'):</strong> <span></span></small>
+							<small class="text-danger hide contact_due_text"><strong>@lang('account.customer_due'):</strong> <span></span></small>
 					</div>
 					<small>
 					<strong>
@@ -380,7 +380,7 @@
 										@lang('restaurant.service_staff')
 									</th>
 								@endif
-								<th class="@if(!auth()->user()->can('edit_product_price_from_sale_screen')) hide @endif">
+								<th class="@if(!$edit_price) hide @endif">
 									@lang('sale.unit_price')
 								</th>
 								<th class="@if(!auth()->user()->can('edit_product_discount_from_sale_screen')) hide @endif">

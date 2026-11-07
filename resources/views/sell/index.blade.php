@@ -407,7 +407,6 @@
     @include('sell.partials.eis_void_tools_javascript')
     @include('sell.partials.eis_sale_sync_javascript')
     @if ($canUseEis && auth()->user()->can('sell.delete'))
-        @include('eis::shared.result-table')
         @include('sell.partials.eis_cancel_receipt_javascript')
     @endif
     <script src="{{ asset('js/payment.js?v=' . $asset_v) }}"></script>
