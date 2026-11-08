@@ -12,7 +12,7 @@
         <span class="input-group-addon">
           <i class="fas fa-money-bill-alt"></i>
         </span>
-        {!! Form::select('payments['.$id.'][account_id]', $accounts, null , ['class' => 'form-control input-sm select2', 'id' => "account_id_".$id, 'style' => 'width:100%;', 'data-id' => $id]); !!}
+        {!! Form::select('payments['.$id.'][account_id]', $accounts, null , ['class' => 'form-control input-sm select2', 'id' => "account_id_".$id, 'style' => 'width:100%;', 'data-id' => $id, 'required']); !!}
       </div>
 @endif
 

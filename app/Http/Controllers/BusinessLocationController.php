@@ -98,6 +98,168 @@ class BusinessLocationController extends Controller
         return view('business_location.index');
     }
 
+    public function paymentAccountDefaults()
+    {
+        if (! auth()->user()->can('business_settings.access')) {
+            abort(403, 'Unauthorized action.');
+        }
+
+        $business_id = request()->session()->get('user.business_id');
+        if (! $this->commonUtil->isModuleEnabled('account', $business_id)) {
+            abort(404);
+        }
+
+        $locations_query = BusinessLocation::where('business_id', $business_id)->orderBy('name');
+        $permitted_locations = auth()->user()->permitted_locations();
+        if ($permitted_locations != 'all') {
+            $locations_query->whereIn('id', $permitted_locations);
+        }
+        $locations = $locations_query->get();
+
+        $payment_types = $this->commonUtil->payment_types(null, false, $business_id);
+        $accounts = $this->moduleUtil->accountsDropdown($business_id, true, false);
+        $account_names = $accounts;
+        unset($account_names['']);
+
+        $location_defaults = [];
+        $suggestions = [];
+        foreach ($locations as $location) {
+            $location_settings = ! empty($location->default_payment_accounts)
+                ? json_decode($location->default_payment_accounts, true)
+                : [];
+            $location_defaults[$location->id] = is_array($location_settings) ? $location_settings : [];
+            foreach ($payment_types as $method => $label) {
+                $suggestions[$location->id][$method] = $this->suggestPaymentAccount(
+                    $method,
+                    $label,
+                    $account_names
+                );
+            }
+        }
+
+        return view('business_location.payment_account_defaults')->with(compact(
+            'locations',
+            'payment_types',
+            'accounts',
+            'location_defaults',
+            'suggestions'
+        ));
+    }
+
+    public function updatePaymentAccountDefaults(Request $request)
+    {
+        if (! auth()->user()->can('business_settings.access')) {
+            abort(403, 'Unauthorized action.');
+        }
+
+        $business_id = $request->session()->get('user.business_id');
+        if (! $this->commonUtil->isModuleEnabled('account', $business_id)) {
+            abort(404);
+        }
+
+        $request->validate([
+            'default_payment_accounts' => ['required', 'array'],
+        ]);
+
+        $locations_query = BusinessLocation::where('business_id', $business_id);
+        $permitted_locations = auth()->user()->permitted_locations();
+        if ($permitted_locations != 'all') {
+            $locations_query->whereIn('id', $permitted_locations);
+        }
+        $locations = $locations_query->get()->keyBy('id');
+        $payment_types = $this->commonUtil->payment_types(null, false, $business_id);
+        $accounts = $this->moduleUtil->accountsDropdown($business_id, true, false);
+        $valid_account_ids = array_fill_keys(array_map('strval', array_keys($accounts)), true);
+        unset($valid_account_ids['']);
+        $submitted_defaults = $request->input('default_payment_accounts');
+
+        foreach ($submitted_defaults as $location_id => $method_defaults) {
+            if (! $locations->has($location_id) || ! is_array($method_defaults)) {
+                return back()->withErrors([
+                    'default_payment_accounts' => __('lang_v1.invalid_payment_account_defaults'),
+                ])->withInput();
+            }
+
+            foreach ($method_defaults as $method => $account_id) {
+                $empty_account = $account_id === null || $account_id === '';
+                $valid_account = (is_string($account_id) || is_int($account_id)) &&
+                    ctype_digit((string) $account_id) &&
+                    isset($valid_account_ids[(string) $account_id]);
+                if (! array_key_exists($method, $payment_types) ||
+                    (! $empty_account && ! $valid_account)) {
+                    return back()->withErrors([
+                        'default_payment_accounts' => __('lang_v1.invalid_payment_account_defaults'),
+                    ])->withInput();
+                }
+            }
+        }
+
+        DB::transaction(function () use ($locations, $submitted_defaults) {
+            foreach ($submitted_defaults as $location_id => $method_defaults) {
+                $location = $locations->get($location_id);
+                $settings = ! empty($location->default_payment_accounts)
+                    ? json_decode($location->default_payment_accounts, true)
+                    : [];
+                if (! is_array($settings)) {
+                    $settings = [];
+                }
+
+                foreach ($method_defaults as $method => $account_id) {
+                    if (! isset($settings[$method]) || ! is_array($settings[$method])) {
+                        $settings[$method] = [];
+                    }
+                    $settings[$method]['account'] = $account_id === '' ? null : $account_id;
+                }
+
+                $location->default_payment_accounts = json_encode($settings);
+                $location->save();
+            }
+        });
+
+        return redirect()->route('business-location.payment-account-defaults')
+            ->with('status', [
+                'success' => true,
+                'msg' => __('lang_v1.payment_account_defaults_saved'),
+            ]);
+    }
+
+    private function suggestPaymentAccount($method, $label, array $accounts)
+    {
+        $normalize = static function ($value) {
+            return trim(preg_replace('/\s+/', ' ', strtolower(str_replace('_', ' ', $value))));
+        };
+        $method_name = $normalize($method);
+        $label_name = $normalize($label);
+
+        foreach ($accounts as $account_id => $account_name) {
+            $account_name = $normalize($account_name);
+            if ($account_name === $method_name || $account_name === $label_name) {
+                return $account_id;
+            }
+        }
+
+        $keywords = [
+            'cash' => ['cash', 'petty cash', 'cash drawer', 'till'],
+            'card' => ['card', 'credit card', 'debit card'],
+            'cheque' => ['cheque', 'check'],
+            'bank_transfer' => ['bank transfer', 'bank'],
+            'other' => ['other'],
+        ][$method] ?? [];
+
+        $matches = [];
+        foreach ($accounts as $account_id => $account_name) {
+            $account_name = $normalize($account_name);
+            foreach ($keywords as $keyword) {
+                if (str_contains($account_name, $keyword)) {
+                    $matches[$account_id] = true;
+                    break;
+                }
+            }
+        }
+
+        return count($matches) === 1 ? array_key_first($matches) : null;
+    }
+
     /**
      * Show the form for creating a new resource.
      *

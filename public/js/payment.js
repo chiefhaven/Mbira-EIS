@@ -143,8 +143,9 @@ function set_default_payment_account() {
 
     var payment_type = $('#transaction_payment_add_form .payment_types_dropdown').val();
     if (payment_type && payment_type != 'advance') {
-        var default_account = !_.isEmpty(default_accounts) && default_accounts[payment_type]['account'] ? 
-            default_accounts[payment_type]['account'] : '';
+        var payment_settings = default_accounts && default_accounts[payment_type];
+        var default_account = payment_settings && payment_settings['account'] ?
+            payment_settings['account'] : '';
         $('#transaction_payment_add_form #account_id').val(default_account);
         $('#transaction_payment_add_form #account_id').change();
     }

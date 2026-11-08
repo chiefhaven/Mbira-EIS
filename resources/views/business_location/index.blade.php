@@ -19,7 +19,10 @@
     @component('components.widget', ['class' => 'box-primary', 'title' => __( 'business.all_your_business_locations' )])
         @slot('tool')
             <div class="box-tools">
-               
+                <a href="{{ route('business-location.payment-account-defaults') }}"
+                    class="tw-dw-btn tw-dw-btn-outline tw-dw-btn-primary pull-right tw-mr-2">
+                    @lang('lang_v1.payment_account_defaults')
+                </a>
                 <button class="tw-dw-btn tw-bg-gradient-to-r tw-from-indigo-600 tw-to-blue-500 tw-font-bold tw-text-white tw-border-none tw-rounded-full pull-right tw-mb-2 btn-modal"
                     data-href="{{action([\App\Http\Controllers\BusinessLocationController::class, 'create'])}}" 
                     data-container=".location_add_modal">

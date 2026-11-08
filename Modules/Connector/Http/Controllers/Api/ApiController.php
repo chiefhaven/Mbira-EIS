@@ -51,7 +51,9 @@ class ApiController extends Controller
 
     public function otherExceptions($e)
     {
-        $msg = is_object($e) ? $e->getMessage() : $e;
+        $msg = $e instanceof \Illuminate\Validation\ValidationException
+            ? (collect($e->errors())->flatten()->first() ?? $e->getMessage())
+            : (is_object($e) ? $e->getMessage() : $e);
 
         return $this->setStatusCode(400)->respondWithError($msg);
 

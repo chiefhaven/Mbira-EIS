@@ -5,6 +5,7 @@ namespace Tests\Unit;
 use App\BusinessLocation;
 use App\InvoiceLayout;
 use App\Product;
+use App\TransactionPayment;
 use App\User;
 use Illuminate\Database\Capsule\Manager as Capsule;
 use Illuminate\Database\Eloquent\Collection;
@@ -56,6 +57,12 @@ class LocationStockAndDefaultsTest extends TestCase
         $schema->create('products', function (Blueprint $table) {
             $table->increments('id');
             $table->integer('business_id');
+            $table->softDeletes();
+        });
+        $schema->create('accounts', function (Blueprint $table) {
+            $table->increments('id');
+            $table->integer('business_id');
+            $table->boolean('is_closed')->default(false);
             $table->softDeletes();
         });
         $schema->create('variations', function (Blueprint $table) {
@@ -179,6 +186,25 @@ class LocationStockAndDefaultsTest extends TestCase
         $this->assertNull($defaults['invoice_scheme_id']);
         $this->assertNull($defaults['invoice_layout_id']);
         $this->assertSame(['cash' => ['is_enabled' => 1, 'account' => null]], $defaults['default_payment_accounts']);
+    }
+
+    public function testPaymentDefaultMustBeEnabledAndUseAnActiveBusinessAccount(): void
+    {
+        $this->db->getConnection()->table('accounts')->insert([
+            'id' => 42,
+            'business_id' => 1,
+            'is_closed' => 0,
+        ]);
+        $this->db->getConnection()->table('business_locations')->where('id', 1)
+            ->update(['default_payment_accounts' => json_encode([
+                'cash' => ['is_enabled' => 1, 'account' => 42],
+            ])]);
+
+        $this->assertSame(42, (int) TransactionPayment::getDefaultAccountId(1, 1, 'cash'));
+        $this->assertNull(TransactionPayment::getDefaultAccountId(1, 1, 'card'));
+
+        $this->db->getConnection()->table('accounts')->where('id', 42)->update(['is_closed' => 1]);
+        $this->assertNull(TransactionPayment::getDefaultAccountId(1, 1, 'cash'));
     }
 
     public function testExplicitlyDisabledPaymentSetupIsNotReenabled(): void

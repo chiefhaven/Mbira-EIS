@@ -407,7 +407,9 @@ class HmsBookingController extends Controller
 
             $output = [
                 'success' => 0,
-                'msg' => __('messages.something_went_wrong'),
+                'msg' => $e instanceof \Illuminate\Validation\ValidationException
+                    ? ($e->errors()['account_id'][0] ?? $e->getMessage())
+                    : __('messages.something_went_wrong'),
             ];
 
             return back()->with('status', $output)->withInput();
@@ -658,7 +660,9 @@ class HmsBookingController extends Controller
 
             $output = [
                 'success' => 0,
-                'msg' => __('messages.something_went_wrong'),
+                'msg' => $e instanceof \Illuminate\Validation\ValidationException
+                    ? ($e->errors()['account_id'][0] ?? $e->getMessage())
+                    : __('messages.something_went_wrong'),
             ];
 
             return back()->with('status', $output)->withInput();

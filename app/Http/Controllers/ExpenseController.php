@@ -878,7 +878,9 @@ class ExpenseController extends Controller
             \Log::emergency('File:' . $e->getFile() . 'Line:' . $e->getLine() . 'Message:' . $e->getMessage());
 
             $output = ['success' => 0,
-                'msg' => $e->getMessage(),
+                'msg' => $e instanceof \Illuminate\Validation\ValidationException
+                    ? ($e->errors()['account_id'][0] ?? $e->getMessage())
+                    : $e->getMessage(),
             ];
 
             return redirect('import-expense')->with('notification', $output);

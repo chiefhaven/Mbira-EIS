@@ -337,6 +337,9 @@ Route::middleware(['setData', 'auth', 'SetSessionData', 'language', 'timezone', 
 
     //Business Locations...
     Route::post('business-location/check-location-id', [BusinessLocationController::class, 'checkLocationId']);
+    Route::get('business-location/payment-account-defaults', [BusinessLocationController::class, 'paymentAccountDefaults'])
+        ->name('business-location.payment-account-defaults');
+    Route::post('business-location/payment-account-defaults', [BusinessLocationController::class, 'updatePaymentAccountDefaults']);
     Route::resource('business-location', BusinessLocationController::class);
 
     //Invoice layouts..

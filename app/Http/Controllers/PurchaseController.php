@@ -430,7 +430,9 @@ class PurchaseController extends Controller
             \Log::emergency('File:'.$e->getFile().'Line:'.$e->getLine().'Message:'.$e->getMessage());
 
             $output = ['success' => 0,
-                'msg' => __('messages.something_went_wrong'),
+                'msg' => $e instanceof \Illuminate\Validation\ValidationException
+                    ? ($e->errors()['account_id'][0] ?? $e->getMessage())
+                    : __('messages.something_went_wrong'),
             ];
         }
 

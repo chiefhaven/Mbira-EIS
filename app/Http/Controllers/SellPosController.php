@@ -761,6 +761,9 @@ class SellPosController extends Controller
             if (get_class($e) == \App\Exceptions\AdvanceBalanceNotAvailable::class) {
                 $msg = $e->getMessage();
             }
+            if ($e instanceof \Illuminate\Validation\ValidationException) {
+                $msg = $e->errors()['account_id'][0] ?? $e->getMessage();
+            }
 
             $output = ['success' => 0,
                 'msg' => $msg,
@@ -2229,6 +2232,19 @@ class SellPosController extends Controller
             if ($transaction->type !== 'sell' || $transaction->status !== 'final') {
                 throw new \App\Services\Sales\SavedSplitException('draft_gateway_payment_blocked', 'Only final sales may use a payment gateway.');
             }
+            $account_id = null;
+            if (TransactionPayment::accountModuleEnabled($transaction->business_id)) {
+                $account_id = TransactionPayment::getDefaultAccountId(
+                    $transaction->business_id,
+                    $transaction->location_id,
+                    'cash'
+                );
+                if (empty($account_id)) {
+                    throw \Illuminate\Validation\ValidationException::withMessages([
+                        'account_id' => __('lang_v1.payment_account_required'),
+                    ]);
+                }
+            }
             $paid_amount = $this->transactionUtil->getTotalPaid($transaction->id);
             $total_payable = $transaction->final_total - $paid_amount;
 
@@ -2251,6 +2267,7 @@ class SellPosController extends Controller
                     'gateway' => $request->gateway,
                     'business_id' => $transaction->business_id,
                     'payment_ref_no' => $payment_ref_no,
+                    'account_id' => $account_id,
                 ];
 
                 // Wrap payment creation in split-aware checkout context
@@ -2283,7 +2300,9 @@ class SellPosController extends Controller
             \Log::emergency('File:' . $e->getFile() . 'Line:' . $e->getLine() . 'Message:' . $e->getMessage());
             $output = [
                 'success' => 0,
-                'msg' => __('messages.something_went_wrong'),
+                'msg' => $e instanceof \Illuminate\Validation\ValidationException
+                    ? ($e->errors()['account_id'][0] ?? $e->getMessage())
+                    : __('messages.something_went_wrong'),
             ];
         }
 

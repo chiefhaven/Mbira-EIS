@@ -5,6 +5,7 @@ namespace App;
 use App\Events\TransactionPaymentDeleted;
 use App\Events\TransactionPaymentUpdated;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Validation\ValidationException;
 
 class TransactionPayment extends Model
 {
@@ -19,10 +20,68 @@ class TransactionPayment extends Model
     {
         static::saving(function ($model) {
             \App\Services\Sales\SavedSaleWriteGuard::model($model);
+
+            if ($model->exists && empty($model->getOriginal('account_id')) &&
+                empty($model->account_id) && $model->getOriginal('method') === $model->method) {
+                return;
+            }
+
+            if ($model->method === 'advance' || ! empty($model->account_id) ||
+                empty($model->business_id) ||
+                ! (new \App\Utils\ModuleUtil())->isModuleEnabled('account', $model->business_id)) {
+                return;
+            }
+
+            $transaction = ! empty($model->transaction_id)
+                ? Transaction::find($model->transaction_id)
+                : null;
+            $default_account_id = self::getDefaultAccountId(
+                $model->business_id,
+                $transaction->location_id ?? null,
+                $model->method
+            );
+
+            if (! empty($default_account_id)) {
+                $model->account_id = $default_account_id;
+
+                return;
+            }
+
+            throw ValidationException::withMessages([
+                'account_id' => __('lang_v1.payment_account_required'),
+            ]);
         });
         static::deleting(function ($model) {
             \App\Services\Sales\SavedSaleWriteGuard::model($model);
         });
+    }
+
+    public static function accountModuleEnabled($business_id)
+    {
+        return (new \App\Utils\ModuleUtil())->isModuleEnabled('account', $business_id);
+    }
+
+    public static function getDefaultAccountId($business_id, $location_id, $method)
+    {
+        if (empty($location_id) || empty($method)) {
+            return null;
+        }
+
+        $location = \App\BusinessLocation::where('business_id', $business_id)->find($location_id);
+        $payment_accounts = ! empty($location->default_payment_accounts)
+            ? json_decode($location->default_payment_accounts, true)
+            : [];
+        $payment_settings = $payment_accounts[$method] ?? [];
+        $default_account_id = $payment_settings['account'] ?? null;
+
+        if (empty($payment_settings['is_enabled']) || empty($default_account_id)) {
+            return null;
+        }
+
+        return \App\Account::where('business_id', $business_id)
+            ->where('is_closed', 0)
+            ->whereKey($default_account_id)
+            ->value('id');
     }
 
     /**

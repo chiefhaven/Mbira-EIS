@@ -1447,7 +1447,9 @@ class SellController extends Controller
             
             $output = [
                 'success' => false,
-                'msg' => trans('messages.something_went_wrong')
+                'msg' => $e instanceof \Illuminate\Validation\ValidationException
+                    ? ($e->errors()['account_id'][0] ?? $e->getMessage())
+                    : trans('messages.something_went_wrong')
             ];
             
             if (request()->ajax()) {
