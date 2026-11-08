@@ -230,5 +230,10 @@ function update_statistics(start, end) {
             $('#total_prp').attr('data-content', newContent);
 
         },
+        error: function(xhr) {
+            $('.total_purchase, .purchase_due, .total_sell, .total_vat, .invoice_due, .total_expense, .total_purchase_return, .total_sell_return, .net').text('--');
+            toastr.error(xhr.responseJSON && xhr.responseJSON.message
+                ? xhr.responseJSON.message : 'Unable to load dashboard totals.');
+        },
     });
 }

@@ -230,8 +230,16 @@ class EisSaleClient
             
             if (isset($data['errors'])) {
                 $errors = $data['errors'];
-                if (is_array($errors) && isset($errors[0])) {
-                    return is_string($errors[0]) ? $errors[0] : json_encode($errors[0]);
+                if (is_array($errors)) {
+                    $messages = [];
+                    array_walk_recursive($errors, function ($message) use (&$messages) {
+                        if (is_string($message) && trim($message) !== '') {
+                            $messages[] = $message;
+                        }
+                    });
+                    if ($messages !== []) {
+                        return implode('; ', $messages);
+                    }
                 }
             }
             

@@ -89,11 +89,18 @@ class SaleTransformer
             $taxRateId = $this->getTaxRateId($settings->business_id, $line);
 
             // Calculate values with proper null handling
+            $discountPerUnit = $this->getDiscountAmount($line);
             $unitPrice = $this->getUnitPrice($line);
+            if ($discountPerUnit > 0) {
+                $unitPrice = round($unitPrice + $discountPerUnit, 2);
+            }
             $quantity = $this->getQuantity($line);
             $vat = round($this->getVatAmount($line) * $quantity, 2);
-            $discount = $this->getDiscountAmount($line);
-            $lineTotal = round($unitPrice * $quantity, 2);
+            $discount = round($discountPerUnit * $quantity, 2);
+            $lineTotal = round($unitPrice * $quantity - $discount, 2);
+            if ($discount > 0) {
+                $vat = $this->getDiscountedVat($settings->business_id, $taxRateId, $lineTotal);
+            }
             
             $subtotal += $lineTotal;
             $totalItems += $quantity;
@@ -235,7 +242,20 @@ class SaleTransformer
      */
     private function getDiscountAmount(TransactionSellLine $line): float
     {
-        return (float) ($line->line_discount_amount ?? 0);
+        return (float) $line->get_discount_amount();
+    }
+
+    private function getDiscountedVat(int $businessId, string $taxRateId, float $lineTotal): float
+    {
+        $taxRate = $this->taxRateModel
+            ->where('business_id', $businessId)
+            ->where('tax_rate_id', $taxRateId)
+            ->first();
+        if (!$taxRate || !is_numeric($taxRate->rate) || $taxRate->rate < 0) {
+            throw new \InvalidArgumentException('A valid EIS tax rate is required to calculate discounted sale VAT.');
+        }
+
+        return round($lineTotal * $taxRate->rate / (100 + $taxRate->rate), 2);
     }
 
     /**
@@ -284,8 +304,8 @@ class SaleTransformer
             ];
         }
 
-        $taxBreakdown[$taxRateId]['taxableAmount'] += $lineTotal - $vat;
-        $taxBreakdown[$taxRateId]['taxAmount'] += $vat;
+        $taxBreakdown[$taxRateId]['taxableAmount'] = round($taxBreakdown[$taxRateId]['taxableAmount'] + $lineTotal - $vat, 2);
+        $taxBreakdown[$taxRateId]['taxAmount'] = round($taxBreakdown[$taxRateId]['taxAmount'] + $vat, 2);
     }
 
     /**

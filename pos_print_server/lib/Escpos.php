@@ -215,28 +215,14 @@ class Escpos
 
             $this->printer->text($this->drawLine());
 
-            $string = $this->columnify(
-                $this->columnify(
-                    $this->columnify(
-                        $data->table_qty_label,
-                        ' ' . $data->table_product_label,
-                        10,
-                        40,
-                        0,
-                        0
-                    ),
-                    $data->table_unit_price_label,
-                    50,
-                    25,
-                    0,
-                    0
-                ),
-                ' ' . $data->table_subtotal_label,
-                75,
-                25,
-                0,
-                0
-            );
+            $hidePrice = !empty($data->hide_price);
+            $headers = ['#', $data->table_product_label, $data->table_qty_label];
+            if (!$hidePrice) {
+                $headers[] = $data->table_unit_price_label;
+                $headers[] = $data->receipt_item_discount_label ?? 'Discount';
+                $headers[] = $data->table_subtotal_label;
+            }
+            $string = $this->productColumns($headers);
 
             $this->printer->setEmphasis(true);
             $this->printer->text(rtrim($string));
@@ -245,13 +231,11 @@ class Escpos
 
             $this->printer->text($this->drawLine());
 
-            foreach ($data->lines as $line) {
+            foreach (array_values((array) $data->lines) as $index => $line) {
 
                 $line = (array) $line;
 
-                $product =
-                    ($line['name'] ?? '') . ' ' .
-                    ($line['variation'] ?? '');
+                $product = $this->productName($line);
 
                 if (!empty($line['sell_line_note'])) {
                     $product .=
@@ -272,37 +256,27 @@ class Escpos
                     $product .= ', ' . $line['cat_code'];
                 }
 
-                $quantity = $line['quantity'] ?? '';
-                $unit_price = $line['unit_price_exc_tax'] ?? '';
-                $line_total = $line['line_total'] ?? '';
-
-                $string = rtrim(
-                    $this->columnify(
-                        $this->columnify(
-                            $this->columnify(
-                                $quantity,
-                                $product,
-                                10,
-                                40,
-                                0,
-                                0
-                            ),
-                            $unit_price,
-                            50,
-                            25,
-                            0,
-                            0
-                        ),
-                        $line_total,
-                        75,
-                        25,
-                        0,
-                        0
-                    )
-                );
+                $columns = [$index + 1, $product, $line['quantity'] ?? ''];
+                if (!$hidePrice) {
+                    $columns[] = $line['unit_price_before_discount_inc_tax'] ?? $line['unit_price_inc_tax'] ?? '';
+                    $columns[] = $line['total_line_discount'] ?? '0.00';
+                    $columns[] = $line['line_total'] ?? '';
+                }
+                $string = rtrim($this->productColumns($columns));
 
                 $this->printer->text($string);
                 $this->printer->feed(2);
+                foreach ($line['modifiers'] ?? [] as $modifier) {
+                    $modifier = (array) $modifier;
+                    $columns = ['', $this->productName($modifier), $modifier['quantity'] ?? ''];
+                    if (!$hidePrice) {
+                        $columns[] = $modifier['unit_price_inc_tax'] ?? '';
+                        $columns[] = '0.00';
+                        $columns[] = $modifier['line_total'] ?? '';
+                    }
+                    $this->printer->text(rtrim($this->productColumns($columns)));
+                    $this->printer->feed(2);
+                }
             }
 
             $this->printer->feed();
@@ -514,6 +488,33 @@ class Escpos
             $second;
 
         return $line;
+    }
+
+    private function productName(array $line): string
+    {
+        return implode(' ', array_unique(array_filter(array_map('trim', [
+            $line['name'] ?? '', $line['product_variation'] ?? '', $line['variation'] ?? '',
+        ]), 'strlen')));
+    }
+
+    private function productColumns(array $columns): string
+    {
+        $percentages = count($columns) === 3 ? [5, 75, 20] : [5, 27, 14, 18, 18, 18];
+        $widths = [];
+        $wrapped = [];
+        foreach ($columns as $index => $column) {
+            $widths[$index] = max(1, (int) ($this->char_per_line * $percentages[$index] / 100));
+            $wrapped[$index] = explode("\n", wordwrap((string) $column, $widths[$index], "\n", true));
+        }
+        $output = [];
+        for ($row = 0; $row < max(array_map('count', $wrapped)); ++$row) {
+            $text = '';
+            foreach ($wrapped as $index => $lines) {
+                $text .= str_pad($lines[$row] ?? '', $widths[$index]);
+            }
+            $output[] = rtrim($text);
+        }
+        return implode("\n", $output) . "\n";
     }
 
     function columnify(

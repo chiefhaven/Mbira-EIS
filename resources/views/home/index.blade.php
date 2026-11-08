@@ -188,6 +188,7 @@
                                                 <p
                                                     class="tw-text-sm tw-font-medium tw-text-gray-500 tw-truncate tw-whitespace-nowrap">
                                                     {{ __('home.total_vat') }}
+                                                    @show_tooltip(__('home.fiscal_vat_help'))
                                                 </p>
                                                 <p
                                                     class="total_vat tw-mt-0.5 tw-text-gray-900 tw-text-xl tw-truncate tw-font-semibold tw-tracking-tight tw-font-mono">

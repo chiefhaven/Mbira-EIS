@@ -233,7 +233,14 @@ class HomeController extends Controller
 
             $sell_details = $this->transactionUtil->getSellTotals($business_id, $start, $end, $location_id, $created_by);
             
-            $vat_details = $this->transactionUtil->getVatTotals($business_id, $start, $end, $location_id, $created_by);
+            try {
+                $vat_details = $this->transactionUtil->getVatTotals(
+                    $business_id, $start, $end, $location_id, $created_by,
+                    request()->user()->permitted_locations((int) $business_id)
+                );
+            } catch (\UnexpectedValueException $exception) {
+                return response()->json(['message' => $exception->getMessage()], 422);
+            }
 
             $total_ledger_discount = $this->transactionUtil->getTotalLedgerDiscount($business_id, $start, $end);
 

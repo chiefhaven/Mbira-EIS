@@ -126,66 +126,7 @@
 <div class="row">
     <div class="col-xs-12">
         <br/>
-        <table class="table table-sm product-table" style="width: 98%; font-size: 12px;">
-            <thead class="product-table-header">
-                <tr>
-                    <th style=" text-align: center; font-weight: bold;">
-                        PROD ID<br><span style="direction: rtl;">معرف المنتج</span>
-                    </th>
-                    <th style=" text-align: center; font-weight: bold;">
-                        PRODUCT NAME<br><span style="direction: rtl;">اسم المنتج</span>
-                    </th>
-                    <th style=" text-align: center; font-weight: bold;">
-                        QUANTITY<br><span style="direction: rtl;">الكمية</span>
-                    </th>
-                    <th style=" text-align: center; font-weight: bold;">
-                        UNIT PRICE<br><span style="direction: rtl;">سعر الوحدة</span>
-                    </th>
-                    <th style=" text-align: center; font-weight: bold;">
-                        TOTAL<br><span style="direction: rtl;">الإجمالي</span>
-                    </th>
-                    <th style=" text-align: center; font-weight: bold;">
-                        TAX<br><span style="direction: rtl;">الضريبة</span>
-                    </th>
-                    <th style="text-align: center; font-weight: bold;">
-                        SUBTOTAL<br><span style="direction: rtl;">المجموع الفرعي</span>
-                    </th>
-                </tr>
-            </thead>
-            <tbody>
-                @foreach($receipt_details->lines as $line)
-                <tr>
-                    <td class="print-red" style="text-align: center;">
-                        @if(!empty($line['sub_sku']))
-                            {{$line['sub_sku']}}
-                        @endif
-                    </td>
-                    <td class="print-red" style=" text-align: left;">
-                        {{$line['name']}} {{$line['product_variation']}} {{$line['variation']}} @if(!empty($line['tax_code']))<b>({{$line['tax_code']}})</b>@endif
-                        @if(!empty($line['sub_sku'])), {{$line['sub_sku']}} @endif 
-                        @if(!empty($line['brand'])), {{$line['brand']}} @endif 
-                        @if(!empty($line['cat_code'])), {{$line['cat_code']}}@endif
-                        @if(!empty($line['product_custom_fields'])), {{$line['product_custom_fields']}} @endif
-                        @if(!empty($line['product_description']))
-                            <br><small>{!!$line['product_description']!!}</small>
-                        @endif
-                        @if(!empty($line['sell_line_note']))
-                            <br><small>{!!$line['sell_line_note']!!}</small>
-                        @endif
-                    </td>
-                    <td class="print-red" style="text-align: center;">{{$line['quantity']}} {{$line['units']}}</td>
-                    <td class="print-red" style=" text-align: center;">{{$line['unit_price_inc_tax']}}</td>
-                    <td class="print-red" style=" text-align: center;">{{$line['line_total_exc_tax']}}</td>
-                    <td class="print-red" style=" text-align: center;">
-                        @if(!empty($line['tax']))
-                            {{$line['tax'] * $line['quantity']}}
-                        @endif
-                    </td>
-                    <td class="print-red" style="text-align: center;">{{$line['line_total']}}</td>
-                </tr>
-                @endforeach
-            </tbody>
-        </table>
+        @include('sale_pos.receipts.partial.product_table')
     </div>
 </div>
 

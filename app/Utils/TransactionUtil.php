@@ -1036,6 +1036,8 @@ class TransactionUtil extends Util
             'table_qty_label' => $il->table_qty_label,
             'table_unit_price_label' => $il->table_unit_price_label,
             'table_subtotal_label' => $il->table_subtotal_label,
+            'receipt_item_discount_label' => !empty($il->common_settings['item_discount_label'])
+                ? $il->common_settings['item_discount_label'] : __('sale.discount'),
         ];
 
         //Display name
@@ -2150,6 +2152,7 @@ class TransactionUtil extends Util
                 'price_exc_tax' => $line->quantity * $line->unit_price,
                 'unit_price_before_discount' => $this->num_f($line->unit_price_before_discount, false, $business_details),
                 'unit_price_before_discount_uf' => $line->unit_price_before_discount,
+                'unit_price_before_discount_inc_tax' => $this->num_f($line->unit_price_inc_tax + $line->get_discount_amount(), false, $business_details),
                 //Fields for 4th column
                 'line_total' => $this->num_f($line->unit_price_inc_tax * $line->quantity, false, $business_details),
                 'line_total_uf' => $line->unit_price_inc_tax * $line->quantity,
@@ -2765,44 +2768,26 @@ class TransactionUtil extends Util
     */
     public function getVatTotals($business_id, $start_date = null, $end_date = null, $location_id = null, $created_by = null, $permitted_locations = null)
     {
-        $query = Transaction::where('transactions.business_id', $business_id)
+        $query = DB::table('transactions')
+            ->join('eis_sales', function ($join) {
+                $join->on('eis_sales.transaction_id', '=', 'transactions.id')
+                    ->on('eis_sales.business_id', '=', 'transactions.business_id')
+                    ->on('eis_sales.location_id', '=', 'transactions.location_id');
+            })
+            ->where('transactions.business_id', $business_id)
             ->where('transactions.type', 'sell')
             ->where('transactions.status', 'final')
-            ->whereExists(function($query) {
-                $query->select(DB::raw(1))
-                    ->from('eis_sales')
-                    ->whereColumn('eis_sales.transaction_id', 'transactions.id')
-                    ->where('eis_sales.status', 'submitted');
-            })
-            ->select(
-                DB::raw('COALESCE(SUM(transactions.tax_amount), 0) as header_tax'),
-                DB::raw('COALESCE(SUM(
-                    (SELECT COALESCE(SUM(item_tax), 0) 
-                    FROM transaction_sell_lines 
-                    WHERE transaction_sell_lines.transaction_id = transactions.id)
-                ), 0) as item_tax'),
-                DB::raw('COALESCE(SUM(transactions.tax_amount + (
-                    SELECT COALESCE(SUM(item_tax), 0) 
-                    FROM transaction_sell_lines 
-                    WHERE transaction_sell_lines.transaction_id = transactions.id
-                )), 0) as total_tax')
-            );
+            ->where('transactions.payment_status', 'paid')
+            ->where('eis_sales.status', 'submitted')
+            ->select('eis_sales.id', 'eis_sales.request_payload', 'eis_sales.response_payload');
 
         // Check for permitted locations
-        if (!empty($permitted_locations) && $permitted_locations !== 'all') {
+        if ($permitted_locations !== null && $permitted_locations !== 'all') {
             $query->whereIn('transactions.location_id', $permitted_locations);
         }
 
-        // Apply date filters
-        if (!empty($start_date) && !empty($end_date)) {
-            $query->whereDate('transactions.transaction_date', '>=', $start_date)
-                ->whereDate('transactions.transaction_date', '<=', $end_date);
-        } elseif (!empty($end_date)) {
-            $query->whereDate('transactions.transaction_date', '<=', $end_date);
-        }
-
         // Filter by location
-        if (!empty($location_id) && (empty($permitted_locations) || $permitted_locations === 'all' || !in_array($location_id, $permitted_locations))) {
+        if (!empty($location_id)) {
             $query->where('transactions.location_id', $location_id);
         }
 
@@ -2811,18 +2796,29 @@ class TransactionUtil extends Util
             $query->where('transactions.created_by', $created_by);
         }
 
-        $vat_details = $query->first();
-
-        // Calculate total_tax by adding header_tax and item_tax
-        $header_tax = $vat_details ? (float) $vat_details->header_tax : 0;
-        $item_tax = $vat_details ? (float) $vat_details->item_tax : 0;
-        $total_tax = $header_tax + $item_tax;
-
-        return [
-            'header_tax' => $header_tax,
-            'item_tax' => $item_tax,
-            'total_tax' => $total_tax,
-        ];
+        $total_tax = 0.0;
+        foreach ($query->cursor() as $sale) {
+            $request = json_decode($sale->request_payload ?? '', true);
+            $response = json_decode($sale->response_payload ?? '', true);
+            $remoteInvoice = $response['data']['data'] ?? $response['data'] ?? null;
+            $invoice = is_array($remoteInvoice) && isset($remoteInvoice['invoiceHeader'], $remoteInvoice['invoiceSummary'])
+                ? $remoteInvoice : $request;
+            $date = $invoice['invoiceHeader']['invoiceDateTime'] ?? null;
+            $vat = $invoice['invoiceSummary']['totalVAT'] ?? null;
+            if (!is_string($date) || !preg_match('/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})?$/', $date)
+                || !is_numeric($vat) || !is_finite((float) $vat) || $vat < 0) {
+                Log::error('Submitted EIS sale has invalid fiscal VAT reporting data', ['eis_sale_id' => $sale->id]);
+                throw new \UnexpectedValueException('A submitted EIS sale has incomplete fiscal date or VAT data. Synchronize its invoice before viewing fiscal VAT totals.');
+            }
+            // EIS invoice lookup dates are Malawi local time, not the ERP sale timezone.
+            $fiscalDate = \Carbon\Carbon::parse($date, 'Africa/Blantyre')->setTimezone('Africa/Blantyre')->toDateString();
+            if ((!empty($start_date) && $fiscalDate < $start_date) || (!empty($end_date) && $fiscalDate > $end_date)) {
+                continue;
+            }
+            $total_tax += (float) $vat;
+        }
+        $total_tax = round($total_tax, 2);
+        return ['header_tax' => 0, 'item_tax' => $total_tax, 'total_tax' => $total_tax];
     }
 
     public function getTotalLedgerDiscount($business_id, $start_date = null, $end_date = null)

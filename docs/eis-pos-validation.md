@@ -1,5 +1,49 @@
 # EIS buyer and relief validation
 
+## Dashboard fiscal VAT
+
+Home dashboard VAT uses `invoiceSummary.totalVAT` from submitted, fully paid
+EIS sales rather than summing POS per-unit tax. A saved invoice lookup response
+is preferred; otherwise the submitted request is used. Date filters use the
+fiscal invoice date in Malawi (`Africa/Blantyre`), including conversion of
+offset-bearing submitted timestamps. Other dashboard figures still use ERP
+sale dates and amounts. Location and user filters remain enforced.
+
+This reports the quantity-aware, discounted fiscal VAT without changing saved
+sales, receipts, ERP transaction dates, or EIS records. Incomplete fiscal date
+or VAT data raises an explicit error requiring invoice synchronization.
+Run `php tests/Standalone/dashboard_fiscal_vat_checks.php` for isolated checks.
+
+## Product discounts
+
+Browser and thermal sale receipts show `# | Product | Quantity | UnitPrice |
+Discount | Subtotal`. UnitPrice is tax-inclusive and before the product discount,
+Discount is the monetary discount for the line quantity, and Subtotal remains
+the saved discounted line total. All eight sale receipt layouts share this
+product table; layout-specific tax and duplicated discounted-price columns are
+replaced by the six-column format. Invoice-level tax and total sections remain.
+Hidden-price receipts omit the monetary columns.
+Identical product, variation-group and variation names are printed only once;
+distinct variation names remain visible on browser and thermal receipts.
+
+EIS product lines send the tax-inclusive price before the line discount,
+the total monetary discount for the quantity (percentage discounts are
+converted using the saved pre-discount unit price), and the discounted line
+total. VAT and tax breakdowns for discounted lines are recomputed from that
+total using the business's configured EIS rate. Stored POS prices, item tax,
+payments and totals are not rewritten. Non-discounted lines retain stored VAT.
+
+EIS field-keyed validation errors are surfaced in the saved submission error
+instead of being replaced by a generic HTTP 400 message. Response bodies and
+credentials are not added to logs.
+
+Run `php tests/Standalone/eis_discount_checks.php` for isolated discounted
+payload and validation-error checks; no live EIS requests are sent.
+These checks also verify that `invoiceSummary.amountTendered` is numeric and
+equals the paid sale's final total in the real HTTP client's outgoing JSON.
+An invoice lookup returning a null tender value does not mean the field was
+omitted from submission; compare it with the locally saved request payload.
+
 ## Terminal activation ownership
 
 The first activated terminal establishes the ERP business account's EIS taxpayer

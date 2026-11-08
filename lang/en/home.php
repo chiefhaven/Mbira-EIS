@@ -18,6 +18,7 @@ return [
     'purchase_due' => 'Purchase due',
     'today' => 'Today',
     'total_vat' => 'Total VAT',
+    'fiscal_vat_help' => 'Submitted EIS VAT, filtered by the fiscal invoice date in Malawi. Other dashboard totals use ERP sale dates.',
     'this_week' => 'This Week',
     'this_month' => 'This Month',
     'this_fy' => 'This Financial Year',
