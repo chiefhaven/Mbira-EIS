@@ -394,21 +394,57 @@ class AccountReportsController extends Controller
 
         try {
             $business_id = session()->get('user.business_id');
+
             if (request()->ajax()) {
                 $payment_id = $request->input('transaction_payment_id');
                 $account_id = $request->input('account_id');
 
-                $payment = TransactionPayment::with(['transaction'])->where('business_id', $business_id)->findOrFail($payment_id);
-                $payment->account_id = $account_id;
-                $payment->save();
+                $account = Account::where('business_id', $business_id)
+                    ->where('is_closed', 0)
+                    ->findOrFail($account_id);
 
-                $payment_type = ! empty($payment->transaction->type) ? $payment->transaction->type : null;
-                if (empty($payment_type)) {
-                    $child_payment = TransactionPayment::where('parent_id', $payment->id)->first();
-                    $payment_type = ! empty($child_payment->transaction->type) ? $child_payment->transaction->type : null;
-                }
+                DB::transaction(function () use ($business_id, $payment_id, $account) {
+                    $transaction_id = TransactionPayment::where('business_id', $business_id)
+                        ->where('id', $payment_id)
+                        ->value('transaction_id');
 
-                AccountTransaction::updateAccountTransaction($payment, $payment_type);
+                    (new \App\Services\Sales\RestaurantBillService(DB::connection()))
+                        ->backendPayment(auth()->user(), (int) $transaction_id, function () use (
+                            $business_id,
+                            $payment_id,
+                            $account,
+                            $transaction_id
+                        ) {
+                            \App\Services\Sales\SavedSaleWriteGuard::paymentLines(
+                                DB::connection(),
+                                $transaction_id,
+                                auth()->user()->id,
+                                function () use ($business_id, $payment_id, $account, $transaction_id) {
+                                    $payment = TransactionPayment::with(['transaction'])
+                                        ->where('business_id', $business_id)
+                                        ->lockForUpdate()
+                                        ->findOrFail($payment_id);
+
+                                    if ((string) $payment->transaction_id !== (string) $transaction_id) {
+                                        throw new \RuntimeException('The payment transaction changed while linking its account.');
+                                    }
+
+                                    $payment->account_id = $account->id;
+                                    $payment->save();
+
+                                    $payment_type = ! empty($payment->transaction->type) ? $payment->transaction->type : null;
+                                    if (empty($payment_type)) {
+                                        $child_payment = TransactionPayment::where('parent_id', $payment->id)->first();
+                                        $payment_type = ! empty($child_payment->transaction->type) ? $child_payment->transaction->type : null;
+                                    }
+
+                                    AccountTransaction::updateAccountTransaction($payment, $payment_type);
+                                }
+                            );
+
+                            return ['success' => true];
+                        });
+                });
             }
             $output = ['success' => true,
                 'msg' => __('account.account_linked_success'),

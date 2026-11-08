@@ -481,6 +481,10 @@ class BusinessController extends Controller
             $business_details['pos_settings'] = json_encode($pos_settings);
 
             $business_details['custom_labels'] = json_encode($business_details['custom_labels']);
+            $custom_labels = json_decode($business_details['custom_labels'], true, 512, JSON_THROW_ON_ERROR);
+            $custom_labels['payments']['custom_pay_1'] = 'Airtel Money';
+            $custom_labels['payments']['custom_pay_2'] = 'TNM Mpamba';
+            $business_details['custom_labels'] = json_encode($custom_labels, JSON_THROW_ON_ERROR);
 
             $business_details['common_settings'] = ! empty($request->input('common_settings')) ? $request->input('common_settings') : [];
 

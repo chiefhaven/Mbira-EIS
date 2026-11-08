@@ -295,10 +295,10 @@ class TransactionController extends Controller
                     $html = $row->ref_no;
                     if ($row->type == 'sell') {
                         $html = '<button type="button" class="btn btn-link btn-modal"
-                                data-href="' . action('SellController@show', [$row->transaction_id]) .'" data-container=".view_modal">' . $row->invoice_no . '</button>';
+                                data-href="' . action([\App\Http\Controllers\SellController::class, 'show'], [$row->transaction_id]) .'" data-container=".view_modal">' . $row->invoice_no . '</button>';
                     } elseif ($row->type == 'purchase') {
                         $html = '<button type="button" class="btn btn-link btn-modal"
-                                data-href="' . action('PurchaseController@show', [$row->transaction_id]) .'" data-container=".view_modal">' . $row->ref_no . '</button>';
+                                data-href="' . action([\App\Http\Controllers\PurchaseController::class, 'show'], [$row->transaction_id]) .'" data-container=".view_modal">' . $row->ref_no . '</button>';
                     }
                     return $html;
                 })

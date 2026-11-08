@@ -7,15 +7,15 @@
         <div class="col-sm-4">
             <div class="form-group">
                 {!! Form::label('custom_payment_1_label', __('lang_v1.custom_payment_1')); !!}
-                {!! Form::text('custom_labels[payments][custom_pay_1]', !empty($custom_labels['payments']['custom_pay_1']) ? $custom_labels['payments']['custom_pay_1'] : null,
-                ['class' => 'form-control', 'id' => 'custom_payment_1']); !!}
+                {!! Form::text('custom_labels[payments][custom_pay_1]', 'Airtel Money',
+                ['class' => 'form-control', 'id' => 'custom_payment_1', 'readonly']); !!}
             </div>
         </div>
         <div class="col-sm-4">
             <div class="form-group">
                 {!! Form::label('custom_payment_2_label', __('lang_v1.custom_payment_2')); !!}
-                {!! Form::text('custom_labels[payments][custom_pay_2]', !empty($custom_labels['payments']['custom_pay_2']) ? $custom_labels['payments']['custom_pay_2'] : null,
-                ['class' => 'form-control', 'id' => 'custom_payment_2']); !!}
+                {!! Form::text('custom_labels[payments][custom_pay_2]', 'TNM Mpamba',
+                ['class' => 'form-control', 'id' => 'custom_payment_2', 'readonly']); !!}
             </div>
         </div>
         <div class="col-sm-4">

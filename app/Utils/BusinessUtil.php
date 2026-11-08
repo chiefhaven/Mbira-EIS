@@ -182,6 +182,13 @@ class BusinessUtil extends Util
         //Disable inline tax editing
         $business_details['enable_inline_tax'] = 0;
 
+        $custom_labels = ! empty($business_details['custom_labels'])
+            ? json_decode($business_details['custom_labels'], true, 512, JSON_THROW_ON_ERROR)
+            : [];
+        $custom_labels['payments']['custom_pay_1'] = 'Airtel Money';
+        $custom_labels['payments']['custom_pay_2'] = 'TNM Mpamba';
+        $business_details['custom_labels'] = json_encode($custom_labels, JSON_THROW_ON_ERROR);
+
         $business = Business::create_business($business_details);
 
         return $business;
@@ -276,15 +283,11 @@ class BusinessUtil extends Util
         $ref_count = $this->setAndGetReferenceCount('business_location', $business_id);
         $location_id = $this->generateReferenceNumber('business_location', $ref_count, $business_id);
 
-        //Enable all payment methods by default
-        $payment_types = $this->payment_types();
-        $location_payment_types = [];
-        foreach ($payment_types as $key => $value) {
-            $location_payment_types[$key] = [
-                'is_enabled' => 1,
-                'account' => null,
-            ];
-        }
+        $payment_types = $this->payment_types(null, false, $business_id);
+        $defaults = BusinessLocation::creationDefaults($business_id, $payment_types);
+        $invoice_scheme_id = $invoice_scheme_id ?: $defaults['invoice_scheme_id'];
+        $invoice_layout_id = $invoice_layout_id ?: $defaults['invoice_layout_id'];
+
         $location = BusinessLocation::create(['business_id' => $business_id,
             'name' => $location_details['name'],
             'landmark' => $location_details['landmark'],
@@ -300,7 +303,7 @@ class BusinessUtil extends Util
             'website' => ! empty($location_details['website']) ? $location_details['website'] : '',
             'email' => '',
             'location_id' => $location_id,
-            'default_payment_accounts' => json_encode($location_payment_types),
+            'default_payment_accounts' => json_encode($defaults['default_payment_accounts'], JSON_THROW_ON_ERROR),
         ]);
 
         return $location;
