@@ -35,7 +35,7 @@ return [
     'total_assets' => 'Tổng tài sản',
     'total_liability' => 'Tổng trách nhiệm',
     'trial_balance' => 'Số dư dùng thử',
-    'payments_not_linked_with_account' => 'Toàn bộ <b>:payments</b> thanh toán không được liên kết với bất kỳ tài khoản nào.',
+    'payments_not_linked_with_account' => 'Thanh toán chưa liên kết: <b>:payments</b>.',
     'saving_current' => 'Saving/Current',
     'capital' => 'Capital',
     'not_applicable' => 'Không áp dụng',

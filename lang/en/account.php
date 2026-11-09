@@ -35,7 +35,7 @@ return [
     'total_assets' => 'Total Assets',
     'total_liability' => 'Total Liability',
     'trial_balance' => 'Trial Balance',
-    'payments_not_linked_with_account' => 'Total <b>:payments</b> payments not linked with any account.',
+    'payments_not_linked_with_account' => 'Unlinked payments: <b>:payments</b>.',
     'saving_current' => 'Saving/Current',
     'capital' => 'Capital',
     'not_applicable' => 'Not Applicable',

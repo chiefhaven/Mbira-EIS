@@ -6,7 +6,7 @@
     @else
         <div class="box-header with-border">
             <h2 class="box-title eis-terminals-section-title">Registered terminals</h2>
-            <p class="eis-terminals-section-description">Review terminal status, location defaults, configurations, and credentials.</p>
+            <p class="eis-terminals-section-description">View status, location defaults, settings, and credentials.</p>
         </div>
         <div class="box-body">
     @endif
@@ -14,7 +14,7 @@
     <div class="eis-terminal-activation">
         @if (!empty($standalone))
             <h3 class="eis-terminals-activation-heading">Activate a terminal</h3>
-            <p class="eis-terminals-activation-help">Enter the activation code supplied for this EIS terminal.</p>
+            <p class="eis-terminals-activation-help">Enter this terminal's activation code.</p>
         @endif
         <div class="row">
             <div class="{{ !empty($standalone) ? 'col-md-5' : 'col-md-4' }} form-group">
@@ -48,11 +48,11 @@
             </tbody>
         </table>
     </div>
-    <p class="text-muted eis-management-note">Only terminals in your permitted locations are shown. Token renewal stores new credentials securely on the server.</p>
+    <p class="text-muted eis-management-note">Only permitted terminals are shown. Renewed credentials are stored securely.</p>
     <div class="box box-default" id="eis-configuration-panel" hidden>
-        <div class="box-header with-border"><h3 class="box-title">Global, Terminal and Taxpayer configurations</h3></div>
+        <div class="box-header with-border"><h3 class="box-title">EIS configuration</h3></div>
         <div class="box-body table-responsive">
-        <p>Saved configuration for the selected terminal. Use Latest config to fetch all three groups from EIS. Local enablement and terminal ownership are not overwritten. Credentials are excluded.</p>
+        <p>Saved terminal settings. Select Latest config to fetch all three EIS groups. Local enablement and ownership stay unchanged. Credentials are excluded.</p>
         <div id="eis-configuration-data" aria-live="polite"></div>
         </div>
     </div>
