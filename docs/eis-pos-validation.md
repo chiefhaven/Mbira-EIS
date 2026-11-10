@@ -80,6 +80,8 @@ only when that terminal configuration confirms VAT registration. Sale prices,
 discounts, gross subtotals and payments are not rewritten.
 The external ESC/POS print-server implementation is not present in this
 checkout; deploy matching print-server changes separately for raw thermal output.
+Run `php tests/Standalone/receipt_vat_display_checks.php` for isolated VAT
+summary, registration, rate-label and VAT-exclusive display checks.
 Identical product, variation-group and variation names are printed only once;
 distinct variation names remain visible on browser and thermal receipts.
 
