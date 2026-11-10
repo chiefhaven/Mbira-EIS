@@ -45,7 +45,7 @@ function discountCheck(bool $condition, string $message): void
     }
     ++$checks;
 }
-function discountPayload(SaleTransformer $transformer, EisSetting $settings, array $attributes, float $total): array
+function discountPayload(SaleTransformer $transformer, EisSetting $settings, array $attributes, float $total, array $invoiceDiscount = []): array
 {
     $lines = [];
     foreach ($attributes as $index => $values) {
@@ -56,7 +56,7 @@ function discountPayload(SaleTransformer $transformer, EisSetting $settings, arr
         $lines[] = $line;
     }
     $transaction = new Transaction();
-    $transaction->setRawAttributes(['id' => 1, 'business_id' => 6, 'transaction_date' => '2026-11-08 10:00:00', 'final_total' => $total]);
+    $transaction->setRawAttributes(['id' => 1, 'business_id' => 6, 'transaction_date' => '2026-11-08 10:00:00', 'final_total' => $total] + $invoiceDiscount);
     $transaction->setRelation('business', null)->setRelation('location', null)->setRelation('contact', null)
         ->setRelation('sell_lines', new Illuminate\Database\Eloquent\Collection($lines));
     $before = array_map(fn ($line) => $line->getAttributes(), $lines);
@@ -94,6 +94,8 @@ foreach (['fixed', 'percentage'] as $type) {
 $zero = $first;
 $zero['tax_id'] = 2;
 $zero['item_tax'] = 0;
+$zero['unit_price_before_discount'] = 1000;
+$zero['unit_price'] = 900;
 $payload = discountPayload($transformer, $settings, [$first, $zero], 1800);
 discountCheck($payload['invoiceLineItems'][1]['totalVAT'] === 0.0
     && count($payload['invoiceSummary']['taxBreakDown']) === 2, 'Mixed-rate discounted lines must remain separate, including zero rates');
@@ -111,6 +113,67 @@ $percentage['quantity'] = 2;
 $payload = discountPayload($transformer, $settings, [$percentage], 1659.58);
 discountCheck($payload['invoiceLineItems'][0]['discount'] === 340.42,
     'Percentage discount must use the saved pre-discount price, not the percentage value as money');
+$correct = ['quantity' => 2, 'unit_price_before_discount' => 100, 'unit_price' => 90,
+    'unit_price_inc_tax' => 105.75, 'item_tax' => 15.75, 'line_discount_type' => 'percentage',
+    'line_discount_amount' => 10, 'tax_id' => 1];
+$payload = discountPayload($transformer, $settings, [$correct], 211.5);
+discountCheck($payload['invoiceLineItems'][0]['unitPrice'] === 117.5
+    && $payload['invoiceLineItems'][0]['discount'] === 23.5
+    && $payload['invoiceSummary']['totalVAT'] === 31.5,
+    'Ten percent net discount is converted to the correct VAT-inclusive EIS discount');
+$free = $correct;
+$free['unit_price'] = 0;
+$free['unit_price_inc_tax'] = 0;
+$free['item_tax'] = 0;
+$free['line_discount_amount'] = 100;
+$payload = discountPayload($transformer, $settings, [$correct, $free], 211.5);
+discountCheck(count($payload['invoiceLineItems']) === 2
+    && $payload['invoiceLineItems'][1]['discount'] === 235.0
+    && $payload['invoiceLineItems'][1]['total'] === 0.0
+    && $payload['invoiceLineItems'][1]['totalVAT'] === 0.0,
+    'Fully discounted products remain present with zero gross total and VAT');
+foreach ([['percentage', 10, 190.35], ['fixed', 21.15, 190.35], ['percentage', 100, 0.0]] as [$type, $amount, $total]) {
+    $payload = discountPayload($transformer, $settings, [$correct], $total,
+        ['discount_type' => $type, 'discount_amount' => $amount]);
+    discountCheck($payload['invoiceLineItems'][0]['total'] === $total
+        && $payload['invoiceLineItems'][0]['totalVAT'] === round($total * 17.5 / 117.5, 2),
+        'Invoice fixed/percentage discounts reduce fiscal line totals and VAT once');
+}
+$tiny = ['quantity' => 1, 'unit_price_before_discount' => 0.01, 'unit_price' => 0.01,
+    'unit_price_inc_tax' => 0.01, 'item_tax' => 0, 'tax_id' => 2];
+$payload = discountPayload($transformer, $settings, [$tiny, $tiny, $tiny], 0.02,
+    ['discount_type' => 'fixed', 'discount_amount' => 0.01]);
+discountCheck(round(array_sum(array_column($payload['invoiceLineItems'], 'discount')), 2) === 0.01
+    && round(array_sum(array_column($payload['invoiceLineItems'], 'total')), 2) === 0.02,
+    'Proportional allocation distributes residual cents without losing the invoice discount');
+$payload = discountPayload($transformer, $settings, [$correct, $zero], 1000.35,
+    ['discount_type' => 'percentage', 'discount_amount' => 10]);
+discountCheck(round(array_sum(array_column($payload['invoiceLineItems'], 'total')), 2) === 1000.35
+    && $payload['invoiceLineItems'][1]['totalVAT'] === 0.0
+    && count($payload['invoiceSummary']['taxBreakDown']) === 2,
+    'Invoice discounts preserve mixed standard and zero-rated VAT breakdowns');
+foreach ($payload['invoiceLineItems'] as $item) {
+    discountCheck(round($item['unitPrice'] * $item['quantity'] - $item['discount'], 2) === $item['total'],
+        'Each mixed-rate line reconciles after both line and invoice discounts');
+}
+$erp = (new App\Utils\ProductUtil())->calculateInvoiceTotal(
+    [['quantity' => 2, 'unit_price_inc_tax' => 105.75]], null,
+    ['discount_type' => 'percentage', 'discount_amount' => 10], false
+);
+$payload = discountPayload($transformer, $settings, [$correct], $erp['final_total'],
+    ['discount_type' => 'percentage', 'discount_amount' => 10]);
+discountCheck($payload['invoiceSummary']['invoiceTotal'] === round($erp['final_total'], 2)
+    && $payload['invoiceLineItems'][0]['total'] === 190.35,
+    'Real ERP percentage invoice calculation and EIS serialized lines agree');
+foreach ([['percentage', 101, 0], ['fixed', 500, 0], ['percentage', 10, 200]] as [$type, $amount, $total]) {
+    try {
+        discountPayload($transformer, $settings, [$correct], $total,
+            ['discount_type' => $type, 'discount_amount' => $amount]);
+        throw new RuntimeException('Invalid invoice discount must not be sent');
+    } catch (InvalidArgumentException $exception) {
+        discountCheck(true, 'Oversized discounts and inconsistent saved totals are rejected');
+    }
+}
 $capsule->table('tax_rates')->where('id', 1)->delete();
 try {
     discountPayload($transformer, $settings, [$first], 900);

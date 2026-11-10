@@ -92,11 +92,16 @@ class SaleTransformer
             $discountPerUnit = $this->getDiscountAmount($line);
             $unitPrice = $this->getUnitPrice($line);
             if ($discountPerUnit > 0) {
-                $unitPrice = round($unitPrice + $discountPerUnit, 2);
+                $rate = $this->discountTaxRate($settings->business_id, $taxRateId);
+                $unitPrice = round((float) $line->unit_price_before_discount * (1 + $rate / 100), 2);
             }
-            $quantity = $this->getQuantity($line);
+            $quantity = round($this->getQuantity($line), 2);
             $vat = round($this->getVatAmount($line) * $quantity, 2);
-            $discount = round($discountPerUnit * $quantity, 2);
+            $discount = $discountPerUnit > 0
+                ? round($unitPrice * $quantity - round($this->getUnitPrice($line) * $quantity, 2), 2) : 0;
+            if ($discount < 0) {
+                throw new \InvalidArgumentException('Saved discounted prices exceed the original fiscal line value.');
+            }
             $lineTotal = round($unitPrice * $quantity - $discount, 2);
             if ($discount > 0) {
                 $vat = $this->getDiscountedVat($settings->business_id, $taxRateId, $lineTotal);
@@ -129,6 +134,35 @@ class SaleTransformer
         // Ensure we have items after filtering
         if (empty($invoiceItems)) {
             throw new \InvalidArgumentException('No valid sell lines found after filtering');
+        }
+        if ((float) $transaction->discount_amount > 0) {
+            $invoiceDiscount = match ($transaction->discount_type) {
+                'percentage' => round($subtotal * (float) $transaction->discount_amount / 100, 2),
+                'fixed' => round((float) $transaction->discount_amount, 2),
+                default => throw new \InvalidArgumentException('A valid invoice discount type is required for EIS submission.'),
+            };
+            if ($invoiceDiscount > $subtotal || $subtotal <= 0) {
+                throw new \InvalidArgumentException('Invoice discount cannot exceed the fiscal line subtotal.');
+            }
+            $allocated = 0;
+            $cumulative = 0;
+            $taxBreakdown = [];
+            $totalVat = 0;
+            foreach ($invoiceItems as &$item) {
+                $cumulative += $item['total'];
+                $target = round($invoiceDiscount * $cumulative / $subtotal, 2);
+                $share = round($target - $allocated, 2);
+                $allocated = $target;
+                $item['discount'] = round($item['discount'] + $share, 2);
+                $item['total'] = round($item['total'] - $share, 2);
+                $item['totalVAT'] = $this->getDiscountedVat($settings->business_id, $item['taxRateId'], $item['total']);
+                $totalVat += $item['totalVAT'];
+                $this->updateTaxBreakdown($taxBreakdown, $item['taxRateId'], $item['total'], $item['totalVAT']);
+            }
+            unset($item);
+            if (abs(round($subtotal - $invoiceDiscount, 2) - round((float) $transaction->final_total, 2)) > 0.005) {
+                throw new \InvalidArgumentException('Discounted fiscal line totals do not match the saved invoice total. Review additional charges, taxes or rounding before EIS submission.');
+            }
         }
 
         // Get site ID with fallback
@@ -209,7 +243,7 @@ class SaleTransformer
     private function isValidSellLine(TransactionSellLine $line): bool
     {
         return $line->exists && 
-               ($line->unit_price ?? 0) > 0 && 
+               ($line->unit_price ?? -1) >= 0 &&
                ($line->quantity ?? 0) > 0;
     }
 
@@ -247,15 +281,21 @@ class SaleTransformer
 
     private function getDiscountedVat(int $businessId, string $taxRateId, float $lineTotal): float
     {
+        $rate = $this->discountTaxRate($businessId, $taxRateId);
+        return round($lineTotal * $rate / (100 + $rate), 2);
+    }
+
+    private function discountTaxRate(int $businessId, string $taxRateId): float
+    {
         $taxRate = $this->taxRateModel
             ->where('business_id', $businessId)
             ->where('tax_rate_id', $taxRateId)
             ->first();
-        if (!$taxRate || !is_numeric($taxRate->rate) || $taxRate->rate < 0) {
+        if (!$taxRate || !is_numeric($taxRate->rate) || !is_finite((float) $taxRate->rate) || $taxRate->rate < 0) {
             throw new \InvalidArgumentException('A valid EIS tax rate is required to calculate discounted sale VAT.');
         }
 
-        return round($lineTotal * $taxRate->rate / (100 + $taxRate->rate), 2);
+        return (float) $taxRate->rate;
     }
 
     /**

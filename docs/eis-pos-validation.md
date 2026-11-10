@@ -107,9 +107,22 @@ distinct variation names remain visible on browser and thermal receipts.
 EIS product lines send the tax-inclusive price before the line discount,
 the total monetary discount for the quantity (percentage discounts are
 converted using the saved pre-discount unit price), and the discounted line
-total. VAT and tax breakdowns for discounted lines are recomputed from that
+total. Gross pre-discount prices use the configured VAT rate; the EIS monetary
+discount is the difference between that gross value and the saved discounted
+gross line total, rather than a VAT-exclusive discount subtracted from a gross price.
+VAT and tax breakdowns for discounted lines are recomputed from that
 total using the business's configured EIS rate. Stored POS prices, item tax,
 payments and totals are not rewritten. Non-discounted lines retain stored VAT.
+POS and classic sale discount/price changes recalculate item VAT from the
+discounted net price, including removal of a discount. A K100 net item at 17.5%
+with 10% discount is K90 net + K15.75 VAT = K105.75 gross.
+Fully discounted products remain in fiscal invoices with zero total and VAT.
+Invoice-level fixed/percentage discounts are allocated proportionally across
+the already line-discounted gross totals, with cumulative cent rounding.
+VAT and rate breakdowns are rebuilt after allocation, including zero-rated lines.
+Discounted fiscal line totals must reconcile to the saved invoice total;
+unrepresented extra taxes/charges or rounding produce an explicit validation
+error rather than sending inconsistent amounts.
 
 EIS field-keyed validation errors are surfaced in the saved submission error
 instead of being replaced by a generic HTTP 400 message. Response bodies and
@@ -117,6 +130,9 @@ credentials are not added to logs.
 
 Run `php tests/Standalone/eis_discount_checks.php` for isolated discounted
 payload and validation-error checks; no live EIS requests are sent.
+Run `node tests/Standalone/pos_percentage_discount_checks.js` to test the actual
+shared POS/classic calculation functions with fixed/percentage discounts,
+zero/standard VAT rates, quantities, subunit multipliers and discount removal.
 These checks also verify that `invoiceSummary.amountTendered` is numeric and
 equals the paid sale's final total in the real HTTP client's outgoing JSON.
 An invoice lookup returning a null tender value does not mean the field was

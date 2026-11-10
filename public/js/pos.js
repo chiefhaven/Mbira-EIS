@@ -528,7 +528,8 @@ $(document).ready(function() {
         var quantity = __read_number(tr.find('input.pos_quantity'));
 
         var line_total = quantity * unit_price_inc_tax;
-        var discounted_unit_price = unit_price_inc_tax - __read_number(tr.find('input.item_tax'));
+        var tax_rate = Number(tr.find('select.tax_id :selected').data('rate')) || 0;
+        var discounted_unit_price = unit_price_inc_tax / (1 + tax_rate / 100);
         var unit_price = get_unit_price_from_discounted_unit_price(tr, discounted_unit_price);
 
         __write_number(tr.find('input.pos_unit_price'), unit_price);
@@ -2057,17 +2058,17 @@ function pos_product_row(variation_id = null, purchase_line_id = null, weighing_
 //Update values for each row
 function pos_each_row(row_obj) {
     var discounted_unit_price = calculate_discounted_unit_price(row_obj);
-    var item_tax = __read_number(row_obj.find('input.item_tax'));
+    var tax_rate = Number(row_obj.find('select.tax_id :selected').data('rate')) || 0;
+    var item_tax = __calculate_amount('percentage', tax_rate, discounted_unit_price);
+    var multiplier = parseFloat(row_obj.find('input.base_unit_multiplier').val()) || 1;
+    __write_number(row_obj.find('input.item_tax'), item_tax);
+    __write_number(row_obj.find('input.hidden_base_unit_item_tax'), item_tax / multiplier);
     var unit_price_inc_tax = discounted_unit_price + item_tax;
     __write_number(row_obj.find('input.pos_unit_price_inc_tax'), unit_price_inc_tax);
-
-    var discount = __read_number(row_obj.find('input.row_discount_amount'));
-
-    if (discount > 0) {
-        var qty = __read_number(row_obj.find('input.pos_quantity'));
-        var line_total = qty * unit_price_inc_tax;
-        __write_number(row_obj.find('input.pos_line_total'), line_total);
-    }
+    var qty = __read_number(row_obj.find('input.pos_quantity'));
+    var line_total = qty * unit_price_inc_tax;
+    __write_number(row_obj.find('input.pos_line_total'), line_total);
+    row_obj.find('span.pos_line_total_text').text(__currency_trans_from_en(line_total, true));
 }
 
 function pos_total_row() {
