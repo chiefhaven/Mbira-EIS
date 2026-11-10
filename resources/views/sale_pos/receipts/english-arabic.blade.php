@@ -17,7 +17,7 @@
 				@if(!empty($receipt_details->business_name) && !empty($receipt_details->location_name))
 					<br/><small>{{$receipt_details->location_name}}</small>
 				@endif
-				{!! $receipt_details->customer_info_address !!}
+				<br/>{!! $receipt_details->address !!}
 			</div>
             @endif
             @if(!empty($receipt_details->contact))

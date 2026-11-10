@@ -1055,16 +1055,26 @@ class TransactionUtil extends Util
         $is_eis_receipt = $transaction->payment_status === 'paid' && $transaction->eisSale
             && ! empty($transaction->eisSale->eis_invoice_number);
         $eis_trading_name = null;
+        $eis_address_lines = null;
         if ($is_eis_receipt
             && (int) $transaction->eisSale->business_id === (int) $transaction->business_id
             && (int) $transaction->eisSale->location_id === (int) $transaction->location_id
             && ! empty($transaction->eisSale->eis_setting_id)) {
-            $eis_trading_name = DB::table('eis_terminal_configurations as terminal')
+            $eis_terminal = DB::table('eis_terminal_configurations as terminal')
                 ->join('eis_configurations as configuration', 'configuration.id', '=', 'terminal.configuration_id')
                 ->where('configuration.business_id', $transaction->business_id)
                 ->where('configuration.location_id', $transaction->location_id)
                 ->where('configuration.eis_setting_id', $transaction->eisSale->eis_setting_id)
-                ->value('terminal.trading_name');
+                ->first(['terminal.trading_name', 'terminal.address_lines']);
+            $eis_trading_name = $eis_terminal->trading_name ?? null;
+            if ($eis_terminal) {
+                $eis_address_lines = json_decode($eis_terminal->address_lines ?? '', true);
+            }
+        }
+        if ($is_eis_receipt && (!is_array($eis_address_lines) || !array_is_list($eis_address_lines)
+            || collect($eis_address_lines)->contains(fn ($line) => !is_string($line)))) {
+            Log::error('EIS receipt terminal address is missing or invalid', ['transaction_id' => $transaction->id]);
+            throw new \UnexpectedValueException('The EIS receipt address is unavailable. Refresh the original sale terminal configuration before printing.');
         }
 
         $output = [
@@ -1133,6 +1143,12 @@ class TransactionUtil extends Util
         }
         if (! empty($temp)) {
             $output['address'] .= implode(', ', $temp);
+        }
+        if ($is_eis_receipt) {
+            $lines = array_values(array_filter(array_map('trim', $eis_address_lines), fn ($line) => $line !== ''));
+            $output['address'] = $receipt_printer_type === 'printer'
+                ? implode("\n", $lines)
+                : implode('<br>', array_map(fn ($line) => e($line), $lines));
         }
 
         $output['website'] = $location_details->website;

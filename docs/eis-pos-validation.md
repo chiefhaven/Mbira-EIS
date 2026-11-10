@@ -53,6 +53,16 @@ sales, receipts, ERP transaction dates, or EIS records. Incomplete submission da
 or VAT data raises an explicit error requiring invoice synchronization.
 Run `php tests/Standalone/dashboard_fiscal_vat_checks.php` for isolated checks.
 
+## Fiscal receipt address
+
+Fiscal receipt seller addresses come exclusively from `addressLines` in the
+original sale terminal's saved EIS configuration, scoped by business, location
+and terminal. Legacy district/city fields are not appended. Browser receipts
+escape each line and thermal receipts use plain-text newlines. Missing or
+malformed address configuration requires a configuration refresh before
+printing; non-EIS receipt addresses remain unchanged.
+Run `php tests/Standalone/eis_receipt_address_checks.php` for isolated checks.
+
 ## Product discounts
 
 Browser and thermal sale receipts show `# | Product | Quantity | UnitPrice |
