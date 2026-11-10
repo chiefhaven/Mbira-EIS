@@ -71,11 +71,11 @@ Run `php tests/Standalone/eis_receipt_address_checks.php` for isolated checks.
 ## Product discounts
 
 Browser sale receipts show `# | Product | Quantity | UnitPrice |
-Discount | Subtotal`. Browser receipt UnitPrice is VAT-exclusive and before the product discount,
-Discount is the monetary discount for the line quantity. Product-line Subtotal
-is the displayed VAT-exclusive unit price less the per-unit discount, multiplied
-by quantity; it is the line's discounted net subtotal. Undiscounted modifiers
-and returned quantities retain their applicable line amounts.
+Discount | Subtotal`. All three monetary product columns are VAT-inclusive.
+UnitPrice is before the product discount; Discount is the gross monetary
+discount for the line quantity; Subtotal is the discounted gross line total.
+Undiscounted modifiers and returned quantities retain their applicable gross
+line amounts.
 Saved gross line totals and fiscal totals remain unchanged. All eight sale receipt layouts share this
 product table; layout-specific tax and duplicated discounted-price columns are
 replaced by the six-column format. Invoice-level tax and total sections remain.

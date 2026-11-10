@@ -19,8 +19,12 @@ $capsule->setAsGlobal();
 $capsule->bootEloquent();
 $capsule->schema()->create('tax_rates', function (Blueprint $table) {
     $table->increments('id');
+    $table->string('name');
+    $table->decimal('amount', 8, 3)->default(0);
+    $table->boolean('is_tax_group')->default(false);
     $table->softDeletes();
 });
+$capsule->table('tax_rates')->insert(['id' => 1, 'name' => 'VAT 17.5%', 'amount' => 17.5, 'is_tax_group' => false]);
 $app->instance('translator', new Illuminate\Translation\Translator(
     new Illuminate\Translation\FileLoader(new Filesystem(), $root.'\lang'), 'en'
 ));
@@ -66,9 +70,9 @@ foreach (['fixed', 'percentage', null] as $type) {
         $line = new TransactionSellLine();
         $line->setRawAttributes(['unit_price_before_discount' => 100 * $multiplier,
             'unit_price' => ($type ? 90 : 100) * $multiplier,
-            'unit_price_inc_tax' => ($type ? 107.5 : 117.5) * $multiplier, 'item_tax' => 17.5 * $multiplier,
+            'unit_price_inc_tax' => ($type ? 105.75 : 117.5) * $multiplier, 'item_tax' => ($type ? 15.75 : 17.5) * $multiplier,
             'line_discount_type' => $type, 'line_discount_amount' => $type === 'fixed' ? 10 * $multiplier : ($type ? 10 : 0),
-            'quantity' => 2, 'orig_quantity' => 2 * $multiplier, 'multiplier' => $multiplier, 'tax_id' => null]);
+            'quantity' => 2, 'orig_quantity' => 2 * $multiplier, 'multiplier' => $multiplier, 'tax_id' => 1]);
         $line->setRelation('product', (object) ['name' => 'Test product', 'unit' => (object) ['short_name' => 'pc'],
             'brand' => null, 'category' => null, 'tax' => null]);
         $line->setRelation('variations', (object) ['id' => 1, 'name' => 'DUMMY', 'product_variation' => (object) ['name' => 'DUMMY']]);
@@ -79,7 +83,7 @@ foreach (['fixed', 'percentage', null] as $type) {
         receiptDiscountCheck($line->getAttributes() === $before, 'Receipt generation must not mutate prices');
         receiptDiscountCheck($receiptLine['unit_price_before_discount_inc_tax'] === number_format(117.5 * $multiplier, 2),
             'Tax-inclusive pre-discount unit price must handle fixed, percentage and sub-unit discounts');
-        receiptDiscountCheck($receiptLine['unit_price_inc_tax'] === number_format(($type ? 107.5 : 117.5) * $multiplier, 2)
+        receiptDiscountCheck($receiptLine['unit_price_inc_tax'] === number_format(($type ? 105.75 : 117.5) * $multiplier, 2)
             && $receiptLine['line_total_uf'] === $line->unit_price_inc_tax * 2,
             'Existing discounted price and totals must remain unchanged');
         $html = renderDiscountPrice($compiler, $receiptLine, $receipt_details);
@@ -90,25 +94,42 @@ foreach (['fixed', 'percentage', null] as $type) {
         receiptDiscountCheck($headers === ['#', 'Product', 'Quantity', 'UnitPrice', 'Discount', 'Subtotal'],
             'Headers must match the requested six-column order');
         $cells = array_map(fn ($node) => trim($node->textContent), iterator_to_array($xpath->query('//tbody/tr[1]/td')));
-        receiptDiscountCheck(count($cells) === 6 && $cells[0] === '1' && $cells[3] === $receiptLine['unit_price_before_discount']
+        receiptDiscountCheck(count($cells) === 6 && $cells[0] === '1' && $cells[3] === $receiptLine['unit_price_before_discount_inc_tax']
             && str_starts_with($cells[4], $receiptLine['total_line_discount'])
-            && $cells[5] === number_format(($line->unit_price_before_discount - $line->get_discount_amount()) * $line->quantity, 2),
-            'Rows must display VAT-exclusive price, total discount and discounted unit price times quantity subtotal');
+            && $cells[5] === number_format($line->unit_price_inc_tax * $line->quantity, 2),
+            'Rows must display inclusive price, discount and discounted inclusive subtotal');
+        receiptDiscountCheck($receiptLine['unit_price_before_discount_inc_tax'] === number_format(117.5 * $multiplier, 2)
+            && $receiptLine['total_line_discount'] === number_format(($type ? 11.75 : 0) * $multiplier * $line->quantity, 2)
+            && $receiptLine['unit_price_quantity_subtotal'] === number_format($line->unit_price_inc_tax * $line->quantity, 2),
+            'Every monetary product column must be VAT-inclusive and reconcile');
         $printedLines[] = $receiptLine;
     }
 }
+$freeLine = new TransactionSellLine();
+$freeLine->setRawAttributes(['unit_price_before_discount' => 100, 'unit_price' => 0, 'unit_price_inc_tax' => 0,
+    'item_tax' => 0, 'line_discount_type' => 'percentage', 'line_discount_amount' => 100,
+    'quantity' => 1, 'orig_quantity' => 1, 'multiplier' => 1, 'tax_id' => 1]);
+$freeLine->setRelation('product', (object) ['name' => 'Free product', 'unit' => (object) ['short_name' => 'pc'],
+    'brand' => null, 'category' => null, 'tax' => null]);
+$freeLine->setRelation('variations', (object) ['id' => 2, 'name' => 'DUMMY', 'product_variation' => (object) ['name' => 'DUMMY']]);
+$freeLine->setRelation('sub_unit', null)->setRelation('modifiers', []);
+$freeReceiptLine = $method->invoke($util, [$freeLine], $layout, $business)['lines'][0];
+receiptDiscountCheck($freeReceiptLine['unit_price_before_discount_inc_tax'] === '117.50'
+    && $freeReceiptLine['total_line_discount'] === '117.50'
+    && $freeReceiptLine['unit_price_quantity_subtotal'] === '0.00',
+    'Fully discounted taxable product retains tax-inclusive original price and discount');
 $escapedLine = $printedLines[0];
-$escapedLine['unit_price_before_discount'] = '<script>bad</script>';
+$escapedLine['unit_price_before_discount_inc_tax'] = '<script>bad</script>';
 $escapedReceipt = clone $receipt_details;
 $escapedReceipt->table_unit_price_label = '<b>Price</b>';
 $html = renderDiscountPrice($compiler, $escapedLine, $escapedReceipt);
 receiptDiscountCheck(!str_contains($html, '<script>') && str_contains($html, '&lt;b&gt;Price'), 'Price and label must be escaped');
 receiptDiscountCheck(str_contains(renderDiscountPrice($compiler, [], $receipt_details), 'colspan="6"'), 'Empty receipts must span all six columns');
 $legacyLine = $printedLines[0];
-unset($legacyLine['unit_price_before_discount'], $legacyLine['total_line_discount']);
+unset($legacyLine['unit_price_before_discount'], $legacyLine['unit_price_before_discount_inc_tax'], $legacyLine['total_line_discount']);
 $html = renderDiscountPrice($compiler, $legacyLine, $receipt_details);
-receiptDiscountCheck(str_contains($html, $legacyLine['unit_price_exc_tax']) && str_contains($html, '0.00'),
-    'Return and legacy line data must retain the available price and zero discount');
+receiptDiscountCheck(str_contains($html, $legacyLine['unit_price_inc_tax']) && str_contains($html, '0.00'),
+    'Return and legacy line data must retain the available inclusive price and zero discount');
 $utilSource = file_get_contents($root.'\app\Utils\TransactionUtil.php');
 receiptDiscountCheck(strpos($utilSource, "'receipt_item_discount_label' =>") < strpos($utilSource, '//Display name'),
     'The localized discount column label must be available for all receipt types');
@@ -119,7 +140,7 @@ receiptDiscountCheck(!str_contains($html, 'UnitPrice') && !str_contains($html, '
     && !str_contains($html, $printedLines[0]['unit_price_before_discount_inc_tax']), 'Hidden-price receipts must not expose any monetary columns');
 $withModifier = $printedLines[0];
 $withModifier['modifiers'] = [['name' => 'Extra', 'quantity' => '1', 'units' => 'pc', 'unit_price_inc_tax' => '5.00',
-    'unit_price_exc_tax' => '4.26', 'line_total' => '5.00', 'unit_price_quantity_subtotal' => '4.26']];
+    'unit_price_exc_tax' => '4.26', 'line_total' => '5.00', 'unit_price_quantity_subtotal' => '5.00']];
 $dom = new DOMDocument();
 $dom->loadHTML(renderDiscountPrice($compiler, $withModifier, $receipt_details));
 $xpath = new DOMXPath($dom);
@@ -138,7 +159,7 @@ foreach ([
     $namedLine['variation'] = $variation;
     $namedLine['modifiers'] = [['name' => $name, 'variation' => $name, 'quantity' => '1', 'units' => 'pc',
         'unit_price_inc_tax' => '5.00', 'unit_price_exc_tax' => '4.26',
-        'unit_price_quantity_subtotal' => '4.26', 'line_total' => '5.00']];
+        'unit_price_quantity_subtotal' => '5.00', 'line_total' => '5.00']];
     $dom = new DOMDocument();
     $dom->loadHTML(renderDiscountPrice($compiler, $namedLine, $receipt_details));
     $xpath = new DOMXPath($dom);

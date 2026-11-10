@@ -136,10 +136,11 @@ $receipt->receipt_item_discount_label = 'Discount';
 $receipt->table_subtotal_label = 'Subtotal';
 $receipt->lines = [['name' => 'Product', 'quantity' => '1', 'units' => 'pc',
     'unit_price_before_discount' => '7,234.04', 'unit_price_inc_tax' => '8,500.00',
-    'total_line_discount' => '0.00', 'line_total' => '8,500.00', 'unit_price_quantity_subtotal' => '7,234.04',
+    'unit_price_before_discount_inc_tax' => '8,500.00',
+    'total_line_discount' => '0.00', 'line_total' => '8,500.00', 'unit_price_quantity_subtotal' => '8,500.00',
     'modifiers' => [['name' => 'Extra', 'quantity' => '1', 'units' => 'pc',
         'unit_price_exc_tax' => '100.00', 'unit_price_inc_tax' => '117.50', 'line_total' => '117.50',
-        'unit_price_quantity_subtotal' => '100.00']]]];
+        'unit_price_quantity_subtotal' => '117.50']]]];
 $receipt_details = $receipt;
 $__env = new Illuminate\View\Factory(new Illuminate\View\Engines\EngineResolver(),
     new Illuminate\View\FileViewFinder(new Filesystem(), [$root.'\resources\views']),
@@ -153,14 +154,14 @@ finally { ob_end_clean(); }
 $dom = new DOMDocument();
 $dom->loadHTML($html);
 $xpath = new DOMXPath($dom);
-vatDisplayCheck(trim($xpath->query('//tbody/tr[1]/td[4]')->item(0)->textContent) === '7,234.04',
-    'Product unit price excludes VAT');
-vatDisplayCheck(trim($xpath->query('//tbody/tr[1]/td[6]')->item(0)->textContent) === '7,234.04',
-    'Product subtotal uses VAT-exclusive unit price times quantity');
-vatDisplayCheck(trim($xpath->query('//tbody/tr[2]/td[6]')->item(0)->textContent) === '100.00',
-    'Modifier subtotal uses VAT-exclusive unit price times quantity');
-vatDisplayCheck(trim($xpath->query('//tbody/tr[2]/td[4]')->item(0)->textContent) === '100.00',
-    'Modifier unit price also excludes VAT');
+vatDisplayCheck(trim($xpath->query('//tbody/tr[1]/td[4]')->item(0)->textContent) === '8,500.00',
+    'Product unit price includes VAT');
+vatDisplayCheck(trim($xpath->query('//tbody/tr[1]/td[6]')->item(0)->textContent) === '8,500.00',
+    'Product subtotal uses VAT-inclusive unit price times quantity');
+vatDisplayCheck(trim($xpath->query('//tbody/tr[2]/td[6]')->item(0)->textContent) === '117.50',
+    'Modifier subtotal uses VAT-inclusive unit price times quantity');
+vatDisplayCheck(trim($xpath->query('//tbody/tr[2]/td[4]')->item(0)->textContent) === '117.50',
+    'Modifier unit price also includes VAT');
 foreach (['classic', 'columnize-taxes', 'detailed', 'elegant', 'elegant_modified', 'slim', 'slim2', 'english-arabic'] as $name) {
     $source = file_get_contents($root.'\resources\views\sale_pos\receipts\\'.$name.'.blade.php');
     vatDisplayCheck($compiler->compileString($source) !== '', $name.' compiles');
