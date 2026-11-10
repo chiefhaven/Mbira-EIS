@@ -527,6 +527,7 @@
 				@endif
 				
 				<!-- Total -->
+				@include('sale_pos.receipts.partial.vat_summary', ['table_rows' => true])
 				<tr>
 					<th style="background-color: #357ca5 !important; color: white !important" class="font-23 padding-10">
 						{!! $receipt_details->total_label !!}
@@ -547,7 +548,6 @@
 	</div>
 </div>
 
-@include('sale_pos.receipts.partial.vat_summary')
 
 @if(!empty($receipt_details->additional_notes))
 	<div class="row">

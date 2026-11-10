@@ -113,11 +113,11 @@ try {
     vatDisplayCheck(str_contains($e->getMessage(), 'Refresh'), 'Unknown rate requires configuration refresh');
 }
 $receipt = (object) ['eis_invoice_number' => 'TEST', 'vat_registered' => true,
-    'vat_registered_label' => 'VAT Registered', 'taxable_amount_label' => 'Taxable Amount',
-    'taxable_amount' => '7,234.04', 'vat_total_label' => 'Total VAT (17.5%)', 'vat_amount' => '1,265.96'];
+    'vat_registered_label' => 'VAT Registered', 'taxable_amount_label' => 'Taxable Amount:',
+    'taxable_amount' => '7,234.04', 'vat_total_label' => 'VAT (17.5%):', 'vat_amount' => '1,265.96'];
 $html = renderVatPartial('vat_summary', $receipt);
 vatDisplayCheck(str_contains($html, 'Taxable Amount') && str_contains($html, '7,234.04')
-    && str_contains($html, 'Total VAT (17.5%)') && str_contains($html, '1,265.96'),
+    && str_contains($html, 'VAT (17.5%):') && str_contains($html, '1,265.96'),
     'Receipt renders taxable amount and Total VAT followed by the standard rate');
 vatDisplayCheck(str_contains(renderVatPartial('vat_registered', $receipt), 'VAT Registered'),
     'VAT registered fiscal receipt includes the heading marker');
@@ -168,5 +168,8 @@ foreach (['classic', 'columnize-taxes', 'detailed', 'elegant', 'elegant_modified
     vatDisplayCheck($compiler->compileString($source) !== '', $name.' compiles');
     vatDisplayCheck(str_contains($source, "partial.vat_summary") || str_contains($source, 'taxable_amount_label'),
         $name.' includes the fiscal tax summary');
+    $taxPosition = strpos($source, $name === 'english-arabic' ? 'taxable_amount_label' : 'partial.vat_summary');
+    vatDisplayCheck($taxPosition < strpos($source, '$receipt_details->total_label'),
+        $name.' shows taxable amount and VAT before the total');
 }
 echo "PASS: {$checks} receipt VAT display checks\n";

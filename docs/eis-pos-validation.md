@@ -74,15 +74,15 @@ replaced by the six-column format. Invoice-level tax and total sections remain.
 Hidden-price receipts omit the monetary columns.
 Browser receipts add Taxable Amount (the sum of VAT-exclusive amounts for
 rates greater than zero, excluding zero-rated and exempt amounts) and
-Total VAT with the standard percentage from the original terminal's EIS
+VAT with the standard percentage from the original terminal's EIS
 configuration. Fiscal VAT uses the saved submitted invoice summary, not an
 estimate from the displayed unit prices. Fiscal Taxable Amount sums
 `invoiceSummary.taxBreakDown[].taxableAmount` only where `rateId` matches a
 positive rate in the terminal configuration; missing breakdowns or unknown
 rates must be synchronized/refreshed before printing.
 Fiscal receipts display Subtotal as fiscal invoice total less VAT (including
-zero-rated and exempt bases), and label the unchanged gross total as Total
-including VAT. Taxable Amount remains limited to positive-rate bases.
+zero-rated and exempt bases), followed by Taxable Amount, VAT, Total, and
+payments. Total remains VAT-inclusive; Taxable Amount includes only positive-rate bases.
 The heading shows VAT Registered
 above the receipt title only when `taxpayerConfiguration.isVATRegistered`
 in that terminal configuration is true (or the supported integer `1`).

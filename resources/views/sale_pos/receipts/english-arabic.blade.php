@@ -193,17 +193,6 @@
                                     <td class="print-red" style="text-align: center;">{{$receipt_details->subtotal}}</td>
                                     <td style="font-weight: bold; direction: rtl; text-align: right;">المجموع الفرعي:</td>
                                 </tr>
-								<tr class="bg-net-amount">
-                                    <td style=" font-weight: bold; text-align: right;">
-                                        {!! $receipt_details->total_label !!}
-                                    </td>
-                                    <td style=" text-align: center;">
-                                        {{ $receipt_details->total }}
-                                    </td>
-                                    <td style=" font-weight: bold; direction: rtl; text-align: right;">
-                                        المبلغ الصافي (مجموع كل شيء):
-                                    </td>
-                                </tr>
                                 @if(empty($receipt_details->hide_price))
                                     <tr>
                                         <td style="font-weight: bold; text-align: right;">{{ $receipt_details->taxable_amount_label }}</td>
@@ -216,6 +205,11 @@
                                         <td style="font-weight: bold; direction: rtl; text-align: right;">ضريبة القيمة المضافة:</td>
                                     </tr>
                                 @endif
+                                <tr class="bg-net-amount">
+                                    <td style="font-weight: bold; text-align: right;">{!! $receipt_details->total_label !!}</td>
+                                    <td style="text-align: center;">{{ $receipt_details->total }}</td>
+                                    <td style="font-weight: bold; direction: rtl; text-align: right;">المبلغ الصافي (مجموع كل شيء):</td>
+                                </tr>
                                 @if(!empty($receipt_details->payments))
                                     @foreach($receipt_details->payments as $payment)
                                         <tr>

@@ -1097,8 +1097,8 @@ class TransactionUtil extends Util
         ];
         $output['vat_registered'] = in_array($eis_configuration['taxpayerConfiguration']['isVATRegistered'] ?? null, [true, 1], true);
         $output['vat_registered_label'] = __('sale.vat_registered');
-        $output['taxable_amount_label'] = __('sale.taxable_amount');
-        $output['vat_total_label'] = __('sale.total_vat');
+        $output['taxable_amount_label'] = __('sale.taxable_amount').':';
+        $output['vat_total_label'] = __('sale.vat');
 
         //Display name
         $output['display_name'] = $output['business_name'];
@@ -1603,6 +1603,7 @@ class TransactionUtil extends Util
                 $output['vat_total_label'] .= ' ('.$fiscalTax['standard_rate'].'%)';
             }
         }
+        $output['vat_total_label'] .= ':';
 
         if ($transaction->tax_amount != 0 && $tax->is_tax_group) {
             $transaction_group_tax_details = $this->groupTaxDetails($tax, $transaction->tax_amount);
@@ -1638,7 +1639,7 @@ class TransactionUtil extends Util
 
         $output['total_unformatted'] = $transaction->final_total;
         if ($is_eis_receipt) {
-            $output['total_label'] = __('sale.total_including_vat').':';
+            $output['total_label'] = __('sale.total').':';
         }
 
         //Paid & Amount due, only if final

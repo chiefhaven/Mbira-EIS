@@ -92,5 +92,6 @@ return [
     'vat_registered' => 'VAT Registered',
     'taxable_amount' => 'Taxable Amount',
     'total_vat' => 'Total VAT',
+    'vat' => 'VAT',
     'total_including_vat' => 'Total including VAT',
 ];

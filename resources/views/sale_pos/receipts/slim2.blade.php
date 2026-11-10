@@ -480,6 +480,7 @@
 				</div>
 			@endif
 
+			@include('sale_pos.receipts.partial.vat_summary')
 			<div class="flex-box">
 				<p class="width-50 text-left">
 					{!! $receipt_details->total_label !!}
@@ -488,7 +489,6 @@
 					{{$receipt_details->total}}
 				</p>
 			</div>
-			@include('sale_pos.receipts.partial.vat_summary')
 			@if(!empty($receipt_details->total_in_words))
 				<p colspan="2" class="text-right mb-0">
 					<small>
