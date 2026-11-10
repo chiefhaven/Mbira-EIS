@@ -21,6 +21,7 @@ $capsule->setAsGlobal();
 $app->instance('db', $capsule->getDatabaseManager());
 $capsule->schema()->create('eis_configurations', function (Blueprint $t) {
     $t->integer('id'); $t->integer('business_id'); $t->integer('location_id'); $t->integer('eis_setting_id');
+    $t->text('raw_response')->nullable();
 });
 $capsule->schema()->create('eis_terminal_configurations', function (Blueprint $t) {
     $t->integer('configuration_id'); $t->string('trading_name'); $t->text('address_lines')->nullable();

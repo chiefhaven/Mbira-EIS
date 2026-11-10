@@ -66,12 +66,20 @@ Run `php tests/Standalone/eis_receipt_address_checks.php` for isolated checks.
 ## Product discounts
 
 Browser and thermal sale receipts show `# | Product | Quantity | UnitPrice |
-Discount | Subtotal`. UnitPrice is tax-inclusive and before the product discount,
+Discount | Subtotal`. Browser receipt UnitPrice is VAT-exclusive and before the product discount,
 Discount is the monetary discount for the line quantity, and Subtotal remains
 the saved discounted line total. All eight sale receipt layouts share this
 product table; layout-specific tax and duplicated discounted-price columns are
 replaced by the six-column format. Invoice-level tax and total sections remain.
 Hidden-price receipts omit the monetary columns.
+Browser receipts add Taxable Amount (fiscal invoice total less VAT) and
+Total VAT with the standard percentage from the original terminal's EIS
+configuration. Fiscal VAT uses the saved submitted invoice summary, not an
+estimate from the displayed unit prices. The heading shows VAT Registered
+only when that terminal configuration confirms VAT registration. Sale prices,
+discounts, gross subtotals and payments are not rewritten.
+The external ESC/POS print-server implementation is not present in this
+checkout; deploy matching print-server changes separately for raw thermal output.
 Identical product, variation-group and variation names are printed only once;
 distinct variation names remain visible on browser and thermal receipts.
 

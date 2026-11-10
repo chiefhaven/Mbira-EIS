@@ -90,23 +90,23 @@ foreach (['fixed', 'percentage', null] as $type) {
         receiptDiscountCheck($headers === ['#', 'Product', 'Quantity', 'UnitPrice', 'Discount', 'Subtotal'],
             'Headers must match the requested six-column order');
         $cells = array_map(fn ($node) => trim($node->textContent), iterator_to_array($xpath->query('//tbody/tr[1]/td')));
-        receiptDiscountCheck(count($cells) === 6 && $cells[0] === '1' && $cells[3] === $receiptLine['unit_price_before_discount_inc_tax']
+        receiptDiscountCheck(count($cells) === 6 && $cells[0] === '1' && $cells[3] === $receiptLine['unit_price_before_discount']
             && str_starts_with($cells[4], $receiptLine['total_line_discount']) && $cells[5] === $receiptLine['line_total'],
-            'Rows must display pre-discount price, total discount and saved subtotal in the correct columns');
+            'Rows must display VAT-exclusive pre-discount price, total discount and saved subtotal in the correct columns');
         $printedLines[] = $receiptLine;
     }
 }
 $escapedLine = $printedLines[0];
-$escapedLine['unit_price_before_discount_inc_tax'] = '<script>bad</script>';
+$escapedLine['unit_price_before_discount'] = '<script>bad</script>';
 $escapedReceipt = clone $receipt_details;
 $escapedReceipt->table_unit_price_label = '<b>Price</b>';
 $html = renderDiscountPrice($compiler, $escapedLine, $escapedReceipt);
 receiptDiscountCheck(!str_contains($html, '<script>') && str_contains($html, '&lt;b&gt;Price'), 'Price and label must be escaped');
 receiptDiscountCheck(str_contains(renderDiscountPrice($compiler, [], $receipt_details), 'colspan="6"'), 'Empty receipts must span all six columns');
 $legacyLine = $printedLines[0];
-unset($legacyLine['unit_price_before_discount_inc_tax'], $legacyLine['total_line_discount']);
+unset($legacyLine['unit_price_before_discount'], $legacyLine['total_line_discount']);
 $html = renderDiscountPrice($compiler, $legacyLine, $receipt_details);
-receiptDiscountCheck(str_contains($html, $legacyLine['unit_price_inc_tax']) && str_contains($html, '0.00'),
+receiptDiscountCheck(str_contains($html, $legacyLine['unit_price_exc_tax']) && str_contains($html, '0.00'),
     'Return and legacy line data must retain the available price and zero discount');
 $utilSource = file_get_contents($root.'\app\Utils\TransactionUtil.php');
 receiptDiscountCheck(strpos($utilSource, "'receipt_item_discount_label' =>") < strpos($utilSource, '//Display name'),
@@ -117,7 +117,8 @@ $html = renderDiscountPrice($compiler, $printedLines[0], $hidden);
 receiptDiscountCheck(!str_contains($html, 'UnitPrice') && !str_contains($html, 'Discount') && !str_contains($html, 'Subtotal')
     && !str_contains($html, $printedLines[0]['unit_price_before_discount_inc_tax']), 'Hidden-price receipts must not expose any monetary columns');
 $withModifier = $printedLines[0];
-$withModifier['modifiers'] = [['name' => 'Extra', 'quantity' => '1', 'units' => 'pc', 'unit_price_inc_tax' => '5.00', 'line_total' => '5.00']];
+$withModifier['modifiers'] = [['name' => 'Extra', 'quantity' => '1', 'units' => 'pc', 'unit_price_inc_tax' => '5.00',
+    'unit_price_exc_tax' => '4.26', 'line_total' => '5.00']];
 $dom = new DOMDocument();
 $dom->loadHTML(renderDiscountPrice($compiler, $withModifier, $receipt_details));
 $xpath = new DOMXPath($dom);
