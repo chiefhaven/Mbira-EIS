@@ -2857,6 +2857,7 @@ class TransactionUtil extends Util
         }
 
         $total_tax = 0.0;
+        $total_eis_sales = 0.0;
         foreach ($query->cursor() as $sale) {
             if (!is_string($sale->submitted_at)
                 || !preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(?:\.\d+)?$/', $sale->submitted_at)) {
@@ -2878,9 +2879,16 @@ class TransactionUtil extends Util
                 throw new \UnexpectedValueException('A submitted EIS sale has incomplete fiscal VAT data. Synchronize its invoice before viewing fiscal VAT totals.');
             }
             $total_tax += (float) $vat;
+            $invoiceTotal = $invoice['invoiceSummary']['invoiceTotal'] ?? null;
+            if (!is_numeric($invoiceTotal) || !is_finite((float) $invoiceTotal) || $invoiceTotal < 0) {
+                Log::error('Submitted EIS invoice has invalid sales reporting data', ['eis_sale_id' => $sale->id]);
+                throw new \UnexpectedValueException('A submitted EIS invoice has incomplete sales total data. Synchronize its invoice before viewing dashboard totals.');
+            }
+            $total_eis_sales += (float) $invoiceTotal;
         }
         $total_tax = round($total_tax, 2);
-        return ['header_tax' => 0, 'item_tax' => $total_tax, 'total_tax' => $total_tax];
+        return ['header_tax' => 0, 'item_tax' => $total_tax, 'total_tax' => $total_tax,
+            'total_eis_sales' => round($total_eis_sales, 2)];
     }
 
     public function getTotalLedgerDiscount($business_id, $start_date = null, $end_date = null)

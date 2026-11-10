@@ -63,7 +63,8 @@ function fiscalFixture(int $id, string $date, float $vat, array $changes = [], ?
         'type' => 'sell', 'status' => 'final', 'payment_status' => 'paid', 'transaction_date' => '2026-11-08 10:00:00'],
         $changes);
     $capsule->table('transactions')->insert($transaction);
-    $invoice = ['invoiceHeader' => ['invoiceDateTime' => $date], 'invoiceSummary' => ['totalVAT' => $vat]];
+    $invoice = ['invoiceHeader' => ['invoiceDateTime' => $date],
+        'invoiceSummary' => ['totalVAT' => $vat, 'invoiceTotal' => $vat * 5]];
     $capsule->table('eis_sales')->insert(['id' => $id, 'transaction_id' => $id, 'business_id' => $transaction['business_id'],
         'location_id' => $transaction['location_id'], 'status' => 'submitted', 'request_payload' => json_encode($invoice),
         'submitted_at' => '2026-11-08 10:00:00',
@@ -102,7 +103,8 @@ fiscalFixture(26, '2026-11-08T10:00:00', 999);
 $capsule->table('eis_sales')->where('id', 26)->update(['location_id' => 14]);
 fiscalVatCheck($util->getVatTotals(6, '2026-11-08', '2026-11-08', 13, null, [13])['total_tax'] === 15683.0,
     'Only submitted, paid, final sales within the same business/location may contribute');
-$remote = ['invoiceHeader' => ['invoiceDateTime' => '2026-11-07T23:00:00'], 'invoiceSummary' => ['totalVAT' => 20]];
+$remote = ['invoiceHeader' => ['invoiceDateTime' => '2026-11-07T23:00:00'],
+    'invoiceSummary' => ['totalVAT' => 20, 'invoiceTotal' => 100]];
 fiscalFixture(27, '2026-11-08T10:00:00+02:00', 999, [], ['data' => $remote]);
 fiscalFixture(28, '2026-11-08T10:00:00+02:00', 999, [], ['data' => ['data' => $remote]]);
 fiscalVatCheck($util->getVatTotals(6, '2026-11-07', '2026-11-07', 13)['total_tax'] === 0.0,
@@ -122,7 +124,7 @@ try {
 $capsule->table('eis_sales')->where('id', 28)->update(['submitted_at' => '2026-11-08 23:59:59']);
 $note = ['sale_id' => 1, 'business_id' => 6, 'location_id' => 13, 'status' => 'accepted',
     'submitted_at' => '2026-11-08 12:00:00',
-    'payload' => json_encode(['invoiceHeader' => [], 'invoiceSummary' => ['totalVAT' => 1265.96]]),
+    'payload' => json_encode(['invoiceHeader' => [], 'invoiceSummary' => ['totalVAT' => 1265.96, 'invoiceTotal' => 8500]]),
     'response' => json_encode(['data' => ['totalVat' => 1265.96]])];
 $capsule->table('eis_sale_adjustments')->insert($note);
 fiscalVatCheck($util->getVatTotals(6, '2026-11-08', '2026-11-08', 13)['total_tax'] === 16988.96,
@@ -140,6 +142,21 @@ fiscalVatCheck($util->getVatTotals(6, null, null, 13, 99, [13])['total_tax'] ===
     'Creator restrictions apply to fiscal notes as well as sales');
 fiscalVatCheck($util->getVatTotals(6, null, null, null, null, [])['total_tax'] === 0.0,
     'Location restrictions apply to fiscal notes as well as sales');
+fiscalVatCheck($util->getVatTotals(6, '2026-11-08', '2026-11-08', 13)['total_eis_sales'] === 87115.0,
+    'Total EIS Sales adds submitted fiscal invoice totals and accepted notes on their submission dates');
+fiscalVatCheck($util->getVatTotals(6, '2026-11-09', '2026-11-09', 13)['total_eis_sales'] === 18617.1,
+    'EIS sales totals use submission date rather than original transaction date');
+fiscalVatCheck($util->getVatTotals(6, null, null, null, null, [])['total_eis_sales'] === 0.0,
+    'EIS sales totals respect permitted locations');
+$capsule->table('eis_sale_adjustments')->where('id', 1)->update([
+    'payload' => json_encode(['invoiceHeader' => [], 'invoiceSummary' => ['totalVAT' => 1265.96]])]);
+try {
+    $util->getVatTotals(6, '2026-11-08', '2026-11-08', 13);
+    throw new RuntimeException('Missing fiscal sales totals must not silently become zero');
+} catch (UnexpectedValueException $e) {
+    fiscalVatCheck(str_contains($e->getMessage(), 'sales total'), 'Invalid fiscal sales totals raise an actionable error');
+}
+$capsule->table('eis_sale_adjustments')->where('id', 1)->update(['payload' => $note['payload']]);
 $capsule->table('eis_sales')->where('id', 27)->update(['request_payload' => null, 'response_payload' => null]);
 try {
     $util->getVatTotals(6, '2026-11-08', '2026-11-08', 13);

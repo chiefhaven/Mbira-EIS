@@ -175,15 +175,12 @@ function update_statistics(start, end) {
         location_id = $('#dashboard_location').val();
     }
     var data = { start: start, end: end, location_id: location_id };
-    //get purchase details
     var loader = '<i class="fas fa-sync fa-spin fa-fw margin-bottom"></i>';
-    $('.total_purchase').html(loader);
-    $('.purchase_due').html(loader);
+    $('.total_eis_sales').html(loader);
     $('.total_sell').html(loader);
     $('.total_vat').html(loader);
     $('.invoice_due').html(loader);
     $('.total_expense').html(loader);
-    $('.total_purchase_return').html(loader);
     $('.total_sell_return').html(loader);
     $('.net').html(loader);
     $.ajax({
@@ -192,9 +189,7 @@ function update_statistics(start, end) {
         dataType: 'json',
         data: data,
         success: function(data) {
-            //purchase details
-            $('.total_purchase').html(__currency_trans_from_en(data.total_purchase, true));
-            $('.purchase_due').html(__currency_trans_from_en(data.purchase_due, true));
+            $('.total_eis_sales').html(__currency_trans_from_en(data.total_eis_sales, true));
 
             //sell details
             $('.total_sell').html(__currency_trans_from_en(data.total_sell, true));
@@ -205,14 +200,10 @@ function update_statistics(start, end) {
 
             //expense details
             $('.total_expense').html(__currency_trans_from_en(data.total_expense, true));
-            var total_purchase_return = data.total_purchase_return - data.total_purchase_return_paid;
-            $('.total_purchase_return').html(__currency_trans_from_en(total_purchase_return, true));
             var total_sell_return_due = data.total_sell_return - data.total_sell_return_paid;
             $('.total_sell_return').html(__currency_trans_from_en(total_sell_return_due, true));
             $('.total_sr').html(__currency_trans_from_en(data.total_sell_return, true));
             $('.total_srp').html(__currency_trans_from_en(data.total_sell_return_paid, true));
-            $('.total_pr').html(__currency_trans_from_en(data.total_purchase_return, true));
-            $('.total_prp').html(__currency_trans_from_en(data.total_purchase_return_paid, true));
             $('.net').html(__currency_trans_from_en(data.net, true));
 
             // assign tooltip total_sell_return 
@@ -221,17 +212,10 @@ function update_statistics(start, end) {
             
             var newContent = "<p class='mb-0 text-muted fs-10 mt-5'>" + splitlang[0] + ": <span class=''>" + __currency_trans_from_en(data.total_sell_return, true) + "</span><br>" + splitlang[1] + ": <span class=''>" + __currency_trans_from_en(data.total_sell_return_paid, true) + "</span></p>";
             $('#total_srp').attr('data-content', newContent)
-            // assign tooltip total_purchase_return 
-            var lang = $('#total_prp').data('value');
-            var splitlang = lang.split('-');
-            
-            var newContent = "<p class='mb-0 text-muted fs-10 mt-5'>" + splitlang[0] + ": <span class=''>" + __currency_trans_from_en(data.total_purchase_return, true) + "</span><br>" + splitlang[1] + ": <span class=''>" + __currency_trans_from_en(data.total_purchase_return_paid, true) + "</span></p>";
-            
-            $('#total_prp').attr('data-content', newContent);
 
         },
         error: function(xhr) {
-            $('.total_purchase, .purchase_due, .total_sell, .total_vat, .invoice_due, .total_expense, .total_purchase_return, .total_sell_return, .net').text('--');
+            $('.total_eis_sales, .total_sell, .total_vat, .invoice_due, .total_expense, .total_sell_return, .net').text('--');
             toastr.error(xhr.responseJSON && xhr.responseJSON.message
                 ? xhr.responseJSON.message : 'Unable to load dashboard totals.');
         },

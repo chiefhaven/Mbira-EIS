@@ -26,6 +26,12 @@ Settings > MRA EIS > EIS Sales. Rollback sends no cancellation.
 
 ## Dashboard fiscal VAT
 
+The dashboard replaces all three purchase summary cards (purchase total, due,
+and returns) with Total EIS Sales. It sums fiscal `invoiceSummary.invoiceTotal`
+for the same submitted sales and accepted notes and uses the same submission-date,
+business, location and creator filters as Total VAT. Pending cancellations are
+not deducted. Other ERP sales and expense cards remain unchanged.
+
 Home dashboard VAT matches the portal gross submission total: it adds
 `invoiceSummary.totalVAT` from submitted, fully paid EIS sales and accepted
 credit/debit notes rather than summing POS per-unit tax. This is not a net VAT
