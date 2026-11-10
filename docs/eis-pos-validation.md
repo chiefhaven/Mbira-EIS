@@ -1,5 +1,29 @@
 # EIS buyer and relief validation
 
+All Sales (`/sells`) displays EIS submission status separately from payment and
+void status: Submitted, Pending, Failed, or Not submitted when no tracking exists.
+The column reflects saved tracking; it does not initiate fiscal submissions.
+
+## Fiscal sales returns
+
+Saving a new full return of a submitted EIS sale prepares a receipt cancellation
+atomically with the local return and sends it automatically after commit (web and
+Connector API). A full return must match every original quantity and the original
+invoice total. Cancellation requires the existing `sell.delete` or
+`business_settings.access` permission in addition to return/location access.
+The reason identifies the local return and original sale.
+
+Partial returns keep the prepared credit/debit-note review workflow. A full
+return is blocked if a fiscal note chain already exists or a historical local
+return has not been fiscally reconciled; review these with MRA rather than
+crediting and cancelling the same invoice.
+
+Cancellation acceptance means the request was received, not that MRA approved
+the void. The return already updates local stock/customer credit. Rejected,
+unsent, or uncertain cancellations are reported separately after saving, and
+uncertain outcomes are never automatically resent. Review saved requests in
+Settings > MRA EIS > EIS Sales. Rollback sends no cancellation.
+
 ## Dashboard fiscal VAT
 
 Home dashboard VAT uses `invoiceSummary.totalVAT` from submitted, fully paid
@@ -160,6 +184,34 @@ ending either at the host or at `/api/v1`. HTTP failures, unavailable EIS,
 malformed envelopes, response identity mismatches, and non-boolean/false validity
 flags block saving. No validation credentials, codes, certificates or response
 bodies are logged by the new services.
+
+POS and classic sales (`/sells/create` and classic sale edits) share the same
+relief checkbox and VAT5 fields. Classic sales submit `is_relief=0` when unchecked
+and `is_relief=1` when checked through the POS store/update controller. Relief is
+independent of the export setting; sales orders do not show these controls.
+Editing a relief sale restores its saved flag and certificate fields.
+Sales navigation matches the mbira-upgrade project: All Sales and Add Sale are
+available alongside POS, drafts, quotations, returns, shipments, discounts,
+subscriptions and sales imports, subject to the existing module and permission
+checks. Sales Order appears when enabled in POS settings for authorized users,
+including users with only sales-order permissions. Sales-order creation highlights
+Sales Order rather than Add Sale.
+Classic sales also always show the separate Is Export checkbox, regardless of
+the business's Enable Export setting. The official
+[EIS InvoiceHeader schema](https://eis-api.mra.mw/swagger/index.html) defines only
+the boolean `isExport`; no additional export-specific fields are defined.
+Classic sale forms therefore omit the six legacy generic export fields.
+The saved sale flag is sent as `invoiceHeader.isExport` rather than a hardcoded
+false. Edits restore the saved flag, and omitted export metadata is preserved
+(including legacy custom-field data). Explicitly unchecking sends `is_export=0`.
+Export does not automatically alter ERP tax calculations.
+Sales orders continue to omit export controls.
+The Enable Export checkbox is visible under Business Settings > Business;
+it still controls the export defaults shown on customer create/edit forms.
+Business registration defaults Enable Export to checked. The first successful
+EIS terminal activation also enables it for an existing business, preserving
+other common settings. Subsequent activations do not overwrite a manual change,
+including when earlier terminals have been soft-deleted.
 
 The relief checkbox reveals project number, certificate number, and positive
 quantity inputs. Successful validation stores those details as JSON on the sale;

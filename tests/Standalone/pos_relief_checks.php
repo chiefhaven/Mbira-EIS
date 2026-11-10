@@ -84,6 +84,24 @@ foreach ([[], ['is_relief' => '0'], ['is_relief' => '1']] as $flag) {
     }
 }
 
+foreach ([[], ['is_export' => '0'], ['is_export' => '1']] as $flag) {
+    $transaction = $util->createSellTransaction(7, $input + $flag, $totals, 1, false)->fresh();
+    $expected = ($flag['is_export'] ?? '0') === '1';
+    $header = $headerMethod->invoke($transformer, $transaction, new EisSetting(), 'TEST-1', '00', []);
+    verifyRelief((bool) $transaction->is_export === $expected && $header['isExport'] === $expected,
+        'Persist export flag and send an exact EIS boolean');
+    $transaction->export_custom_fields_info = ['export_custom_field_1' => 'Historical value'];
+    $transaction->save();
+    foreach (['1', null, '0'] as $value) {
+        $change = $value === null ? [] : ['is_export' => $value];
+        $transaction = $util->updateSellTransaction($transaction, 7, $input + $change, $totals, 1, false)->fresh();
+        $header = $headerMethod->invoke($transformer, $transaction, new EisSetting(), 'TEST-1', '00', []);
+        verifyRelief($header['isExport'] === ($value !== '0'), 'Export edit, omitted flag preservation, and uncheck');
+        verifyRelief($transaction->export_custom_fields_info === ['export_custom_field_1' => 'Historical value'],
+            'Removing legacy fields from forms does not erase historical data');
+    }
+}
+
 $factory = new Factory($container->make('translator'), $container);
 Request::macro('validate', function ($rules) use ($factory) {
     return $factory->make($this->all(), $rules)->validate();
@@ -95,13 +113,15 @@ $auth->shouldReceive('user')->andReturn($user);
 $container->instance(Illuminate\Contracts\Auth\Factory::class, $auth);
 $controller = (new ReflectionClass(SellPosController::class))->newInstanceWithoutConstructor();
 foreach (['store', 'update'] as $method) {
-    foreach (['invalid', ['1'], null, '2'] as $value) {
-        try {
-            $request = Request::create('/pos', 'POST', ['is_relief' => $value]);
-            $method === 'store' ? $controller->store($request) : $controller->update($request, 1);
-            throw new RuntimeException('Invalid relief input accepted');
-        } catch (ValidationException $e) {
-            verifyRelief(isset($e->errors()['is_relief']), 'Controller rejects invalid boolean');
+    foreach (['is_relief', 'is_export'] as $field) {
+        foreach (['invalid', ['1'], null, '2'] as $value) {
+            try {
+                $request = Request::create('/pos', 'POST', [$field => $value]);
+                $method === 'store' ? $controller->store($request) : $controller->update($request, 1);
+                throw new RuntimeException('Invalid '.$field.' input accepted');
+            } catch (ValidationException $e) {
+                verifyRelief(isset($e->errors()[$field]), 'Controller rejects invalid '.$field.' boolean');
+            }
         }
     }
 }
@@ -132,6 +152,26 @@ foreach (['create', 'edit'] as $view) {
 $source = file_get_contents(dirname(__DIR__, 2).'/resources/views/sale_pos/partials/pos_form_totals.blade.php');
 token_get_all($blade->compileString($source), TOKEN_PARSE);
 verifyRelief(str_contains($source, "'sale_pos.partials.relief_checkbox'"), 'Totals include relief checkbox');
+foreach (['create', 'edit'] as $view) {
+    $source = file_get_contents(dirname(__DIR__, 2).'/resources/views/sell/'.$view.'.blade.php');
+    token_get_all($blade->compileString($source), TOKEN_PARSE);
+    foreach (['relief_checkbox', 'vat5_fields'] as $partial) {
+        $position = strpos($source, "@include('sale_pos.partials.{$partial}')");
+        verifyRelief($position !== false && $position > strpos($source, 'Form::open(')
+            && $position < strpos($source, 'Form::close()'), 'Classic '.$view.' includes '.$partial.' inside the submitted form');
+    }
+    verifyRelief(str_contains($source, "asset('js/pos.js"), 'Classic '.$view.' loads the shared relief toggle handler');
+    verifyRelief(! str_contains($source, "['is_enabled_export']"), 'Classic '.$view.' export controls do not depend on the business export setting');
+    $exportPosition = strpos($source, 'name="is_export"');
+    verifyRelief($exportPosition !== false && $exportPosition > strpos($source, 'Form::open(')
+        && $exportPosition < strpos($source, 'Form::close()'), 'Classic '.$view.' submits the export checkbox');
+    verifyRelief(! str_contains($source, 'export_custom_fields_info'), 'Classic '.$view.' omits non-EIS export fields');
+    $exportCheckbox = [];
+    preg_match_all('/<input[^>]+name="is_export"[^>]*>/', $source, $exportCheckbox);
+    verifyRelief(count($exportCheckbox[0]) === 2
+        && str_contains($exportCheckbox[0][0], 'value="0"')
+        && str_contains($exportCheckbox[0][1], 'value="1"'), 'Classic '.$view.' sends explicit unchecked and checked export booleans');
+}
 $migration->down();
 verifyRelief(! $schema->hasColumn('transactions', 'is_relief'), 'Migration rollback');
 Mockery::close();

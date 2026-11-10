@@ -698,25 +698,23 @@
 				</div>
 		    </div>
 			@endcomponent
-			@if(!empty($common_settings['is_enabled_export']) && $transaction->type != 'sales_order')
+			@if($transaction->type != 'sales_order')
+				@component('components.widget', ['class' => 'box-solid', 'title' => __('sale.is_relief')])
+					<div class="col-md-12 mb-12">
+						@include('sale_pos.partials.relief_checkbox')
+						@include('sale_pos.partials.vat5_fields')
+					</div>
+				@endcomponent
+			@endif
+			@if($transaction->type != 'sales_order')
 				@component('components.widget', ['class' => 'box-solid', 'title' => __('lang_v1.export')])
 					<div class="col-md-12 mb-12">
 		                <div class="form-check">
-		                    <input type="checkbox" name="is_export" class="form-check-input" id="is_export" @if(!empty($transaction->is_export)) checked @endif>
+		                    <input type="hidden" name="is_export" value="0">
+		                    <input type="checkbox" name="is_export" value="1" class="form-check-input" id="is_export" @if(!empty($transaction->is_export)) checked @endif>
 		                    <label class="form-check-label" for="is_export">@lang('lang_v1.is_export')</label>
 		                </div>
 		            </div>
-			        @php
-	                	$i = 1;
-		            @endphp
-		            @for($i; $i <= 6 ; $i++)
-		                <div class="col-md-4 export_div" @if(empty($transaction->is_export)) style="display: none;" @endif>
-		                    <div class="form-group">
-		                        {!! Form::label('export_custom_field_'.$i, __('lang_v1.export_custom_field'.$i).':') !!}
-		                        {!! Form::text('export_custom_fields_info['.'export_custom_field_'.$i.']', !empty($transaction->export_custom_fields_info['export_custom_field_'.$i]) ? $transaction->export_custom_fields_info['export_custom_field_'.$i] : null, ['class' => 'form-control','placeholder' => __('lang_v1.export_custom_field'.$i), 'id' => 'export_custom_field_'.$i]); !!}
-		                    </div>
-		                </div>
-		            @endfor
 				@endcomponent
 			@endif
 		</div>
@@ -878,14 +876,6 @@
 		        browseLabel: LANG.file_browse_label,
 		        removeLabel: LANG.remove,
 		    });
-
-		    $('#is_export').on('change', function () {
-	            if ($(this).is(':checked')) {
-	                $('div.export_div').show();
-	            } else {
-	                $('div.export_div').hide();
-	            }
-	        });
 
 	        $('#status').change(function(){
     			if ($(this).val() == 'final') {

@@ -366,6 +366,7 @@ class SellPosController extends Controller
         }
 
         $request->validate([
+            'is_export' => 'sometimes|boolean',
             'is_relief' => 'sometimes|boolean',
             'buyerAuthorizationCode' => 'nullable|string|max:1000',
         ]);
@@ -1273,6 +1274,7 @@ class SellPosController extends Controller
         }
 
         $request->validate([
+            'is_export' => 'sometimes|boolean',
             'is_relief' => 'sometimes|boolean',
             'buyerAuthorizationCode' => 'nullable|string|max:1000',
         ]);

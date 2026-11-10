@@ -398,10 +398,11 @@ class SellReturnController extends Controller
                 DB::commit();
 
                 $output = ['success' => 1,
-                    'msg' => __('lang_v1.success').(DB::getSchemaBuilder()->hasTable('eis_sale_adjustments')
+                    'msg' => __('lang_v1.success').' '.(app(\Modules\EIS\Services\Sales\SaleAdjustmentService::class)->cancellationMessage($sell_return)
+                        ?? (DB::getSchemaBuilder()->hasTable('eis_sale_adjustments')
                         && DB::table('eis_sale_adjustments')->where('business_id', $business_id)
                             ->where('return_id', $sell_return->id)->where('status', 'prepared')->exists()
-                        ? ' EIS adjustment saved for review in Settings > MRA EIS > EIS Sales; not sent yet.' : ''),
+                        ? 'EIS adjustment saved for review in Settings > MRA EIS > EIS Sales; not sent yet.' : '')),
                     'receipt' => $receipt,
                 ];
             }

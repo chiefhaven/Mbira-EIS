@@ -181,6 +181,10 @@ class BusinessUtil extends Util
 
         //Disable inline tax editing
         $business_details['enable_inline_tax'] = 0;
+        $business_details['common_settings'] = array_replace(
+            $business_details['common_settings'] ?? [],
+            ['is_enabled_export' => 1]
+        );
 
         $custom_labels = ! empty($business_details['custom_labels'])
             ? json_decode($business_details['custom_labels'], true, 512, JSON_THROW_ON_ERROR)

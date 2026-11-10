@@ -498,7 +498,11 @@ class EisTerminalActivationService
             }
             return \Illuminate\Support\Facades\Cache::lock('eis-activate-'.hash('sha256', $identity), 60)
                 ->block(10, fn () => DB::transaction(function () use ($businessId, $response, $activationCode, $environment, $activatedBy, $locationId) {
-                DB::table('business')->where('id', $businessId)->lockForUpdate()->first();
+                $business = \App\Business::where('id', $businessId)->lockForUpdate()->first();
+                if (! $business) {
+                    throw new \InvalidArgumentException('Business not found for terminal activation.');
+                }
+                $isFirstTerminal = ! EisSetting::withTrashed()->where('business_id', $businessId)->exists();
 
                 // Get activated terminal data
                 $activatedTerminal = $response->data->activatedTerminal ?? null;
@@ -571,8 +575,17 @@ class EisTerminalActivationService
                 $this->claimLocationDefault($businessId, (int) $location->id, (int) $setting->id);
                 // EIS prices are tax-inclusive, so the business must show inline tax on purchases and sales.
                 DB::table('business')->where('id', $businessId)->update(['enable_inline_tax' => 1]);
+                if ($isFirstTerminal) {
+                    $commonSettings = $business->common_settings ?? [];
+                    $commonSettings['is_enabled_export'] = 1;
+                    $business->common_settings = $commonSettings;
+                    $business->save();
+                }
                 if (app()->bound('session') && (int) session('business.id') === $businessId) {
                     session(['business.enable_inline_tax' => 1]);
+                    if ($isFirstTerminal) {
+                        session(['business.common_settings' => $commonSettings]);
+                    }
                 }
 
                 // Save or update main configuration

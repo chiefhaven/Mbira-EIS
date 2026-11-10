@@ -28,7 +28,21 @@ $app->instance('cache', new class {
     public function __construct() { $this->store = new Illuminate\Cache\ArrayStore(); }
     public function lock($name, $seconds) { return new Illuminate\Cache\ArrayLock($this->store, $name, $seconds); }
 });
-$schema->create('business', function (Blueprint $table) { $table->increments('id'); $table->string('name'); $table->string('tax_label_1')->nullable(); $table->string('tax_number_1')->nullable(); $table->boolean('enable_inline_tax')->default(0); });
+$schema->create('business', function (Blueprint $table) {
+    $table->increments('id'); $table->string('name'); $table->string('tax_label_1')->nullable(); $table->string('tax_number_1')->nullable(); $table->boolean('enable_inline_tax')->default(0);
+    $table->text('common_settings')->nullable();
+    foreach (['sell_price_tax', 'default_profit_percent', 'keyboard_shortcuts', 'ref_no_prefixes', 'custom_labels'] as $column) {
+        $table->text($column)->nullable();
+    }
+    $table->timestamps();
+});
+DB::beginTransaction();
+$registered = (new App\Utils\BusinessUtil())->createNewBusiness([
+    'name' => 'Registration fixture', 'common_settings' => ['is_enabled_export' => 0, 'fixture_option' => 'keep'],
+]);
+locationCheck($registered->fresh()->common_settings === ['is_enabled_export' => 1, 'fixture_option' => 'keep'],
+    'Business registration enables export by default without losing other common settings');
+DB::rollBack();
 DB::table('business')->insert([['id' => 1, 'name' => 'Business one'], ['id' => 2, 'name' => 'Business two']]);
 $schema->create('products', function (Blueprint $table) {
     $table->increments('id'); $table->integer('business_id');
@@ -299,11 +313,17 @@ locationCheck($matchingName['success']
     'Matching identity permits another site and ignores trading-name casing and surrounding whitespace');
 DB::rollBack();
 DB::beginTransaction();
-DB::table('business')->insert(['id' => 4, 'name' => 'Initial ERP Name']);
+DB::table('business')->insert(['id' => 4, 'name' => 'Initial ERP Name',
+    'common_settings' => json_encode(['is_enabled_export' => 0, 'fixture_option' => 'keep'])]);
 $first = $process->invoke($activation, 4,
     activationResponse('FIRST-IDENTITY', 'FIRST-SITE', 1, 'First EIS Identity'), 'CODE', [], null);
 locationCheck($first['success'] && DB::table('business')->where('id', 4)->value('name') === 'First EIS Identity',
     'First terminal establishes identity without requiring the initial ERP name to match');
+locationCheck(App\Business::findOrFail(4)->common_settings === ['is_enabled_export' => 1, 'fixture_option' => 'keep'],
+    'First terminal enables export and preserves unrelated business settings');
+DB::table('business')->where('id', 4)->update([
+    'common_settings' => json_encode(['is_enabled_export' => 0, 'fixture_option' => 'keep']),
+]);
 $firstLocation = (int) DB::table('eis_settings')->where('id', $first['terminal_setting_id'])->value('location_id');
 locationCheck((int) DB::table('business_locations')->where('id', $firstLocation)->value('default_eis_setting_id')
     === (int) $first['terminal_setting_id'],
@@ -314,6 +334,8 @@ $replacement = $process->invoke($activation, 4,
 locationCheck((int) DB::table('business_locations')->where('id', $firstLocation)->value('default_eis_setting_id')
     === (int) $replacement['terminal_setting_id'],
     'A soft-deleted default is replaced by the next activated terminal');
+locationCheck(App\Business::findOrFail(4)->common_settings === ['is_enabled_export' => 0, 'fixture_option' => 'keep'],
+    'Later activation preserves a manually disabled export setting even when the first terminal was deleted');
 DB::table('eis_settings')->where('id', $first['terminal_setting_id'])->update(['deleted_at' => null]);
 locationReject(fn () => $process->invoke($activation, 4,
     activationResponse('SECOND-IDENTITY', 'FIRST-SITE', 2, 'Other EIS Identity'), 'CODE', [], null),

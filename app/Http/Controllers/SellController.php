@@ -86,9 +86,9 @@ class SellController extends Controller
         }
 
         $eis_status = [
-            'pending' => 'Pending',
-            'submitted' => 'Submmited',
-            'failed' => 'Failed', 
+            'pending' => __('sale.eis_pending'),
+            'submitted' => __('sale.eis_submitted'),
+            'failed' => __('sale.eis_failed'),
         ];
 
         $business_id = request()->session()->get('user.business_id');
@@ -524,7 +524,7 @@ class SellController extends Controller
                 })
                 ->addColumn('eis_status', function ($row) use ($eis_status) {
                     $status = optional($row->eisSale)->status;
-                    return $status ? ($eis_status[$status] ?? $status) : '';
+                    return $status ? ($eis_status[$status] ?? $status) : __('sale.eis_not_submitted');
                 })
                 ->addColumn('eis_void_status', function ($row) {
                     $sale = $row->eisSale;

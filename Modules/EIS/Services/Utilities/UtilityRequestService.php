@@ -156,7 +156,7 @@ class UtilityRequestService
         }
         $message = match ($status) {
             'accepted' => $request->operation === 'cancel-receipt'
-                ? 'EIS accepted the void request. Approval is separate; the local sale and stock were not changed.'
+                ? 'EIS accepted the void request. Approval is separate; this request made no additional local sale or stock changes.'
                 : 'EIS accepted this initial-inventory batch. No local stock was changed.',
             'rejected' => 'EIS rejected the request. Review the saved result; it will not be resent.',
             'needs_review' => 'EIS returned an incomplete or partial result. Verify this request with MRA before taking further action.',

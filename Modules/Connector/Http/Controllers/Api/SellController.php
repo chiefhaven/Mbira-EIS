@@ -1913,6 +1913,10 @@ class SellController extends ApiController
                 $output = $this->transactionUtil->addSellReturn($input, $business_id, $user->id);
 
                 DB::commit();
+                $cancellationMessage = app(\Modules\EIS\Services\Sales\SaleAdjustmentService::class)->cancellationMessage($output);
+                if ($cancellationMessage !== null) {
+                    $output->setAttribute('eis_cancellation_message', $cancellationMessage);
+                }
                 if (DB::getSchemaBuilder()->hasTable('eis_sale_adjustments') && DB::table('eis_sale_adjustments')
                     ->where('business_id', $business_id)->where('return_id', $output->id)->where('status', 'prepared')->exists()) {
                     $output->setAttribute('eis_adjustment_message', 'EIS adjustment saved for review in Settings > MRA EIS > EIS Sales; not sent yet.');

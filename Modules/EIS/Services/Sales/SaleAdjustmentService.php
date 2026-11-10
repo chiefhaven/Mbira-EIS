@@ -9,6 +9,7 @@ use Modules\EIS\Models\EisSale;
 use Modules\EIS\Models\EisSetting;
 use Modules\EIS\Services\Terminal\TerminalContext;
 use Modules\EIS\Services\Utilities\EisUtilitiesClient;
+use Modules\EIS\Services\Utilities\UtilityRequestService;
 use Modules\EIS\Services\EisSubscriptionAccess;
 
 class SaleAdjustmentService
@@ -54,10 +55,15 @@ class SaleAdjustmentService
             ->where('status', '!=', 'accepted')->lockForUpdate()->exists()) {
             throw new \InvalidArgumentException('Resolve the existing EIS credit/debit note before editing this return. Never resend an uncertain request.');
         }
-        if (DB::table('eis_utility_requests')->where('business_id', $sale->business_id)->where('operation', 'cancel-receipt')
+        if (DB::table('eis_utility_requests')->where('business_id', $sale->business_id)
+            ->where('location_id', $fiscal->location_id)->where('eis_setting_id', $fiscal->eis_setting_id)
+            ->where('operation', 'cancel-receipt')
             ->where('status', '!=', 'rejected')->get()->contains(function ($request) use ($fiscal) {
                 $number = json_decode($request->payload, true, 512, JSON_THROW_ON_ERROR)['receiptNumber'] ?? null;
-                return in_array($number, array_filter([$fiscal->receipt_number, $fiscal->fiscal_invoice_number, $fiscal->eis_invoice_number]), true);
+                $original = $fiscal->request_payload;
+                if (is_string($original)) { $original = json_decode($original, true, 512, JSON_THROW_ON_ERROR); }
+                return in_array($number, array_filter([$fiscal->receipt_number, $fiscal->fiscal_invoice_number,
+                    $fiscal->eis_invoice_number, $original['invoiceHeader']['invoiceNumber'] ?? null]), true);
             })) {
             throw new \InvalidArgumentException('This invoice has a void request. Verify its outcome before processing a return.');
         }
@@ -106,6 +112,40 @@ class SaleAdjustmentService
         }
         $last = DB::table('eis_sale_adjustments')->where('business_id', $sale->business_id)
             ->where('sale_id', $sale->id)->orderByDesc('id')->lockForUpdate()->first();
+        $isFullReturn = count($lines) > 0 && collect($lines)->every(
+            fn ($line) => abs((float) $line['quantity'] - (float) $line['quantity_returned']) < 0.00001
+        ) && abs((float) $sale->final_total - (float) $return->final_total) < 0.005;
+        if ($isFullReturn) {
+            if ($last) {
+                throw new \InvalidArgumentException('This sale already has a fiscal note chain. Review it with MRA before cancelling the entire receipt.');
+            }
+            if (!$return->wasRecentlyCreated) {
+                throw new \InvalidArgumentException('Historical returns need EIS verification before requesting receipt cancellation.');
+            }
+            $actor = \App\User::where('business_id', $sale->business_id)->findOrFail($actorId);
+            if (!$actor->can('business_settings.access') && !$actor->can('sell.delete')) {
+                throw new \InvalidArgumentException('A full fiscal return requests receipt cancellation and requires sales-delete or business-settings permission.');
+            }
+            $number = $fiscal->eis_invoice_number ?: ($fiscal->receipt_number ?: $fiscal->fiscal_invoice_number);
+            if (!$number) {
+                throw new \InvalidArgumentException('The original fiscal receipt number is missing.');
+            }
+            $request = app(UtilityRequestService::class)->prepare($setting, 'cancel-receipt', [
+                'receiptNumber' => $number,
+                'reason' => $this->cancellationReason($return),
+            ], $actorId);
+            DB::afterCommit(function () use ($setting, $request, $actorId) {
+                try {
+                    app(UtilityRequestService::class)->submit($setting, (int) $request->id, $actorId);
+                } catch (\Throwable $exception) {
+                    Log::error('Automatic EIS return cancellation could not complete', [
+                        'request_id' => $request->id, 'business_id' => $setting->business_id,
+                        'exception' => get_class($exception), 'message' => $exception->getMessage(),
+                    ]);
+                }
+            });
+            return;
+        }
         if (!$last && collect($lines)->contains(fn ($line) => (float) $line['quantity_returned'] > 0)
             && $return->wasRecentlyCreated === false) {
             throw new \InvalidArgumentException('Historical returns need EIS verification before their first linked adjustment.');
@@ -148,6 +188,7 @@ class SaleAdjustmentService
         if (DB::connection()->transactionLevel() !== 0) {
             throw new \InvalidArgumentException('Send EIS adjustments outside a local ledger transaction.');
         }
+
         [$row, $claimed, $setting] = DB::transaction(function () use ($setting, $id, $actorId) {
             DB::table('business')->where('id', $setting->business_id)->lockForUpdate()->first();
             $fresh = EisSetting::where('business_id', $setting->business_id)->lockForUpdate()->findOrFail($setting->id);
@@ -199,6 +240,31 @@ class SaleAdjustmentService
             'response' => json_encode($result['response'], JSON_THROW_ON_ERROR), 'result_message' => $message, 'updated_at' => now(),
         ]);
         return DB::table('eis_sale_adjustments')->find($id);
+    }
+
+    public function cancellationMessage(Transaction $return): ?string
+    {
+        if (!DB::getSchemaBuilder()->hasTable('eis_utility_requests')) {
+            return null;
+        }
+        $request = DB::table('eis_utility_requests')->where('business_id', $return->business_id)
+            ->where('location_id', $return->location_id)->where('operation', 'cancel-receipt')
+            ->where('payload->reason', $this->cancellationReason($return))
+            ->orderByDesc('id')->first();
+        if (!$request) {
+            return null;
+        }
+        return match ($request->status) {
+            'accepted' => 'EIS receipt cancellation requested. Approval is separate; the return already updated local stock and credit.',
+            'prepared' => 'Return saved, but EIS cancellation has not been sent. Review the saved cancellation request in EIS Sales.',
+            'rejected' => 'Return saved, but EIS rejected receipt cancellation. Review the saved request in EIS Sales.',
+            default => 'Return saved; EIS cancellation outcome requires review. Do not resend until its outcome is verified.',
+        };
+    }
+
+    private function cancellationReason(Transaction $return): string
+    {
+        return 'Full sales return #'.$return->id.' for sale #'.$return->return_parent_id;
     }
 
     private function lines(int $saleId): array

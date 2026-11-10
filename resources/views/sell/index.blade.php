@@ -73,6 +73,7 @@
                             <th>@lang('lang_v1.contact_no')</th>
                             <th>@lang('sale.location')</th>
                             <th>@lang('sale.payment_status')</th>
+                            <th>@lang('sale.eis_submission_status')</th>
                             <th>EIS void status</th>
                             <th>@lang('lang_v1.payment_method')</th>
                             <th>@lang('sale.total_amount')</th>
@@ -101,6 +102,7 @@
                         <tr class="bg-gray font-17 footer-total text-center">
                             <td colspan="6"><strong>@lang('sale.total'):</strong></td>
                             <td class="footer_payment_status_count"></td>
+                            <td></td>
                             <td></td>
                             <td class="payment_method_count"></td>
                             <td class="footer_sale_total"></td>
@@ -246,6 +248,12 @@
                     {
                         data: 'payment_status',
                         name: 'payment_status'
+                    },
+                    {
+                        data: 'eis_status',
+                        name: 'eis_status',
+                        orderable: false,
+                        searchable: false
                     },
                     {
                         data: 'eis_void_status',

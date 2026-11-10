@@ -25,12 +25,47 @@ use App\TransactionSellLinesPurchaseLines;
 use App\Variation;
 use App\VariationLocationDetails;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use App\CashRegister;
 use Illuminate\Support\Facades\Log;
 
 class TransactionUtil extends Util
 {
+    protected function applyEisBuyerValidation($business_id, array $input, ?Transaction $existing = null): array
+    {
+        if (array_key_exists('vat5_certificate_details', $input) || array_key_exists('customer_authorization_code', $input)) {
+            return $input;
+        }
+
+        if (empty($input['contact_id']) && empty($existing?->contact_id)) {
+            return $input;
+        }
+
+        $location_id = $input['location_id'] ?? $existing?->location_id ?? null;
+        if (empty($location_id)) {
+            return $input;
+        }
+
+        if (! Schema::hasTable('eis_settings')) {
+            return $input;
+        }
+
+        if (! \Modules\EIS\Models\EisSetting::where('business_id', $business_id)
+            ->where('location_id', $location_id)
+            ->exists()) {
+            return $input;
+        }
+
+        $buyerValidation = app(\Modules\EIS\Services\Sales\PosBuyerValidationService::class);
+        $input['vat5_certificate_details'] = $buyerValidation->validate((int) $business_id, $input, $existing);
+        $validatedAuthorizationCode = $buyerValidation->validatedAuthorizationCode();
+        $input['customer_authorization_code'] = $validatedAuthorizationCode
+            ?? ($input['customer_authorization_code'] ?? ($existing?->customer_authorization_code ?? null));
+
+        return $input;
+    }
+
     /**
      * Add Sell transaction
      *
@@ -42,6 +77,8 @@ class TransactionUtil extends Util
      */
     public function createSellTransaction($business_id, $input, $invoice_total, $user_id, $uf_data = true)
     {
+        $input = $this->applyEisBuyerValidation($business_id, $input);
+
         $sale_type = ! empty($input['type']) ? $input['type'] : 'sell';
         $invoice_scheme_id = ! empty($input['invoice_scheme_id']) ? $input['invoice_scheme_id'] : null;
         $invoice_no = ! empty($input['invoice_no']) ? $input['invoice_no'] : $this->getInvoiceNumber($business_id, $input['status'], $input['location_id'], $invoice_scheme_id, $sale_type);
@@ -168,6 +205,10 @@ class TransactionUtil extends Util
         $id = is_object($transaction_id) ? $transaction_id->id : $transaction_id;
         \App\Services\Sales\SavedSaleWriteGuard::lock(DB::connection(), $id);
         $transaction = $transaction_id;
+        $existing = is_object($transaction) ? $transaction : Transaction::where('id', $transaction_id)->where('business_id', $business_id)->first();
+        if ($existing) {
+            $input = $this->applyEisBuyerValidation($business_id, $input, $existing);
+        }
 
         if (! is_object($transaction)) {
             $transaction = Transaction::where('id', $transaction_id)
@@ -256,7 +297,8 @@ class TransactionUtil extends Util
             'sales_order_ids' => ! empty($input['sales_order_ids']) ? $input['sales_order_ids'] : null,
             'prefer_payment_method' => ! empty($input['prefer_payment_method']) ? $input['prefer_payment_method'] : null,
             'prefer_payment_account' => ! empty($input['prefer_payment_account']) ? $input['prefer_payment_account'] : null,
-            'is_export' => ! empty($input['is_export']) ? 1 : 0,
+            'is_export' => array_key_exists('is_export', $input)
+                ? (! empty($input['is_export']) ? 1 : 0) : $transaction->is_export,
             'is_relief' => array_key_exists('is_relief', $input)
                 ? filter_var($input['is_relief'], FILTER_VALIDATE_BOOLEAN)
                 : $transaction->is_relief,
@@ -264,7 +306,9 @@ class TransactionUtil extends Util
                 ? (array_key_exists('vat5_certificate_details', $input) ? $input['vat5_certificate_details'] : $transaction->vat5_certificate_details) : null,
             'customer_authorization_code' => array_key_exists('customer_authorization_code', $input)
                 ? $input['customer_authorization_code'] : $transaction->customer_authorization_code,
-            'export_custom_fields_info' => (! empty($input['is_export']) && ! empty($input['export_custom_fields_info'])) ? $input['export_custom_fields_info'] : null,
+            'export_custom_fields_info' => array_key_exists('export_custom_fields_info', $input)
+                ? (! empty($input['is_export']) ? $input['export_custom_fields_info'] : null)
+                : $transaction->export_custom_fields_info,
             'additional_expense_value_1' => isset($input['additional_expense_value_1']) ? $uf_data ? $this->num_uf($input['additional_expense_value_1']) : $input['additional_expense_value_1'] : 0,
             'additional_expense_value_2' => isset($input['additional_expense_value_2']) ? $uf_data ? $this->num_uf($input['additional_expense_value_2']) : $input['additional_expense_value_2'] : 0,
             'additional_expense_value_3' => isset($input['additional_expense_value_3']) ? $uf_data ? $this->num_uf($input['additional_expense_value_3']) : $input['additional_expense_value_3'] : 0,

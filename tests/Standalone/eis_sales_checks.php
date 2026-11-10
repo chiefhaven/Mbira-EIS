@@ -31,6 +31,7 @@ function salesReject(callable $work, string $message): void
 }
 $capsule->setEventDispatcher(new Illuminate\Events\Dispatcher($app));
 $capsule->bootEloquent();
+DB::connection()->setTransactionManager(new Illuminate\Database\DatabaseTransactionsManager());
 Illuminate\Database\Eloquent\Model::clearBootedModels();
 $app->instance('db.schema', $schema);
 $app->instance('log', new Psr\Log\NullLogger());
@@ -48,7 +49,11 @@ DB::table('users')->insert(['id' => 7, 'business_id' => 1]);
 $gate = Mockery::mock(Illuminate\Contracts\Auth\Access\Gate::class);
 $gate->shouldReceive('forUser')->andReturnSelf();
 $actorAllowed = true;
-$gate->shouldReceive('check')->andReturnUsing(function ($ability) use (&$actorAllowed) {
+$cancelAllowed = true;
+$gate->shouldReceive('check')->andReturnUsing(function ($ability) use (&$actorAllowed, &$cancelAllowed) {
+    if (in_array($ability, ['sell.delete', 'business_settings.access'], true)) {
+        return $actorAllowed && $cancelAllowed;
+    }
     return $ability === 'access_all_locations' || $actorAllowed;
 });
 $app->instance(Illuminate\Contracts\Auth\Access\Gate::class, $gate);
@@ -171,6 +176,72 @@ function localSalesGraph(): array {
 }
 $before = localSalesGraph();
 try {
+    DB::transaction(function () {
+        makeReturn(3);
+        salesCheck(DB::table('eis_utility_requests')->count() === 1, 'Full return prepares a durable cancellation inside the transaction');
+        throw new RuntimeException('Full return rollback test');
+    });
+} catch (RuntimeException $e) {
+    if ($e->getMessage() !== 'Full return rollback test') { throw $e; }
+}
+salesCheck(localSalesGraph() === $before && DB::table('eis_utility_requests')->count() === 0 && count($requests) === 0,
+    'Rolled-back full return discards the cancellation and after-commit send');
+$cancelAllowed = false;
+salesReject(fn () => makeReturn(3), 'Return permission alone does not grant receipt cancellation permission');
+salesCheck(localSalesGraph() === $before && count($requests) === 0, 'Unauthorized full cancellation rolls back the return and stock');
+$cancelAllowed = true;
+DB::table('eis_sales')->where('id', 1)->update(['receipt_number' => null, 'eis_invoice_number' => null]);
+salesReject(fn () => makeReturn(3), 'Missing fiscal receipt prevents full cancellation');
+DB::table('eis_sales')->where('id', 1)->update(['receipt_number' => 'RECEIPT-800', 'eis_invoice_number' => 'FISCAL-800']);
+$returnDeviceId = EisSetting::findOrFail(101)->device_id;
+foreach (['accepted', 'rejected', 'unknown', 'prepared'] as $outcome) {
+    $requests = [];
+    $responseStatus = $outcome === 'rejected' ? 400 : 200;
+    $responseBody = $outcome === 'rejected'
+        ? ['statusCode' => 0, 'message' => 'Synthetic rejection']
+        : ['statusCode' => 1, 'data' => ['invoiceNumber' => 'FISCAL-800', 'approvalStatus' => 'Pending']];
+    $disconnect = $outcome === 'unknown';
+    DB::beginTransaction();
+    $fullReturn = makeReturn(3);
+    salesCheck(count($requests) === 0, 'Cancellation waits for the outermost commit: '.$outcome);
+    if ($outcome === 'prepared') {
+        DB::table('eis_settings')->where('id', 101)->update(['device_id' => 'changed-device']);
+    }
+    DB::commit();
+    $cancellation = DB::table('eis_utility_requests')->first();
+    salesCheck($cancellation->status === $outcome && DB::table('eis_sale_adjustments')->count() === 0,
+        'Full return requests cancellation only, with persisted outcome: '.$outcome);
+    salesCheck((float) $fullReturn->final_total === 345.0
+        && (float) DB::table('variation_location_details')->value('qty_available') === 10.0,
+        'Local full return remains committed regardless of remote outcome: '.$outcome);
+    $message = $service->cancellationMessage($fullReturn);
+    salesCheck($message !== null && ($outcome === 'accepted' ? str_contains($message, 'Approval is separate')
+        : str_contains($message, 'Return saved')), 'Full return exposes cancellation outcome without false approval: '.$outcome);
+    if ($outcome !== 'prepared') {
+        salesCheck(count($requests) === 1 && end($requests)->url() === 'https://eis.invalid/api/v1/sales/cancel-receipt'
+            && end($requests)->data()['receiptNumber'] === 'FISCAL-800',
+            'Automatic cancellation uses the canonical receipt and exact EIS endpoint: '.$outcome);
+        app(Modules\EIS\Services\Utilities\UtilityRequestService::class)->submit(EisSetting::findOrFail(101), $cancellation->id, 7);
+        salesCheck(count($requests) === 1, 'Cancellation outcome is never blindly resent: '.$outcome);
+    } else {
+        salesCheck(count($requests) === 0, 'Changed terminal prevents sending without rolling back a committed return');
+    }
+    if ($outcome !== 'rejected') {
+        salesReject(fn () => makeReturn(2), 'Pending cancellation fences edits to local fiscal returns: '.$outcome);
+    }
+    DB::table('eis_settings')->where('id', 101)->update(['device_id' => $returnDeviceId]);
+    DB::table('eis_utility_requests')->delete();
+    foreach ($before as $table => $records) {
+        DB::table($table)->delete();
+        if ($records) { DB::table($table)->insert($records); }
+    }
+}
+$requests = [];
+$disconnect = false;
+$responseStatus = 200;
+$responseBody = ['statusCode' => 1, 'data' => []];
+echo "OK: {$salesChecks} automatic return cancellation checks\n";
+try {
     DB::transaction(function () { makeReturn(1); throw new RuntimeException('Rollback test'); });
 } catch (RuntimeException $e) {}
 salesCheck(localSalesGraph() === $before && DB::table('eis_sale_adjustments')->count() === 0 && count($requests) === 0,
@@ -226,11 +297,12 @@ salesReject(fn () => DB::transaction(fn () => Transaction::findOrFail($return->i
 salesCheck(Transaction::findOrFail($return->id)->exists, 'Blocked delete preserves linked return');
 salesReject(fn () => DB::transaction(fn () => Transaction::findOrFail(800)->delete()), 'Original sale with a fiscal note chain cannot be deleted');
 
-$return = makeReturn(3);
+salesReject(fn () => makeReturn(3), 'Full cancellation cannot void an original invoice with an existing fiscal note chain');
+$return = makeReturn(2.5);
 $row = DB::table('eis_sale_adjustments')->orderByDesc('id')->first();
 $payload = json_decode($row->payload, true);
-salesCheck((float) $payload['invoiceSummary']['invoiceTotal'] === 0.0 && (float) $payload['invoiceSummary']['totalVAT'] === 0.0
-    && (float) $payload['invoiceLineItems'][0]['quantity'] === 0.0, 'Full return produces zero remaining invoice, retaining original line identities');
+salesCheck((float) $payload['invoiceSummary']['invoiceTotal'] === 57.5 && (float) $payload['invoiceSummary']['totalVAT'] === 7.5
+    && (float) $payload['invoiceLineItems'][0]['quantity'] === 0.5, 'Partial return retains the remaining invoice and original line identities');
 $disconnect = true; $count = count($requests);
 salesCheck($service->submit($setting, $row->id, 7)->status === 'unknown' && count($requests) === $count + 1,
     'Network loss persists unknown after one send');

@@ -354,7 +354,7 @@ class SaleTransformer
             'globalConfigVersion' => (int) ($settings->global_version ?? 0),
             'taxpayerConfigVersion' => (int) ($settings->taxpayer_version ?? 0),
             'terminalConfigVersion' => (int) ($settings->terminal_version ?? 0),
-            'isExport' => false,
+            'isExport' => (bool) $transaction->is_export,
             'isReliefSupply' => (bool) $transaction->is_relief,
             'vat5CertificateDetails' => $transaction->is_relief ? $transaction->vat5_certificate_details : null,
             'paymentMethod' => $this->getPaymentMethod($transaction),
