@@ -92,8 +92,8 @@ foreach (['fixed', 'percentage', null] as $type) {
         $cells = array_map(fn ($node) => trim($node->textContent), iterator_to_array($xpath->query('//tbody/tr[1]/td')));
         receiptDiscountCheck(count($cells) === 6 && $cells[0] === '1' && $cells[3] === $receiptLine['unit_price_before_discount']
             && str_starts_with($cells[4], $receiptLine['total_line_discount'])
-            && $cells[5] === number_format($line->unit_price_before_discount * $line->quantity, 2),
-            'Rows must display VAT-exclusive price, discount and unit price times quantity subtotal');
+            && $cells[5] === number_format(($line->unit_price_before_discount - $line->get_discount_amount()) * $line->quantity, 2),
+            'Rows must display VAT-exclusive price, total discount and discounted unit price times quantity subtotal');
         $printedLines[] = $receiptLine;
     }
 }
@@ -153,7 +153,12 @@ foreach (['classic', 'columnize-taxes', 'detailed', 'elegant', 'elegant_modified
         $name.' must use the shared six-column product table');
     receiptDiscountCheck($compiler->compileString($source) !== '', $name.' must compile');
 }
-$source = file_get_contents($root.'\pos_print_server\lib\Escpos.php');
+$thermalSource = $root.'\pos_print_server\lib\Escpos.php';
+if (!is_file($thermalSource)) {
+    echo 'Receipt browser checks passed: '.$checks." checks; thermal checks skipped because the external print-server source is not present.\n";
+    exit(0);
+}
+$source = file_get_contents($thermalSource);
 require $root.'\pos_print_server\lib\Escpos.php';
 $start = strpos($source, '        /* Products */');
 $end = strpos($source, '        /* Totals */', $start);

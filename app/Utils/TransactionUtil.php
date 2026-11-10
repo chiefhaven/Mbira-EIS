@@ -2308,6 +2308,11 @@ class TransactionUtil extends Util
             }
 
             $line_array['total_line_discount'] = $this->num_f($line_array['line_discount_uf'] * $line_array['quantity_uf'], false, $business_details);
+            $line_array['unit_price_quantity_subtotal'] = $this->num_f(
+                ($line->unit_price_before_discount - $line_array['line_discount_uf']) * $line->quantity,
+                false,
+                $business_details
+            );
 
             if ($il->show_brand == 1) {
                 $line_array['brand'] = ! empty($brand->name) ? $brand->name : '';
