@@ -484,7 +484,7 @@
 
 				<div class="flex-box">
 					<p class="width-50 text-right">
-						TOTAL:
+						{!! $receipt_details->total_label !!}
 					</p>
 					<p class="width-50 text-right">
 						{{$receipt_details->total}}

@@ -195,7 +195,7 @@
                                 </tr>
 								<tr class="bg-net-amount">
                                     <td style=" font-weight: bold; text-align: right;">
-                                        TOTAL:
+                                        {!! $receipt_details->total_label !!}
                                     </td>
                                     <td style=" text-align: center;">
                                         {{ $receipt_details->total }}

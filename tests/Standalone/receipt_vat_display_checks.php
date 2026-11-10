@@ -46,7 +46,7 @@ $config = ['globalConfiguration' => ['taxrates' => [
 $invoice = ['invoiceSummary' => ['invoiceTotal' => 8500, 'totalVAT' => 1265.96,
     'taxBreakDown' => [['rateId' => 'A', 'taxableAmount' => 7234.04, 'taxAmount' => 1265.96]]]];
 $details = $method->invoke($util, $invoice, $config);
-vatDisplayCheck($details === ['vat' => 1265.96, 'taxable_amount' => 7234.04, 'standard_rate' => '17.5'],
+vatDisplayCheck($details === ['vat' => 1265.96, 'subtotal' => 7234.04, 'taxable_amount' => 7234.04, 'standard_rate' => '17.5'],
     'Receipt taxable amount and standard percentage must use fiscal totals/configuration');
 foreach ([
     [100, 0, [['rateId' => 'B', 'taxableAmount' => 100]], 0.0],
@@ -70,6 +70,8 @@ foreach ([
     ]], $config);
     vatDisplayCheck($result['taxable_amount'] === $expected,
         'Only positive-rate bases count, including multiple rates and VAT rounded to zero');
+    vatDisplayCheck($result['subtotal'] === round($gross - $vat, 2),
+        'Subtotal excludes VAT but includes zero-rated and exempt amounts');
 }
 foreach ([[], ['invoiceTotal' => 10], ['invoiceTotal' => 10, 'totalVAT' => 11],
     ['invoiceTotal' => INF, 'totalVAT' => 1], ['invoiceTotal' => 100, 'totalVAT' => -1]] as $summary) {

@@ -1595,6 +1595,8 @@ class TransactionUtil extends Util
                 $payload = json_decode($payload, true);
             }
             $fiscalTax = $this->receiptFiscalTaxDetails($payload ?? [], $eis_configuration);
+            $output['subtotal'] = $this->num_f($fiscalTax['subtotal'], $show_currency, $business_details);
+            $output['subtotal_exc_tax'] = $output['subtotal'];
             $output['vat_amount'] = $this->num_f($fiscalTax['vat'], $show_currency, $business_details);
             $output['taxable_amount'] = $this->num_f($fiscalTax['taxable_amount'], $show_currency, $business_details);
             if ($fiscalTax['standard_rate'] !== null) {
@@ -1635,6 +1637,9 @@ class TransactionUtil extends Util
         }
 
         $output['total_unformatted'] = $transaction->final_total;
+        if ($is_eis_receipt) {
+            $output['total_label'] = __('sale.total_including_vat').':';
+        }
 
         //Paid & Amount due, only if final
         if ($transaction_type == 'sell' && $transaction->status == 'final') {
@@ -2981,7 +2986,8 @@ class TransactionUtil extends Util
                 $taxableAmount += (float) $amount;
             }
         }
-        return ['vat' => (float) $vat, 'taxable_amount' => round($taxableAmount, 2),
+        return ['vat' => (float) $vat, 'subtotal' => round((float) $total - (float) $vat, 2),
+            'taxable_amount' => round($taxableAmount, 2),
             'standard_rate' => $standardRate];
     }
 
