@@ -368,14 +368,6 @@
 							</td>
 						</tr>
 					@endif
-					<tr>
-						<th style="width:70%">
-							{!! $receipt_details->subtotal_label !!}
-						</th>
-						<td class="text-right">
-							{{$receipt_details->subtotal}}
-						</td>
-					</tr>
 					@if(!empty($receipt_details->total_exempt_uf))
 					<tr>
 						<th style="width:70%">

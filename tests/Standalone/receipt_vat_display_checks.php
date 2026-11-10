@@ -167,10 +167,15 @@ vatDisplayCheck(trim($xpath->query('//tbody/tr[2]/td[4]')->item(0)->textContent)
 foreach (['classic', 'columnize-taxes', 'detailed', 'elegant', 'elegant_modified', 'slim', 'slim2', 'english-arabic'] as $name) {
     $source = file_get_contents($root.'\resources\views\sale_pos\receipts\\'.$name.'.blade.php');
     vatDisplayCheck($compiler->compileString($source) !== '', $name.' compiles');
+    vatDisplayCheck(!str_contains($source, '$receipt_details->subtotal_label') && !str_contains($source, 'Subtotal:'),
+        $name.' omits the invoice-level Subtotal row');
     vatDisplayCheck(str_contains($source, "partial.vat_summary") || str_contains($source, 'taxable_amount_label'),
         $name.' includes the fiscal tax summary');
     $taxPosition = strpos($source, $name === 'english-arabic' ? 'taxable_amount_label' : 'partial.vat_summary');
     vatDisplayCheck($taxPosition < strpos($source, '$receipt_details->total_label'),
         $name.' shows taxable amount and VAT before the total');
 }
+$productTable = file_get_contents($root.'\resources\views\sale_pos\receipts\partial\product_table.blade.php');
+vatDisplayCheck(str_contains($productTable, 'table_subtotal_label'),
+    'Product table retains per-line Subtotal column');
 echo "PASS: {$checks} receipt VAT display checks\n";

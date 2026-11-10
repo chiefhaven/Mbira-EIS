@@ -88,6 +88,8 @@ standard percentage from the original terminal's EIS configuration. Fiscal
 receipt Subtotal sums `invoiceLineItems[].total`; Taxable Amount subtracts
 `invoiceSummary.totalVAT` from that gross sum. VAT, Total, and payments remain
 separate.
+All sale receipt layouts omit the invoice-level Subtotal row; the product table
+still shows each line Subtotal.
 Taxable Amount and VAT use the same label/value columns and alignment as the
 other receipt totals, including left-aligned labels in the slim2 layout.
 The heading shows VAT Registered

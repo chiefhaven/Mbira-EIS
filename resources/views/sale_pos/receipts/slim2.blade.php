@@ -386,15 +386,6 @@
 				</div>
 			@endif
 			@if(empty($receipt_details->hide_price))
-            <div class="flex-box">
-                <p class="left text-left">
-                    Subtotal:
-                </p>
-                <p class="width-50 text-right">
-                    {{$receipt_details->subtotal}}
-                </p>
-            </div>
-
             <!-- Shipping Charges -->
 			@if(!empty($receipt_details->shipping_charges))
 				<div class="flex-box">

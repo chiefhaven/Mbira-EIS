@@ -432,15 +432,6 @@
 						</td>
 					</tr>
 				@endif
-				<tr >
-					<td style="width:50%">
-						{!! $receipt_details->subtotal_label !!}
-					</td>
-					<td class="text-right">
-						{{$receipt_details->subtotal_exc_tax}}
-					</td>
-				</tr>
-				
 				<!-- Shipping Charges -->
 				@if(!empty($receipt_details->shipping_charges))
 					<tr >

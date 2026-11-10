@@ -188,11 +188,6 @@
                     <div class="table-responsive totals-section">
                         <table class="table table-bordered" style="width: 98%; font-size: 11px; margin-bottom: 2px;">
                             <tbody>
-                                <tr>
-                                    <td style="font-weight: bold; text-align: right;">Subtotal:</td>
-                                    <td class="print-red" style="text-align: center;">{{$receipt_details->subtotal}}</td>
-                                    <td style="font-weight: bold; direction: rtl; text-align: right;">المجموع الفرعي:</td>
-                                </tr>
                                 @if(empty($receipt_details->hide_price))
                                     <tr>
                                         <td style="font-weight: bold; text-align: right;">{{ $receipt_details->taxable_amount_label }}</td>

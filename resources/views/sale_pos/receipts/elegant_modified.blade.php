@@ -162,15 +162,6 @@
 	<div class="col-md-6 invoice-col width-50">
 		<table class="table-no-side-cell-border table-no-top-cell-border width-100">
 			<tbody>
-				<tr class="color-555">
-					<td style="width:50%">
-						{!! $receipt_details->subtotal_label !!}
-					</td>
-					<td class="text-right">
-						{{$receipt_details->subtotal}}
-					</td>
-				</tr>
-				
 				<!-- Shipping Charges -->
 				@if(!empty($receipt_details->shipping_charges))
 					<tr class="color-555">
