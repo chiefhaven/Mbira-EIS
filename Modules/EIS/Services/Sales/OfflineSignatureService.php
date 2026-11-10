@@ -159,7 +159,8 @@ class OfflineSignatureService
         string $taxpayerId,
         int $position,
         array $request,
-        string $secretKey
+        string $secretKey,
+        ?string $baseURL = null
     ): array {
         try {
             // Get transaction date
@@ -193,7 +194,11 @@ class OfflineSignatureService
             $offlineDataSignature = urlencode($offlineDataSignature);
             
             // Build validation URL
-            $offlineBaseURL = "https://dev-eis-portal.mra.mw/ReceiptValidation/Validate/";
+            $offlineBaseURL = $baseURL ?? match (strtolower(trim((string) config('eis.environment', 'development')))) {
+                'development', 'dev', 'sandbox' => 'https://dev-eis-portal.mra.mw/ReceiptValidation/Validate/',
+                'production' => 'https://eis-portal.mra.mw/ReceiptValidation/Validate/',
+                default => throw new \InvalidArgumentException('Select a supported EIS environment before offline signing.'),
+            };
             $validationURL = $offlineBaseURL . "?" . $param . "&S=" . $offlineDataSignature;
             
             return [
@@ -210,7 +215,7 @@ class OfflineSignatureService
                 'exception' => get_class($e),
             ]);
             
-            throw new \Exception('Failed to generate offline signature: ' . $e->getMessage());
+            throw $e;
         }
     }
 
@@ -270,9 +275,9 @@ class OfflineSignatureService
         int $position,
         array $request,
         string $secretKey,
-        string $baseURL = 'https://dev-eis-portal.mra.mw/ReceiptValidation/Validate/'
+        ?string $baseURL = null
     ): string {
-        $result = $this->generateInvoiceResponse($taxpayerId, $position, $request, $secretKey);
+        $result = $this->generateInvoiceResponse($taxpayerId, $position, $request, $secretKey, $baseURL);
         return $result['validationURL'];
     }
 

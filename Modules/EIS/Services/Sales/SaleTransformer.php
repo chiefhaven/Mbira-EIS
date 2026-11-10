@@ -495,25 +495,34 @@ class SaleTransformer
     /**
      * Generate offline signature data with better error handling
      */
-    protected function generateOfflineSignature(EisSetting $settings, Transaction $transaction, string $eisInvoiceNumber, array $invoiceSummary, int $totalItems): array {
+    protected function generateOfflineSignature(EisSetting $settings, Transaction $transaction, string $eisInvoiceNumber, array $invoiceSummary, float $totalItems): array {
         try {
             // Parse invoice number to get components
             $parsedInvoice = $this->parseInvoiceNumber($eisInvoiceNumber);
             
-            // Get taxpayer ID and terminal position with fallbacks
-            $taxpayerId = $settings->tpin ?? '000000';
-            $terminalPosition = (int) ($parsedInvoice['terminal_position'] ?? 1);
-            $transactionCount = (int) ($parsedInvoice['count'] ?? 1);
+            $taxpayerId = (string) $parsedInvoice['taxpayer_id'];
+            $terminalPosition = $parsedInvoice['terminal_position'];
+            $transactionCount = $parsedInvoice['count'];
+            if (trim((string) $settings->secret_key) === '' || empty($transaction->transaction_date)) {
+                throw new \InvalidArgumentException('An EIS signing key and fiscal invoice date are required for offline signing.');
+            }
+            foreach (['invoiceTotal', 'totalVAT'] as $field) {
+                if (!is_numeric($invoiceSummary[$field] ?? null) || !is_finite((float) $invoiceSummary[$field])
+                    || $invoiceSummary[$field] < 0) {
+                    throw new \InvalidArgumentException('Valid fiscal invoice totals are required for offline signing.');
+                }
+            }
+            if ($invoiceSummary['totalVAT'] > $invoiceSummary['invoiceTotal'] || !is_finite($totalItems) || $totalItems <= 0) {
+                throw new \InvalidArgumentException('Valid fiscal VAT and item quantities are required for offline signing.');
+            }
             
             // Prepare request data for signature
             $requestData = [
-                'transactiondate' => $transaction->transaction_date
-                    ? Carbon::parse($transaction->transaction_date)->toISOString()
-                    : now()->toISOString(),
+                'transactiondate' => Carbon::parse($transaction->transaction_date)->toIso8601String(),
                 'transactionCount' => $transactionCount,
                 'NumItems' => $totalItems,
-                'InvoiceTotal' => (float) ($invoiceSummary['invoiceTotal'] ?? 0),
-                'VATAmount' => (float) ($invoiceSummary['totalVAT'] ?? 0),
+                'InvoiceTotal' => (float) $invoiceSummary['invoiceTotal'],
+                'VATAmount' => (float) $invoiceSummary['totalVAT'],
             ];
             
             // Generate offline signature
@@ -523,6 +532,9 @@ class SaleTransformer
                 $requestData,
                 $settings->secret_key ?? ''
             );
+            if ($result['combinedString'] !== $eisInvoiceNumber) {
+                throw new \UnexpectedValueException('The EIS invoice identity and fiscal date do not match; offline signing was blocked.');
+            }
             
             Log::debug('Offline signature generated successfully', [
                 'transaction_id' => $transaction->id,
@@ -536,11 +548,7 @@ class SaleTransformer
                 'exception' => get_class($e),
             ]);
             
-            return [
-                'offlineDataSignature' => '',
-                'validationURL' => '',
-                'error' => $e->getMessage()
-            ];
+            throw $e;
         }
     }
 
@@ -560,21 +568,21 @@ class SaleTransformer
 
         $totalItems = 0;
         foreach ($invoiceLines as $line) {
-            if (!is_array($line) || !is_numeric($line['quantity'] ?? null)) {
+            if (!is_array($line) || !is_numeric($line['quantity'] ?? null)
+                || !is_finite((float) $line['quantity']) || $line['quantity'] <= 0) {
                 throw new \UnexpectedValueException('The submitted EIS invoice lines are invalid; offline validation data cannot be generated.');
             }
             $totalItems += (float) $line['quantity'];
         }
 
         $fiscalTransaction = clone $transaction;
-        $fiscalTransaction->transaction_date = $payload['invoiceHeader']['invoiceDateTime']
-            ?? $transaction->transaction_date;
+        $fiscalTransaction->transaction_date = $payload['invoiceHeader']['invoiceDateTime'] ?? null;
         return $this->generateOfflineSignature(
             $settings,
             $fiscalTransaction,
             $invoiceNumber,
             $invoiceSummary,
-            (int) $totalItems
+            $totalItems
         );
     }
 
@@ -583,26 +591,14 @@ class SaleTransformer
      */
     protected function parseInvoiceNumber(string $invoiceNumber): array
     {
-        try {
+        if (preg_match('~^[A-Za-z0-9+/]+(?:-[A-Za-z0-9+/]+){3}$~D', $invoiceNumber)) {
             $parsed = $this->invoiceNumberGenerator->parseInvoiceNumber($invoiceNumber);
-            
-            if (is_array($parsed) && !empty($parsed)) {
+            if ($parsed !== null && $parsed['taxpayer_id'] > 0 && $parsed['terminal_position'] > 0
+                && $parsed['julian_date'] > 0 && $parsed['count'] > 0) {
                 return $parsed;
             }
-        } catch (\Exception $e) {
-            Log::warning('Failed to parse invoice number', [
-                'invoice_number' => $invoiceNumber,
-                'error' => $e->getMessage()
-            ]);
         }
-        
-        // Default fallback
-        return [
-            'taxpayer_id' => '',
-            'terminal_position' => 1,
-            'julian_date' => now()->format('z'),
-            'count' => 1,
-        ];
+        throw new \InvalidArgumentException('A valid EIS fiscal invoice number is required for offline signing.');
     }
 
     /**

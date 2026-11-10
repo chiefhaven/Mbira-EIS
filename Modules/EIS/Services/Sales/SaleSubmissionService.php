@@ -114,17 +114,23 @@ class SaleSubmissionService
         $includeOfflineSignature = $forceOffline || ($existing && ($existing->status === 'failed' || !empty($existing->request_payload)))
             || $failedTransaction !== null;
         // Split fiscal guards require a top-level transaction; lock allocation without enclosing their model saves.
-        [$eisSale, $eisInvoiceNumber] = Cache::lock('eis-invoice-terminal-'.$eisSetting->id, 60)->block(10, function () use ($transaction, $eisSetting) {
+        [$eisSale, $eisInvoiceNumber, $fiscalDate] = Cache::lock('eis-invoice-terminal-'.$eisSetting->id, 60)->block(10, function () use ($transaction, $eisSetting) {
             $tracking = EisSale::where('transaction_id', $transaction->id)->first();
+            $createdAt = $tracking?->created_at ?? now()->startOfSecond();
+            $fiscalDate = $tracking?->request_payload['invoiceHeader']['invoiceDateTime']
+                ?? $createdAt->toIso8601String();
+            $numberTransaction = clone $transaction;
+            $numberTransaction->transaction_date = $fiscalDate;
             $number = $tracking?->eis_invoice_number ?? $tracking?->fiscal_invoice_number
-                ?? $this->generateEISInvoiceNumber($transaction, $eisSetting);
+                ?? $this->generateEISInvoiceNumber($numberTransaction, $eisSetting);
             $sale = EisSale::updateOrCreate(['transaction_id' => $transaction->id], [
                 'business_id' => $transaction->business_id, 'invoice_number' => $transaction->invoice_no,
                 'fiscal_invoice_number' => $number, 'receipt_number' => $number, 'status' => 'pending',
                 'eis_invoice_number' => $number,
                 'location_id' => $transaction->location_id, 'eis_setting_id' => $eisSetting->id,
+                'created_at' => $createdAt,
             ]);
-            return [$sale, $number];
+            return [$sale, $number, $fiscalDate];
         });
 
         // Only a sale paid in full is submitted (see SaleSubmissionRule).
@@ -143,8 +149,7 @@ class SaleSubmissionService
 
             // Fiscal creation has its own date; retries retain the invoice date already sent.
             $fiscalTransaction = clone $transaction;
-            $fiscalTransaction->transaction_date = $existing?->request_payload['invoiceHeader']['invoiceDateTime']
-                ?? $eisSale->created_at->toIso8601String();
+            $fiscalTransaction->transaction_date = $fiscalDate;
             $payload = $this->transformer->transform(
                 $fiscalTransaction,
                 $settings,
@@ -201,7 +206,7 @@ class SaleSubmissionService
 
             return $eisSale->refresh();
 
-        } catch (EisSaleException $e) {
+        } catch (EisSaleException|\InvalidArgumentException|\UnexpectedValueException $e) {
 
             Log::error('EIS Sale Submission Failed', [
                 'transaction_id' => $transaction->id,

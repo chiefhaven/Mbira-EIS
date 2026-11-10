@@ -354,6 +354,22 @@ or live payments are made by this fixture.
 - Retries include offline signature data. Existing failed tracking, a saved
   request from an interrupted pending attempt, or failed-transaction history
   identify a retry. A pending record without prior request/history is still new.
+- New offline signatures use the fiscal invoice's decoded taxpayer ID (not the
+  seller TIN), terminal position and sequence. Its date is preserved with its
+  timezone offset; the signed identity must equal the exact fiscal invoice number.
+  New invoice numbers and headers share one fiscal creation timestamp, even for
+  backdated POS sales. That timestamp is explicitly persisted as `eis_sales.created_at`;
+  invoice allocation, the header and signing all use it rather than separate clock reads.
+  Invalid identities, missing signing keys or mismatched dates
+  fail explicitly rather than producing blank signatures.
+- Fractional item quantities are preserved in signing parameters. HMAC-SHA256,
+  Base64 and signature URL encoding are covered by independent synthetic tests.
+  Validation links use the development portal for development/dev/sandbox and
+  the production portal for production; unsupported environments fail explicitly.
+- The HTTP client removes local `offlineSignatureData` and summary `validationURL`
+  from outbound sales requests to match Swagger, retaining `offlineSignature`.
+  Local tracking keeps QR/retry metadata. Existing persisted signatures are reused
+  unchanged; this change does not rewrite or resubmit historical invoices.
 - Pending/failed tracking stores the generated invoice number in
   `eis_sales.fiscal_invoice_number`. Retries reuse the saved invoice identity
   rather than allocating another number. Existing records are updated when retried;
@@ -371,3 +387,8 @@ or live payments are made by this fixture.
 
 `tests/Standalone/eis_submission_retry_checks.php` tests these paths using SQLite
 memory, a fixture signature generator and HTTP fakes, without real EIS calls.
+`tests/Standalone/eis_offline_signature_checks.php` exercises the real signer
+using synthetic keys, including RFC 4231 HMAC validation, timezone boundaries,
+invoice identity and environment-specific URLs. Swagger describes the request
+schema but does not publish the canonical signing algorithm or an MRA signature
+test vector; cryptographic acceptance still requires MRA verification.

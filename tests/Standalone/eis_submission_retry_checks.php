@@ -44,6 +44,7 @@ $schema->create('transactions', function (Blueprint $t) {
     $t->increments('id'); $t->integer('business_id'); $t->string('invoice_no');
     $t->string('type'); $t->string('status'); $t->string('payment_status');
     $t->string('transaction_date')->nullable();
+    $t->decimal('final_total', 22, 4)->default(84.75);
     $t->integer('location_id')->default(3);
     $t->boolean('is_fiscalized')->default(false);
     $t->string('fiscal_invoice_number')->nullable(); $t->string('receipt_number')->nullable();
@@ -51,6 +52,7 @@ $schema->create('transactions', function (Blueprint $t) {
 });
 $schema->create('eis_settings', function (Blueprint $t) {
     $t->increments('id'); $t->integer('business_id'); $t->string('tpin'); $t->string('branch_id'); $t->timestamps();
+    $t->string('secret_key')->nullable();
     $t->integer('location_id')->default(3); $t->boolean('status')->default(true); $t->softDeletes();
 });
 $container->instance('db.schema', $schema);
@@ -88,7 +90,7 @@ $schema->create('eis_failed_transactions', function (Blueprint $t) {
 $schema->create('eis_migration_issues', function (Blueprint $t) {
     $t->increments('id'); $t->string('source_table'); $t->integer('source_id');
 });
-DB::table('eis_settings')->insert(['business_id' => 7, 'tpin' => 'FIXTURE', 'branch_id' => 'SITE-7']);
+DB::table('eis_settings')->insert(['business_id' => 7, 'tpin' => 'FIXTURE', 'branch_id' => 'SITE-7', 'secret_key' => 'fixture-secret']);
 $settings = EisSetting::first();
 $settings->global_version = 1;
 $settings->terminal_version = 1;
@@ -97,7 +99,7 @@ $transformer = new class(new EisTaxRate(), new OfflineSignatureService(), new In
     public int $signatures = 0;
     public int $offlineQrGenerations = 0;
     public array $signatureDates = [];
-    protected function generateOfflineSignature(EisSetting $settings, Transaction $transaction, string $eisInvoiceNumber, array $invoiceSummary, int $totalItems): array {
+    protected function generateOfflineSignature(EisSetting $settings, Transaction $transaction, string $eisInvoiceNumber, array $invoiceSummary, float $totalItems): array {
         ++$this->signatures;
         $this->signatureDates[] = $transaction->transaction_date;
         return ['offlineDataSignature' => 'fixture-signature', 'validationURL' => 'https://eis.invalid/offline'];
@@ -256,7 +258,11 @@ checkRetry(($storedFirstFailure['offlineSignatureData']['offlineDataSignature'] 
     'First failure persists its exact offline signature in the retry payload');
 $settings->secret_key = 'fixture-secret';
 $realOfflineTransformer = new SaleTransformer(new EisTaxRate(), new OfflineSignatureService(), new InvoiceNumberGenerator());
-$offlineValidation = $realOfflineTransformer->generateOfflineValidationData($settings, $transaction, $first);
+$signingPayload = $first;
+$signingPayload['invoiceHeader']['invoiceNumber'] = (new OfflineSignatureService())->generateCombinedString(
+    100, 3, (new OfflineSignatureService())->toJulianDate($first['invoiceHeader']['invoiceDateTime']), 1
+);
+$offlineValidation = $realOfflineTransformer->generateOfflineValidationData($settings, $transaction, $signingPayload);
 checkRetry(str_starts_with($offlineValidation['validationURL'], 'https://dev-eis-portal.mra.mw/ReceiptValidation/Validate/?')
     && str_contains($offlineValidation['validationURL'], '&S='),
     'Offline QR validation URL follows the EIS receipt signature format');
@@ -588,6 +594,24 @@ checkRetry($requests === 1 && ! $duplicateResponse['success']
     && $duplicateResponse['error_code'] === 'DUPLICATE_INVOICE'
     && ! $duplicateResponse['retryable'],
     'Duplicate EIS invoice response is marked for verification, not automatic retry');
+$wireHttp = new Illuminate\Http\Client\Factory();
+$wireHttp->preventStrayRequests();
+$container->instance(Illuminate\Http\Client\Factory::class, $wireHttp);
+Illuminate\Support\Facades\Http::clearResolvedInstance(Illuminate\Http\Client\Factory::class);
+Illuminate\Support\Facades\Http::fake(function ($request) use (&$wirePayload) {
+    $wirePayload = $request->data();
+    return Illuminate\Support\Facades\Http::response(['statusCode' => 1, 'data' => []]);
+});
+$signedRequest = $retry;
+$signedRequest['offlineSignatureData'] = ['offlineDataSignature' => 'preserved-signature', 'validationURL' => 'https://eis.invalid/qr'];
+$signedRequest['invoiceSummary']['offlineSignature'] = 'preserved-signature';
+$signedRequest['invoiceSummary']['validationURL'] = 'https://eis.invalid/qr';
+(new EisSaleClient($health))->submit($signedRequest, $httpSettings);
+checkRetry(!isset($wirePayload['offlineSignatureData']) && !isset($wirePayload['invoiceSummary']['validationURL'])
+    && $wirePayload['invoiceSummary']['offlineSignature'] === 'preserved-signature',
+    'HTTP request excludes local receipt metadata and preserves the exact saved signature');
+checkRetry(isset($signedRequest['offlineSignatureData'], $signedRequest['invoiceSummary']['validationURL']),
+    'HTTP filtering does not mutate persisted receipt/retry metadata');
 $foreignSettings = new EisSetting();
 $foreignSettings->business_id = 8;
 $beforeGenerated = $service->generated;
@@ -806,7 +830,7 @@ checkRetry($firstDeferredPayload['invoiceSummary']['offlineSignature'] === 'fixt
     'Deferred first submission includes complete offline metadata without requiring an earlier failure');
 checkRetry($deferredResult->status === 'submitted',
     'Offline first attempt still uses normal successful response handling');
-Carbon\Carbon::setTestNow(Carbon\Carbon::parse('2026-10-26 13:10:00'));
+Carbon\Carbon::setTestNow(Carbon\Carbon::parse('2026-10-26 13:10:00.987654'));
 try {
     $datedSale = submissionFixture();
     DB::table('transactions')->where('id', $datedSale->id)->update(['transaction_date' => '2026-09-01 09:00:00']);
@@ -815,7 +839,7 @@ try {
     $datedTracking = EisSale::where('transaction_id', $datedSale->id)->firstOrFail();
     $invoiceDate = end($client->payloads)['invoiceHeader']['invoiceDateTime'];
     checkRetry($invoiceDate === $datedTracking->created_at->toIso8601String()
-        && Carbon\Carbon::parse($invoiceDate)->eq(now()),
+        && Carbon\Carbon::parse($invoiceDate)->eq(now()->startOfSecond()),
         'A new fiscal invoice uses current EIS creation time instead of the historical sale date');
     checkRetry($datedSale->fresh()->transaction_date === '2026-09-01 09:00:00',
         'Fiscal creation does not change the original POS transaction date');
@@ -828,9 +852,38 @@ try {
     $offlineSale = submissionFixture();
     DB::table('transactions')->where('id', $offlineSale->id)->update(['transaction_date' => '2026-09-02 09:00:00']);
     try { $service->submit($offlineSale, $settings, true); } catch (EisSaleException $exception) {}
-    checkRetry(Carbon\Carbon::parse(end($transformer->signatureDates))->eq(now())
-        && Carbon\Carbon::parse(end($client->payloads)['invoiceHeader']['invoiceDateTime'])->eq(now()),
+    checkRetry(Carbon\Carbon::parse(end($transformer->signatureDates))->eq(now()->startOfSecond())
+        && Carbon\Carbon::parse(end($client->payloads)['invoiceHeader']['invoiceDateTime'])->eq(now()->startOfSecond()),
         'Offline first attempt uses the current fiscal creation time for both header and signature');
+    $realSigningService = new SaleSubmissionService($realOfflineTransformer, $client, new SaleResponseService(), $generator);
+    $backdatedSale = submissionFixture();
+    DB::table('transactions')->where('id', $backdatedSale->id)->update(['transaction_date' => '2026-09-01 09:00:00']);
+    try { $realSigningService->submit($backdatedSale, $settings, true); } catch (EisSaleException $exception) {}
+    $signedBackdatedPayload = end($client->payloads);
+    parse_str($signedBackdatedPayload['offlineSignatureData']['param'], $signedParams);
+    checkRetry($signedParams['TI'] === $signedBackdatedPayload['invoiceHeader']['invoiceNumber']
+        && $generator->parseInvoiceNumber($signedParams['TI'])['julian_date'] === $generator->toJulianDate(now())
+        && $signedBackdatedPayload['invoiceHeader']['invoiceDateTime']
+            === EisSale::where('transaction_id', $backdatedSale->id)->firstOrFail()->created_at->toIso8601String(),
+        'Real allocator, transformer and signer agree on fiscal identity/date for a backdated sale');
+    $savedSignature = $signedBackdatedPayload['invoiceSummary']['offlineSignature'];
+    Carbon\Carbon::setTestNow(now()->addDay());
+    try { $realSigningService->submit($backdatedSale, $settings, true); } catch (EisSaleException $exception) {}
+    checkRetry(end($client->payloads)['invoiceSummary']['offlineSignature'] === $savedSignature
+        && end($client->payloads)['invoiceHeader'] === $signedBackdatedPayload['invoiceHeader'],
+        'Real signer retry next day preserves saved signature and fiscal header');
+    DB::table('eis_settings')->where('id', 1)->update(['secret_key' => '']);
+    $unsignedSale = submissionFixture();
+    $beforeRequests = count($client->payloads);
+    try {
+        $realSigningService->submit($unsignedSale, $settings, true);
+        throw new RuntimeException('Missing key must block deferred submission');
+    } catch (InvalidArgumentException $exception) {
+        checkRetry(count($client->payloads) === $beforeRequests
+            && EisSale::where('transaction_id', $unsignedSale->id)->value('status') === 'failed'
+            && DB::table('eis_failed_transactions')->where('transaction_id', $unsignedSale->id)->exists(),
+            'Invalid signing input persists a failed retry state without any HTTP submission');
+    }
 } finally {
     Carbon\Carbon::setTestNow();
 }

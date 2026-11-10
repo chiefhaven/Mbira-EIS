@@ -83,6 +83,8 @@ class EisSaleClient
         }
 
         $url = $this->baseUrl . '/sales/submit-sales-transaction';
+        // Receipt QR metadata is persisted locally, not part of the Swagger request.
+        unset($payload['offlineSignatureData'], $payload['invoiceSummary']['validationURL']);
 
         try {
             $response = Http::acceptJson()
