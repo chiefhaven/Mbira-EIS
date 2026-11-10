@@ -45,10 +45,12 @@ function addressCheck(bool $condition, string $message): void
     if (!$condition) { throw new RuntimeException($message); }
     ++$checks;
 }
-$render = function (bool $fiscal, string $printer = 'browser', int $terminal = 13, bool $showLegacy = true) use ($configurationBlock, $addressBlock): array {
+$render = function (bool $fiscal, string $printer = 'browser', int $terminal = 13, bool $showLegacy = true,
+    int $saleLocation = 48, ?int $fiscalLocation = null, int $fiscalBusiness = 6) use ($configurationBlock, $addressBlock): array {
     $is_eis_receipt = $fiscal;
-    $transaction = (object) ['id' => 100, 'business_id' => 6, 'location_id' => 48,
-        'eisSale' => (object) ['business_id' => 6, 'location_id' => 48, 'eis_setting_id' => $terminal]];
+    $transaction = (object) ['id' => 100, 'business_id' => 6, 'location_id' => $saleLocation,
+        'eisSale' => (object) ['business_id' => $fiscalBusiness, 'location_id' => $fiscalLocation ?? $saleLocation,
+            'eis_setting_id' => $terminal]];
     $il = (object) array_fill_keys(['show_landmark', 'show_city', 'show_state', 'show_zip_code', 'show_country'], $showLegacy ? 1 : 0);
     $location_details = (object) ['landmark' => 'Legacy street', 'city' => 'Legacy city',
         'state' => 'Legacy district', 'zip_code' => '100', 'country' => 'Malawi'];
@@ -67,6 +69,20 @@ addressCheck($render(true, 'browser', 13, false)[0] === $address, 'EIS address d
 addressCheck($render(false)[0] === 'Legacy street, Legacy city, Legacy district, 100, Malawi', 'Non-EIS receipt keeps existing address behavior');
 addressCheck($render(false, 'browser', 13, false)[0] === '', 'Non-EIS address visibility flags remain enforced');
 addressCheck($render(true, 'browser', 14)[0] === 'Wrong terminal address', 'Recorded terminal ID selects its own configuration');
+DB::table('eis_terminal_configurations')->where('configuration_id', 4)
+    ->update(['address_lines' => '["Location 49 address"]']);
+addressCheck($render(true, 'browser', 13, true, 49)[0] === 'Location 49 address',
+    'Another sale location selects only that location configuration');
+addressCheck($render(true)[0] === $address, 'Other location configuration does not leak into the original sale receipt');
+foreach ([[48, 49, 6, 13], [48, 48, 7, 13], [50, 50, 6, 13], [48, 48, 6, 99]] as [$saleLocation, $fiscalLocation, $business, $terminal]) {
+    try {
+        $render(true, 'browser', $terminal, true, $saleLocation, $fiscalLocation, $business);
+        throw new RuntimeException('Mismatched or missing sale terminal must not use another configuration');
+    } catch (UnexpectedValueException $e) {
+        addressCheck(str_contains($e->getMessage(), 'original sale terminal'),
+            'Mismatched business/location or missing terminal/location requires the original terminal configuration');
+    }
+}
 foreach ([null, 'not json', '{"city":"wrong shape"}', '[123]'] as $invalid) {
     DB::table('eis_terminal_configurations')->where('configuration_id', 1)->update(['address_lines' => $invalid]);
     try {

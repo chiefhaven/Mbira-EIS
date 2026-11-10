@@ -55,7 +55,7 @@
                         {{ $line['total_line_discount'] ?? '0.00' }}
                         @if(!empty($line['line_discount_percent']))<small>({{ $line['line_discount_percent'] }}%)</small>@endif
                     </td>
-                    <td class="text-right">{{ $line['line_total'] }}</td>
+                    <td class="text-right">{{ $line['unit_price_quantity_subtotal'] }}</td>
                 @endif
             </tr>
             @if(!empty($line['modifiers']))
@@ -72,7 +72,7 @@
                         @if(empty($receipt_details->hide_price))
                             <td class="text-right">{{ $modifier['unit_price_exc_tax'] }}</td>
                             <td class="text-right">0.00</td>
-                            <td class="text-right">{{ $modifier['line_total'] }}</td>
+                            <td class="text-right">{{ $modifier['unit_price_quantity_subtotal'] }}</td>
                         @endif
                     </tr>
                 @endforeach

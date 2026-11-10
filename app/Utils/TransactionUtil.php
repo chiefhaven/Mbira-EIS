@@ -2243,6 +2243,7 @@ class TransactionUtil extends Util
                 'base_unit_price' => $this->num_f($base_unit_price, false, $business_details),
                 'price_exc_tax' => $line->quantity * $line->unit_price,
                 'unit_price_before_discount' => $this->num_f($line->unit_price_before_discount, false, $business_details),
+                'unit_price_quantity_subtotal' => $this->num_f($line->unit_price_before_discount * $line->quantity, false, $business_details),
                 'unit_price_before_discount_uf' => $line->unit_price_before_discount,
                 'unit_price_before_discount_inc_tax' => $this->num_f($line->unit_price_inc_tax + $line->get_discount_amount(), false, $business_details),
                 //Fields for 4th column
@@ -2375,6 +2376,7 @@ class TransactionUtil extends Util
                         'unit_price_exc_tax' => $this->num_f($modifier_line->unit_price, false, $business_details),
                         'unit_price_exc_tax' => $this->num_f($modifier_line->unit_price, false, $business_details),
                         'price_exc_tax' => $modifier_line->quantity * $modifier_line->unit_price,
+                        'unit_price_quantity_subtotal' => $this->num_f($modifier_line->unit_price * $modifier_line->quantity, false, $business_details),
 
                         //Fields for 4th column
                         'line_total' => $this->num_f($modifier_line->unit_price_inc_tax * $line->quantity, false, $business_details),
@@ -2462,6 +2464,7 @@ class TransactionUtil extends Util
 
                 //Fields for 4th column
                 'line_total' => $this->num_f($line->unit_price_inc_tax * $line->quantity_returned, false, $business_details),
+                'unit_price_quantity_subtotal' => $this->num_f($line->unit_price * $line->quantity_returned, false, $business_details),
 
                 // field for zatca pdf
                 'unit_price_before_discount_uf' => $line->unit_price_before_discount,

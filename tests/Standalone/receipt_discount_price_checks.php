@@ -91,8 +91,9 @@ foreach (['fixed', 'percentage', null] as $type) {
             'Headers must match the requested six-column order');
         $cells = array_map(fn ($node) => trim($node->textContent), iterator_to_array($xpath->query('//tbody/tr[1]/td')));
         receiptDiscountCheck(count($cells) === 6 && $cells[0] === '1' && $cells[3] === $receiptLine['unit_price_before_discount']
-            && str_starts_with($cells[4], $receiptLine['total_line_discount']) && $cells[5] === $receiptLine['line_total'],
-            'Rows must display VAT-exclusive pre-discount price, total discount and saved subtotal in the correct columns');
+            && str_starts_with($cells[4], $receiptLine['total_line_discount'])
+            && $cells[5] === number_format($line->unit_price_before_discount * $line->quantity, 2),
+            'Rows must display VAT-exclusive price, discount and unit price times quantity subtotal');
         $printedLines[] = $receiptLine;
     }
 }
@@ -118,7 +119,7 @@ receiptDiscountCheck(!str_contains($html, 'UnitPrice') && !str_contains($html, '
     && !str_contains($html, $printedLines[0]['unit_price_before_discount_inc_tax']), 'Hidden-price receipts must not expose any monetary columns');
 $withModifier = $printedLines[0];
 $withModifier['modifiers'] = [['name' => 'Extra', 'quantity' => '1', 'units' => 'pc', 'unit_price_inc_tax' => '5.00',
-    'unit_price_exc_tax' => '4.26', 'line_total' => '5.00']];
+    'unit_price_exc_tax' => '4.26', 'line_total' => '5.00', 'unit_price_quantity_subtotal' => '4.26']];
 $dom = new DOMDocument();
 $dom->loadHTML(renderDiscountPrice($compiler, $withModifier, $receipt_details));
 $xpath = new DOMXPath($dom);
@@ -136,7 +137,8 @@ foreach ([
     $namedLine['product_variation'] = $group;
     $namedLine['variation'] = $variation;
     $namedLine['modifiers'] = [['name' => $name, 'variation' => $name, 'quantity' => '1', 'units' => 'pc',
-        'unit_price_inc_tax' => '5.00', 'line_total' => '5.00']];
+        'unit_price_inc_tax' => '5.00', 'unit_price_exc_tax' => '4.26',
+        'unit_price_quantity_subtotal' => '4.26', 'line_total' => '5.00']];
     $dom = new DOMDocument();
     $dom->loadHTML(renderDiscountPrice($compiler, $namedLine, $receipt_details));
     $xpath = new DOMXPath($dom);
