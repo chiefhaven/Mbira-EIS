@@ -92,7 +92,7 @@ All sale receipt layouts omit the invoice-level Subtotal row; the product table
 still shows each line Subtotal.
 Taxable Amount and VAT use the same label/value columns and alignment as the
 other receipt totals, including left-aligned labels in the slim2 layout.
-The heading shows VAT Registered
+The heading shows `***VAT Registered***`
 above the receipt title only when `taxpayerConfiguration.isVATRegistered`
 in that terminal configuration is true (or the supported integer `1`).
 False or missing flags print no registration line. Sale prices,

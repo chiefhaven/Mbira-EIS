@@ -116,8 +116,8 @@ vatDisplayCheck(substr_count($html, 'class="width-50 text-right"') === 4
 vatDisplayCheck(str_contains($html, 'Taxable Amount') && str_contains($html, '7,234.04')
     && str_contains($html, 'VAT (17.5%):') && str_contains($html, '1,265.96'),
     'Receipt renders taxable amount and Total VAT followed by the standard rate');
-vatDisplayCheck(str_contains(renderVatPartial('vat_registered', $receipt), 'VAT Registered'),
-    'VAT registered fiscal receipt includes the heading marker');
+vatDisplayCheck(str_contains(renderVatPartial('vat_registered', $receipt), '***VAT Registered***'),
+    'VAT registered fiscal receipt wraps the heading marker in literal asterisks');
 $receipt->vat_registered = false;
 vatDisplayCheck(trim(renderVatPartial('vat_registered', $receipt)) === '',
     'Non-VAT registered terminal does not claim registration');
