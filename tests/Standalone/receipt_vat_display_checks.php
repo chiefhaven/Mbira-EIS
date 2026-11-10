@@ -116,6 +116,10 @@ $receipt = (object) ['eis_invoice_number' => 'TEST', 'vat_registered' => true,
     'vat_registered_label' => 'VAT Registered', 'taxable_amount_label' => 'Taxable Amount:',
     'taxable_amount' => '7,234.04', 'vat_total_label' => 'VAT (17.5%):', 'vat_amount' => '1,265.96'];
 $html = renderVatPartial('vat_summary', $receipt);
+vatDisplayCheck(substr_count($html, 'class="width-50 text-right"') === 4
+    && str_contains($html, 'class="flex-box receipt-taxable-amount"')
+    && str_contains($html, 'class="flex-box receipt-total-vat"'),
+    'VAT and taxable amount use the same equal-width right-aligned columns as receipt totals');
 vatDisplayCheck(str_contains($html, 'Taxable Amount') && str_contains($html, '7,234.04')
     && str_contains($html, 'VAT (17.5%):') && str_contains($html, '1,265.96'),
     'Receipt renders taxable amount and Total VAT followed by the standard rate');

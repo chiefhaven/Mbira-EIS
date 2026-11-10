@@ -480,7 +480,7 @@
 				</div>
 			@endif
 
-			@include('sale_pos.receipts.partial.vat_summary')
+			@include('sale_pos.receipts.partial.vat_summary', ['label_alignment' => 'text-left'])
 			<div class="flex-box">
 				<p class="width-50 text-left">
 					{!! $receipt_details->total_label !!}

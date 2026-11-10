@@ -11,15 +11,15 @@
             <td class="text-right">{{ $receipt_details->vat_amount }}</td>
         </tr>
     @else
-    @if(isset($receipt_details->taxable_amount))
-        <div class="receipt-taxable-amount" style="display: flex; justify-content: space-between; gap: 8px;">
-            <span>{{ $receipt_details->taxable_amount_label }}</span>
-            <span>{{ $receipt_details->taxable_amount }}</span>
+        @if(isset($receipt_details->taxable_amount))
+        <div class="flex-box receipt-taxable-amount">
+            <p class="width-50 {{ $label_alignment ?? 'text-right' }}">{{ $receipt_details->taxable_amount_label }}</p>
+            <p class="width-50 text-right">{{ $receipt_details->taxable_amount }}</p>
         </div>
-    @endif
-    <div class="receipt-total-vat" style="display: flex; justify-content: space-between; gap: 8px;">
-        <span>{{ $receipt_details->vat_total_label ?? __('sale.vat').':' }}</span>
-        <span>{{ $receipt_details->vat_amount }}</span>
-    </div>
+        @endif
+        <div class="flex-box receipt-total-vat">
+            <p class="width-50 {{ $label_alignment ?? 'text-right' }}">{{ $receipt_details->vat_total_label ?? __('sale.vat').':' }}</p>
+            <p class="width-50 text-right">{{ $receipt_details->vat_amount }}</p>
+        </div>
     @endif
 @endif

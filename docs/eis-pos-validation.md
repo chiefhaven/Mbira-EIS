@@ -83,6 +83,8 @@ rates must be synchronized/refreshed before printing.
 Fiscal receipts display Subtotal as fiscal invoice total less VAT (including
 zero-rated and exempt bases), followed by Taxable Amount, VAT, Total, and
 payments. Total remains VAT-inclusive; Taxable Amount includes only positive-rate bases.
+Taxable Amount and VAT use the same label/value columns and alignment as the
+other receipt totals, including left-aligned labels in the slim2 layout.
 The heading shows VAT Registered
 above the receipt title only when `taxpayerConfiguration.isVATRegistered`
 in that terminal configuration is true (or the supported integer `1`).
