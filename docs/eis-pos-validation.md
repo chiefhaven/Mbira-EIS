@@ -1,28 +1,33 @@
 # EIS buyer and relief validation
 
-All Sales (`/sells`) displays EIS submission status separately from payment and
-void status: Submitted, Pending, Failed, or Not submitted when no tracking exists.
+All Sales (`/sells`) displays EIS submission status separately from payment:
+Submitted, Pending, Failed, or Not submitted when no tracking exists.
 The column reflects saved tracking; it does not initiate fiscal submissions.
 
 ## Fiscal sales returns
 
-Saving a new full return of a submitted EIS sale prepares a receipt cancellation
-atomically with the local return and sends it automatically after commit (web and
-Connector API). A full return must match every original quantity and the original
-invoice total. Cancellation requires the existing `sell.delete` or
-`business_settings.access` permission in addition to return/location access.
-The reason identifies the local return and original sale.
+ERP sale returns (full or partial) are disabled for any fully paid invoice,
+including non-EIS sales. Sales/POS actions, direct return pages, invoice lookup
+and shared return writes enforce this rule using the original sale payment status.
+Existing returns remain viewable; unpaid/partially paid invoices retain the
+existing permission and fiscal eligibility checks.
 
-Partial returns keep the prepared credit/debit-note review workflow. A full
-return is blocked if a fiscal note chain already exists or a historical local
-return has not been fiscally reconciled; review these with MRA rather than
-crediting and cancelling the same invoice.
+EIS receipt cancellation and void features are disabled. Cancellation actions,
+void-status checks, columns and filters are removed from sales/POS screens.
+The utility catalogue excludes `cancel-receipt` and `get-void-receipts`;
+backend calls and previously prepared cancellation submissions are rejected
+before sending or claiming requests. Void synchronization is also blocked.
+Historical requests and void flags are preserved, not deleted or reset.
 
-Cancellation acceptance means the request was received, not that MRA approved
-the void. The return already updates local stock/customer credit. Rejected,
-unsent, or uncertain cancellations are reported separately after saving, and
-uncertain outcomes are never automatically resent. Review saved requests in
-Settings > MRA EIS > EIS Sales. Rollback sends no cancellation.
+Automatic full-return cancellation is disabled. A full fiscal return is blocked
+inside the local ledger transaction with an explicit error, so no return, stock
+or customer-credit change is committed without a supported fiscal workflow.
+Partial returns retain their existing credit/debit-note review workflow.
+Existing unresolved cancellation requests still require outcome verification
+before further adjustments; disabling a feature does not undo remote requests.
+
+Run `php tests/Standalone/eis_void_disabled_checks.php` to verify disabled
+entry points and historical-request preservation using HTTP fakes and SQLite.
 
 ## Dashboard fiscal VAT
 

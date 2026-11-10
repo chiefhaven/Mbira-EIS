@@ -23,6 +23,7 @@ class UtilitiesController extends Controller
             'payload' => 'required|string|max:8000000',
         ]);
         $this->authorizeAccount($request, $input['operation']);
+        UtilityOperations::assertEnabled($input['operation']);
         $setting = $this->terminal($request, (int) $input['terminal_id']);
         try {
             $object = json_decode($input['payload'], false, 64, JSON_THROW_ON_ERROR);
@@ -94,6 +95,7 @@ class UtilitiesController extends Controller
     public function show(Request $request, int $requestId)
     {
         $row = $this->record($request, $requestId);
+        UtilityOperations::assertEnabled($row->operation);
         $setting = $this->terminal($request, (int) $row->eis_setting_id);
         $this->authorizeOperation($request, $setting, $row->operation, json_decode($row->payload, true, 512, JSON_THROW_ON_ERROR));
         return response()->json(['success' => true, 'data' => $this->reviewData($row)]);
@@ -103,6 +105,7 @@ class UtilitiesController extends Controller
     {
         $request->validate(['confirmed' => 'required|accepted', 'real_inventory' => 'sometimes|accepted']);
         $row = $this->record($request, $requestId);
+        UtilityOperations::assertEnabled($row->operation);
         $setting = $this->terminal($request, (int) $row->eis_setting_id);
         $this->authorizeOperation($request, $setting, $row->operation, json_decode($row->payload, true, 512, JSON_THROW_ON_ERROR));
         if ($row->operation === 'taxpayer-initial-inventory-upload') {

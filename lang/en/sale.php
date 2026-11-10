@@ -93,5 +93,6 @@ return [
     'taxable_amount' => 'Taxable Amount',
     'total_vat' => 'Total VAT',
     'vat' => 'VAT',
+    'paid_invoice_return_disabled' => 'Sale returns are disabled for fully paid invoices.',
     'total_including_vat' => 'Total including VAT',
 ];

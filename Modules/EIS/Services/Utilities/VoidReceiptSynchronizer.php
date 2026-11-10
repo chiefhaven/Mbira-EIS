@@ -10,6 +10,7 @@ final class VoidReceiptSynchronizer
 {
     public function sync(EisSetting $setting, array $items): array
     {
+        UtilityOperations::assertEnabled('get-void-receipts');
         app(EisSubscriptionAccess::class)->assertAllowed((int) $setting->business_id);
 
         foreach (['void_status', 'void_approval_status', 'void_synced_at', 'void_response_payload'] as $column) {

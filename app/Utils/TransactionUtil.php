@@ -6569,6 +6569,13 @@ class TransactionUtil extends Util
         return $parent_payment;
     }
 
+    public static function assertSaleReturnAllowed(Transaction $sale): void
+    {
+        if ($sale->payment_status === 'paid') {
+            throw new \InvalidArgumentException(__('sale.paid_invoice_return_disabled'));
+        }
+    }
+
     public function addSellReturn($input, $business_id, $user_id, $uf_number = true)
     {
         \App\Services\Sales\SavedSaleWriteGuard::lock(DB::connection(), $input['transaction_id']);
@@ -6591,6 +6598,7 @@ class TransactionUtil extends Util
                         ->lockForUpdate()
                         ->findOrFail($input['transaction_id']);
 
+        self::assertSaleReturnAllowed($sell);
         $eisReturns = app(\Modules\EIS\Services\Sales\SaleAdjustmentService::class);
         $eisFiscal = $eisReturns->beforeReturn($sell, (int) $user_id);
 

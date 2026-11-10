@@ -98,6 +98,7 @@ class UtilityRequestService
             $row = DB::table('eis_utility_requests')->where('business_id', $setting->business_id)
                 ->where('eis_setting_id', $setting->id)->where('id', $requestId)->lockForUpdate()->first();
             if (!$row) { throw new \InvalidArgumentException('Utility request does not belong to this business terminal.'); }
+            UtilityOperations::assertEnabled($row->operation);
             if ($row->status !== 'prepared') { return [$row, false, $setting]; }
             if ($row->endpoint !== $this->endpoint() || $row->site_id !== TerminalContext::site($setting)
                 || $row->device_id !== $setting->device_id || $row->tin !== $setting->tpin

@@ -95,6 +95,7 @@ class SellReturnController extends Controller
                     'bl.name as business_location',
                     'T1.invoice_no as parent_sale',
                     'T1.id as parent_sale_id',
+                    'T1.payment_status as parent_payment_status',
                     DB::raw('SUM(TP.amount) as amount_paid')
                 );
 
@@ -203,11 +204,11 @@ class SellReturnController extends Controller
                                             <i class="fas fa-eye" aria-hidden="true"></i> ' . __('messages.view') . '
                                         </a>
                                     </li>
-                                    <li>
+                                    '.($row->parent_payment_status !== 'paid' ? '<li>
                                         <a href="' . action('App\Http\Controllers\SellReturnController@add', [$row->parent_sale_id]) . '">
                                             <i class="fa fa-edit" aria-hidden="true"></i> ' . __('messages.edit') . '
                                         </a>
-                                    </li>
+                                    </li>' : '').'
                                     <li>
                                         <a href="' . action('App\Http\Controllers\SellReturnController@destroy', [$row->id]) . '" class="delete_sell_return">
                                             <i class="fa fa-trash" aria-hidden="true"></i> ' . __('messages.delete') . '
@@ -346,7 +347,9 @@ class SellReturnController extends Controller
 
         $sell = Transaction::where('business_id', $business_id)
             ->with(['sell_lines', 'location', 'return_parent', 'contact', 'tax', 'sell_lines.sub_unit', 'sell_lines.product', 'sell_lines.product.unit'])
-            ->find($id);
+            ->findOrFail($id);
+
+        abort_if($sell->payment_status === 'paid', 403, __('sale.paid_invoice_return_disabled'));
 
         foreach ($sell->sell_lines as $key => $value) {
             if (!empty($value->sub_unit_id)) {
@@ -696,6 +699,10 @@ class SellReturnController extends Controller
             return ['success' => 0,
                 'msg' => trans('lang_v1.sell_not_found'),
             ];
+        }
+
+        if ($sell->payment_status === 'paid') {
+            return ['success' => 0, 'msg' => __('sale.paid_invoice_return_disabled')];
         }
 
         return ['success' => 1,

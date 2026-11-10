@@ -135,7 +135,6 @@ class SellController extends Controller
                 'sub_type' => request()->input('sub_type'),
                 'status' => request()->input('status'),
                 'eis_status' => request()->input('eis_status'),
-                'eis_void_status' => request()->input('eis_void_status'),
                 'sales_cmsn_agnt' => request()->input('sales_cmsn_agnt'),
                 'service_staffs' => request()->input('service_staffs'),
                 'only_pending_shipments' => request()->input('only_pending_shipments'),
@@ -364,9 +363,10 @@ class SellController extends Controller
                                 if (auth()->user()->can('sell.create') || auth()->user()->can('direct_sell.access')) {
                                     // $html .= '<li><a href="' . action([\App\Http\Controllers\SellController::class, 'duplicateSell'], [$row->id]) . '"><i class="fas fa-copy"></i> ' . __("lang_v1.duplicate_sell") . '</a></li>';
 
-                                    $html .= '<li><a href="'.action([\App\Http\Controllers\SellReturnController::class, 'add'], [$row->id]).'"><i class="fas fa-undo"></i> '.__('lang_v1.sell_return').'</a></li>
-
-                                    <li><a href="'.action([\App\Http\Controllers\SellPosController::class, 'showInvoiceUrl'], [$row->id]).'" class="view_invoice_url"><i class="fas fa-eye"></i> '.__('lang_v1.view_invoice_url').'</a></li>';
+                                    if ($row->payment_status !== 'paid') {
+                                        $html .= '<li><a href="'.action([\App\Http\Controllers\SellReturnController::class, 'add'], [$row->id]).'"><i class="fas fa-undo"></i> '.__('lang_v1.sell_return').'</a></li>';
+                                    }
+                                    $html .= '<li><a href="'.action([\App\Http\Controllers\SellPosController::class, 'showInvoiceUrl'], [$row->id]).'" class="view_invoice_url"><i class="fas fa-eye"></i> '.__('lang_v1.view_invoice_url').'</a></li>';
                                 }
                             }
 
@@ -378,26 +378,6 @@ class SellController extends Controller
                                     $html .= '<li><a href="#" class="eis-sale-sync" data-sync-url="'
                                         .e(route('eis.sales.sync', ['id' => $fiscalSale->id])).'">'
                                         .'<i class="fas fa-sync"></i> Sync EIS Invoice/Receipt</a></li>';
-                                }
-                            }
-                            if ($canUseEis && auth()->user()->can('sell.delete')) {
-                                $fiscalSale = $row->relationLoaded('eisSale') ? $row->eisSale : null;
-                                $eisInvoiceNumber = $fiscalSale ? $fiscalSale->eis_invoice_number : null;
-                                if ($fiscalSale && $fiscalSale->status === 'submitted'
-                                    && $eisInvoiceNumber && $fiscalSale->eis_setting_id) {
-                                    $html .= '<li><a href="#" class="eis-cancel-receipt" data-terminal-id="'
-                                        .e((string) $fiscalSale->eis_setting_id).'" data-invoice-number="'
-                                        .e($eisInvoiceNumber).'" data-pos-invoice-number="'
-                                        .e((string) ($row->invoice_no ?? '')).'" data-invoice-date="'
-                                        .e((string) ($row->transaction_date ?? '')).'" data-customer="'
-                                        .e(trim((!empty($row->supplier_business_name) ? $row->supplier_business_name.' - ' : '').($row->name ?? ''))).'" data-location="'
-                                        .e((string) ($row->business_location ?? '')).'" data-total="'
-                                        .e((string) ($row->final_total ?? '')).'"><i class="fas fa-ban"></i> Request EIS receipt cancellation</a></li>';
-                                    if (auth()->user()->can('business_settings.access')) {
-                                        $html .= '<li><a href="#" class="eis-void-sync" data-terminal-id="'
-                                            .e((string) $fiscalSale->eis_setting_id).'" data-invoice-number="'
-                                            .e($eisInvoiceNumber).'"><i class="fas fa-sync"></i> Check EIS void status</a></li>';
-                                    }
                                 }
                             }
 
@@ -526,17 +506,6 @@ class SellController extends Controller
                     $status = optional($row->eisSale)->status;
                     return $status ? ($eis_status[$status] ?? $status) : __('sale.eis_not_submitted');
                 })
-                ->addColumn('eis_void_status', function ($row) {
-                    $sale = $row->eisSale;
-                    if (!$sale || !$sale->void_synced_at) {
-                        return '';
-                    }
-                    if ($sale->void_status === 'void') {
-                        return '<span class="label label-danger">Void</span>';
-                    }
-                    return $sale->void_approval_status
-                        ? '<span class="label label-default">'.e($sale->void_approval_status).'</span>' : '';
-                })
                 ->editColumn('status', function ($row) use ($sales_order_statuses, $is_admin) {
                     $status = '';
 
@@ -586,7 +555,7 @@ class SellController extends Controller
                         }
                     }, ]);
 
-            $rawColumns = ['final_total', 'action', 'total_paid', 'total_remaining', 'payment_status', 'invoice_no', 'discount_amount', 'tax_amount', 'total_before_tax', 'shipping_status', 'types_of_service_name', 'payment_methods', 'return_due', 'conatct_name', 'status', 'zatca_status', 'eis_void_status'];
+            $rawColumns = ['final_total', 'action', 'total_paid', 'total_remaining', 'payment_status', 'invoice_no', 'discount_amount', 'tax_amount', 'total_before_tax', 'shipping_status', 'types_of_service_name', 'payment_methods', 'return_due', 'conatct_name', 'status', 'zatca_status'];
 
             return $datatable->rawColumns($rawColumns)
                       ->skipTotalRecords()
@@ -2598,29 +2567,6 @@ class SellController extends Controller
             $query->where('transactions.status', request()->input('status'));
         }
 
-        $voidFilter = request()->input('eis_void_status');
-        if (in_array($voidFilter, ['void', 'not_void'], true)) {
-            if (!DB::getSchemaBuilder()->hasTable('eis_sales') ||
-                !DB::getSchemaBuilder()->hasColumn('eis_sales', 'void_status')) {
-                if ($voidFilter === 'void') {
-                    $query->whereRaw('1 = 0');
-                }
-            } elseif ($voidFilter === 'void') {
-                $query->whereExists(function ($subquery) use ($business_id) {
-                    $subquery->select(DB::raw(1))->from('eis_sales as void_sales')
-                        ->whereColumn('void_sales.transaction_id', 'transactions.id')
-                        ->where('void_sales.business_id', $business_id)
-                        ->where('void_sales.void_status', 'void');
-                });
-            } else {
-                $query->whereNotExists(function ($subquery) use ($business_id) {
-                    $subquery->select(DB::raw(1))->from('eis_sales as void_sales')
-                        ->whereColumn('void_sales.transaction_id', 'transactions.id')
-                        ->where('void_sales.business_id', $business_id)
-                        ->where('void_sales.void_status', 'void');
-                });
-            }
-        }
 
         // Commission agent filters
         if (! empty(request()->input('sales_cmsn_agnt'))) {

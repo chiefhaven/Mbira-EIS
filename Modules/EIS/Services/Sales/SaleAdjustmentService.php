@@ -9,7 +9,6 @@ use Modules\EIS\Models\EisSale;
 use Modules\EIS\Models\EisSetting;
 use Modules\EIS\Services\Terminal\TerminalContext;
 use Modules\EIS\Services\Utilities\EisUtilitiesClient;
-use Modules\EIS\Services\Utilities\UtilityRequestService;
 use Modules\EIS\Services\EisSubscriptionAccess;
 
 class SaleAdjustmentService
@@ -116,35 +115,7 @@ class SaleAdjustmentService
             fn ($line) => abs((float) $line['quantity'] - (float) $line['quantity_returned']) < 0.00001
         ) && abs((float) $sale->final_total - (float) $return->final_total) < 0.005;
         if ($isFullReturn) {
-            if ($last) {
-                throw new \InvalidArgumentException('This sale already has a fiscal note chain. Review it with MRA before cancelling the entire receipt.');
-            }
-            if (!$return->wasRecentlyCreated) {
-                throw new \InvalidArgumentException('Historical returns need EIS verification before requesting receipt cancellation.');
-            }
-            $actor = \App\User::where('business_id', $sale->business_id)->findOrFail($actorId);
-            if (!$actor->can('business_settings.access') && !$actor->can('sell.delete')) {
-                throw new \InvalidArgumentException('A full fiscal return requests receipt cancellation and requires sales-delete or business-settings permission.');
-            }
-            $number = $fiscal->eis_invoice_number ?: ($fiscal->receipt_number ?: $fiscal->fiscal_invoice_number);
-            if (!$number) {
-                throw new \InvalidArgumentException('The original fiscal receipt number is missing.');
-            }
-            $request = app(UtilityRequestService::class)->prepare($setting, 'cancel-receipt', [
-                'receiptNumber' => $number,
-                'reason' => $this->cancellationReason($return),
-            ], $actorId);
-            DB::afterCommit(function () use ($setting, $request, $actorId) {
-                try {
-                    app(UtilityRequestService::class)->submit($setting, (int) $request->id, $actorId);
-                } catch (\Throwable $exception) {
-                    Log::error('Automatic EIS return cancellation could not complete', [
-                        'request_id' => $request->id, 'business_id' => $setting->business_id,
-                        'exception' => get_class($exception), 'message' => $exception->getMessage(),
-                    ]);
-                }
-            });
-            return;
+            throw new \InvalidArgumentException('Full fiscal returns are unavailable while EIS receipt cancellation and void requests are disabled. No return was saved.');
         }
         if (!$last && collect($lines)->contains(fn ($line) => (float) $line['quantity_returned'] > 0)
             && $return->wasRecentlyCreated === false) {

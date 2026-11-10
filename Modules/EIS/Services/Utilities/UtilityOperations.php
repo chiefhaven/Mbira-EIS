@@ -9,6 +9,13 @@ use Modules\EIS\Services\Terminal\TerminalContext;
 
 final class UtilityOperations
 {
+    public static function assertEnabled(string $operation): void
+    {
+        if (in_array($operation, ['cancel-receipt', 'get-void-receipts'], true)) {
+            throw ValidationException::withMessages(['operation' => 'EIS receipt cancellation and void requests are disabled.']);
+        }
+    }
+
     public const MUTATIONS = ['cancel-receipt', 'taxpayer-initial-inventory-upload'];
 
     public static function definitions(): array
@@ -21,10 +28,6 @@ final class UtilityOperations
             'validate-authorization-code' => ['authorizationCode' => ''],
             'ping' => [],
             'product-status' => ['productId' => ''],
-            'cancel-receipt' => ['receiptNumber' => '', 'reason' => '', 'supportingDocuments' => ''],
-            'get-void-receipts' => [
-                'status' => null, 'invoiceNumber' => '', 'startDate' => '', 'endDate' => '', 'page' => 1, 'pageSize' => 20,
-            ],
             'get-terminal-site-products' => [],
             'taxpayer-initial-inventory-upload' => ['isLastBatch' => false, 'products' => [[
                 'barCode' => '', 'productName' => '', 'productDescription' => '',
@@ -36,6 +39,7 @@ final class UtilityOperations
 
     public static function path(string $operation): string
     {
+        self::assertEnabled($operation);
         if (!array_key_exists($operation, self::definitions())) {
             throw ValidationException::withMessages(['operation' => 'Select a documented EIS utility.']);
         }

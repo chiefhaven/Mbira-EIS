@@ -398,27 +398,12 @@ $sellPosControllerSource = file_get_contents(dirname(__DIR__, 2).'\app\Http\Cont
 $posIndexSource = file_get_contents(dirname(__DIR__, 2).'\resources\views\sale_pos\index.blade.php');
 $cancelScriptSource = file_get_contents(dirname(__DIR__, 2).'\resources\views\sell\partials\eis_cancel_receipt_javascript.blade.php');
 $cancelModalSource = file_get_contents(dirname(__DIR__, 2).'\resources\views\sell\partials\eis_cancel_receipt_modal.blade.php');
-managementCheck(str_contains($sellControllerSource, 'eis-cancel-receipt')
-    && str_contains($sellControllerSource, '$fiscalSale->eis_invoice_number')
-    && !str_contains($sellControllerSource, "$fiscalSale->getRawOriginal('receipt_number')")
-    && str_contains($sellControllerSource, 'data-pos-invoice-number=')
-    && str_contains($sellControllerSource, 'data-total=')
-    && str_contains($cancelScriptSource, "operation: 'cancel-receipt'")
-    && str_contains($cancelScriptSource, "data: {confirmed: 1}")
-    && str_contains($cancelScriptSource, 'approval is separate')
-    && str_contains($cancelScriptSource, "result.data.status === 'accepted'")
-    && str_contains($cancelScriptSource, "toastr.success(message)")
-    && str_contains($cancelScriptSource, "modal.modal('hide')")
-    && str_contains($sellPosControllerSource, '$canUseEis = \App\Services\EisProductPolicy::configured($business_id)')
-    && str_contains($sellPosControllerSource, "'canUseEis'")
-    && str_contains($posIndexSource, "@include('sell.partials.eis_cancel_receipt_modal')")
-    && str_contains($posIndexSource, "@include('sell.partials.eis_cancel_receipt_javascript')")
-    && str_contains($cancelScriptSource, 'function renderSaleDetails')
-    && !str_contains($cancelScriptSource, "EisResultTables.render('#eis-cancel")
-    && str_contains($cancelScriptSource, "['Fiscal invoice', sale.fiscal_invoice_number]")
-    && str_contains($cancelScriptSource, "['Cancellation reason', data.reason]")
-    && str_contains($cancelModalSource, 'eis-cancel-review-details'),
-    'POS cancellation review shows invoice details instead of the technical request payload');
+managementCheck(!str_contains($sellControllerSource, 'eis-cancel-receipt')
+    && !str_contains($sellControllerSource, 'eis-void-sync')
+    && !str_contains($posIndexSource, "@include('sell.partials.eis_cancel_receipt_modal')")
+    && !str_contains($posIndexSource, "@include('sell.partials.eis_cancel_receipt_javascript')")
+    && !str_contains($posIndexSource, "@include('sell.partials.eis_void_tools_javascript')"),
+    'Disabled EIS cancellation and void features have no POS actions, modal or scripts');
 $moduleViews = [
     'terminals\index.blade.php', 'sales\index.blade.php',
     'stock\tools.blade.php', 'stock\outbound.blade.php', 'stock\reconcile.blade.php',
