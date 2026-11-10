@@ -89,4 +89,7 @@ return [
     'shipping' => 'Shipping',
     'shipping_details' => 'Shipping Details',
     'shipping_charges' => 'Shipping Charges',
+    'vat_registered' => 'VAT Registered',
+    'taxable_amount' => 'Taxable Amount',
+    'total_vat' => 'Total VAT',
 ];

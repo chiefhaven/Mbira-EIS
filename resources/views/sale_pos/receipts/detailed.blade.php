@@ -566,12 +566,7 @@
                     </div>
                 </div>
 
-                @if (empty($receipt_details->hide_price) && !empty($receipt_details->vat_amount))
-                    <div class="border-bottom col-md-12">
-                        VAT:
-                        <span class="pull-right">{{ $receipt_details->vat_amount }}</span>
-                    </div>
-                @endif
+                @include('sale_pos.receipts.partial.vat_summary')
 
                 @if (!empty($receipt_details->additional_notes))
                     <div class="row ">

@@ -1056,6 +1056,7 @@ class TransactionUtil extends Util
             && ! empty($transaction->eisSale->eis_invoice_number);
         $eis_trading_name = null;
         $eis_address_lines = null;
+        $eis_configuration = [];
         if ($is_eis_receipt
             && (int) $transaction->eisSale->business_id === (int) $transaction->business_id
             && (int) $transaction->eisSale->location_id === (int) $transaction->location_id
@@ -1065,10 +1066,11 @@ class TransactionUtil extends Util
                 ->where('configuration.business_id', $transaction->business_id)
                 ->where('configuration.location_id', $transaction->location_id)
                 ->where('configuration.eis_setting_id', $transaction->eisSale->eis_setting_id)
-                ->first(['terminal.trading_name', 'terminal.address_lines']);
+                ->first(['terminal.trading_name', 'terminal.address_lines', 'configuration.raw_response']);
             $eis_trading_name = $eis_terminal->trading_name ?? null;
             if ($eis_terminal) {
                 $eis_address_lines = json_decode($eis_terminal->address_lines ?? '', true);
+                $eis_configuration = json_decode($eis_terminal->raw_response ?? '', true)['data'] ?? [];
             }
         }
         if ($is_eis_receipt && (!is_array($eis_address_lines) || !array_is_list($eis_address_lines)
@@ -1093,6 +1095,10 @@ class TransactionUtil extends Util
             'receipt_item_discount_label' => !empty($il->common_settings['item_discount_label'])
                 ? $il->common_settings['item_discount_label'] : __('sale.discount'),
         ];
+        $output['vat_registered'] = ($eis_configuration['taxpayerConfiguration']['isVATRegistered'] ?? false) === true;
+        $output['vat_registered_label'] = __('sale.vat_registered');
+        $output['taxable_amount_label'] = __('sale.taxable_amount');
+        $output['vat_total_label'] = __('sale.total_vat');
 
         //Display name
         $output['display_name'] = $output['business_name'];
@@ -1575,6 +1581,21 @@ class TransactionUtil extends Util
         $output['tax_label'] .= ':';
         $output['tax'] = ($transaction->tax_amount != 0) ? $this->num_f($transaction->tax_amount, $show_currency, $business_details) : 0;
         $output['vat_amount'] = $this->num_f($total_line_taxes + $transaction->tax_amount, $show_currency, $business_details);
+        $output['taxable_amount'] = $this->num_f(
+            $transaction->final_total - $total_line_taxes - $transaction->tax_amount, $show_currency, $business_details
+        );
+        if ($is_eis_receipt) {
+            $payload = $transaction->eisSale->request_payload;
+            if (is_string($payload)) {
+                $payload = json_decode($payload, true);
+            }
+            $fiscalTax = $this->receiptFiscalTaxDetails($payload ?? [], $eis_configuration);
+            $output['vat_amount'] = $this->num_f($fiscalTax['vat'], $show_currency, $business_details);
+            $output['taxable_amount'] = $this->num_f($fiscalTax['taxable_amount'], $show_currency, $business_details);
+            if ($fiscalTax['standard_rate'] !== null) {
+                $output['vat_total_label'] .= ' ('.$fiscalTax['standard_rate'].'%)';
+            }
+        }
 
         if ($transaction->tax_amount != 0 && $tax->is_tax_group) {
             $transaction_group_tax_details = $this->groupTaxDetails($tax, $transaction->tax_amount);
@@ -2341,6 +2362,7 @@ class TransactionUtil extends Util
                         //Field for 3rd column
                         'unit_price_inc_tax' => $this->num_f($modifier_line->unit_price_inc_tax, false, $business_details),
                         'unit_price_exc_tax' => $this->num_f($modifier_line->unit_price, false, $business_details),
+                        'unit_price_exc_tax' => $this->num_f($modifier_line->unit_price, false, $business_details),
                         'price_exc_tax' => $modifier_line->quantity * $modifier_line->unit_price,
 
                         //Fields for 4th column
@@ -2905,6 +2927,32 @@ class TransactionUtil extends Util
         $total_tax = round($total_tax, 2);
         return ['header_tax' => 0, 'item_tax' => $total_tax, 'total_tax' => $total_tax,
             'total_eis_sales' => round($total_eis_sales, 2)];
+    }
+
+    private function receiptFiscalTaxDetails(array $invoice, array $configuration): array
+    {
+        $summary = $invoice['invoiceSummary'] ?? [];
+        $vat = $summary['totalVAT'] ?? null;
+        $total = $summary['invoiceTotal'] ?? null;
+        if (!is_numeric($vat) || !is_numeric($total) || !is_finite((float) $vat)
+            || !is_finite((float) $total) || $vat < 0 || $total < $vat) {
+            Log::error('EIS receipt fiscal tax totals are missing or invalid');
+            throw new \UnexpectedValueException('The EIS invoice tax totals are unavailable. Synchronize the invoice before printing.');
+        }
+        $standardRate = null;
+        foreach ($configuration['globalConfiguration']['taxrates'] ?? [] as $rate) {
+            if (strcasecmp(trim($rate['name'] ?? ''), 'Standard Rated') !== 0) {
+                continue;
+            }
+            if (!is_numeric($rate['rate'] ?? null) || !is_finite((float) $rate['rate']) || $rate['rate'] < 0) {
+                Log::error('EIS receipt standard VAT rate is invalid');
+                throw new \UnexpectedValueException('Refresh the EIS terminal configuration before printing the VAT rate.');
+            }
+            $standardRate = rtrim(rtrim(number_format((float) $rate['rate'], 4, '.', ''), '0'), '.');
+            break;
+        }
+        return ['vat' => (float) $vat, 'taxable_amount' => round((float) $total - (float) $vat, 2),
+            'standard_rate' => $standardRate];
     }
 
     public function getTotalLedgerDiscount($business_id, $start_date = null, $end_date = null)

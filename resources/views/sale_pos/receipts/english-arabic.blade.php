@@ -205,7 +205,12 @@
                                 </tr>
                                 @if(empty($receipt_details->hide_price))
                                     <tr>
-                                        <td style="font-weight: bold; text-align: right;">VAT:</td>
+                                        <td style="font-weight: bold; text-align: right;">{{ $receipt_details->taxable_amount_label }}</td>
+                                        <td class="print-red" style="text-align: center;">{{ $receipt_details->taxable_amount }}</td>
+                                        <td></td>
+                                    </tr>
+                                    <tr>
+                                        <td style="font-weight: bold; text-align: right;">{{ $receipt_details->vat_total_label }}</td>
                                         <td class="print-red" style="text-align: center;">{{$receipt_details->vat_amount}}</td>
                                         <td style="font-weight: bold; direction: rtl; text-align: right;">ضريبة القيمة المضافة:</td>
                                     </tr>

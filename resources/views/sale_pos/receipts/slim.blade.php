@@ -489,12 +489,7 @@
 						{{$receipt_details->total}}
 					</p>
 				</div>
-				@if(empty($receipt_details->hide_price))
-					<div class="flex-box">
-						<p class="width-50 text-right">VAT:</p>
-						<p class="width-50 text-right">{{$receipt_details->vat_amount}}</p>
-					</div>
-				@endif
+				@include('sale_pos.receipts.partial.vat_summary')
 				@if(!empty($receipt_details->total_in_words))
 				<p colspan="2" class="text-right mb-0">
 					<small>
