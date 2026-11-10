@@ -1471,9 +1471,7 @@ class TransactionUtil extends Util
                     $total_exempt += $line['line_total_uf'];
                 }
                 $subtotal_exc_tax += $line['line_total_exc_tax_uf'];
-                if ($line['tax_percent'] > 0) {
-                    $taxable_amount += $line['line_total_exc_tax_uf'];
-                }
+                $taxable_amount += $line['line_total_exc_tax_uf'];
                 $total_quantity += $line['quantity_uf'];
                 $total_line_discount += ($line['line_discount_uf'] * $line['quantity_uf']);
                 $total_line_taxes += ($line['tax_unformatted'] * $line['quantity_uf']);
@@ -1520,9 +1518,7 @@ class TransactionUtil extends Util
                 }
 
                 $total_line_taxes += ($line['tax_unformatted'] * $line['quantity']);
-                if ($line['tax_percent'] > 0) {
-                    $taxable_amount += $line['unit_price_uf'] * $line['quantity_uf'];
-                }
+                $taxable_amount += $line['unit_price_uf'] * $line['quantity_uf'];
             }
         }
 
@@ -2959,11 +2955,7 @@ class TransactionUtil extends Util
             throw new \UnexpectedValueException('The EIS invoice tax totals are unavailable. Synchronize the invoice before printing.');
         }
         $standardRate = null;
-        $ratesById = [];
         foreach ($configuration['globalConfiguration']['taxrates'] ?? [] as $rate) {
-            if (isset($rate['id'])) {
-                $ratesById[(string) $rate['id']] = $rate['rate'] ?? null;
-            }
             if (strcasecmp(trim($rate['name'] ?? ''), 'Standard Rated') !== 0) {
                 continue;
             }
@@ -2986,14 +2978,7 @@ class TransactionUtil extends Util
                 Log::error('EIS receipt fiscal taxable amount is missing or invalid');
                 throw new \UnexpectedValueException('The EIS invoice tax breakdown is invalid. Synchronize the invoice before printing.');
             }
-            $rate = $ratesById[(string) $rateId] ?? null;
-            if (!is_numeric($rate) || !is_finite((float) $rate) || $rate < 0) {
-                Log::error('EIS receipt tax breakdown rate is missing or invalid', ['rate_id' => $rateId]);
-                throw new \UnexpectedValueException('Refresh the EIS terminal configuration before printing the taxable amount.');
-            }
-            if ($rate > 0) {
-                $taxableAmount += (float) $amount;
-            }
+            $taxableAmount += (float) $amount;
         }
         return ['vat' => (float) $vat, 'subtotal' => round((float) $total - (float) $vat, 2),
             'taxable_amount' => round($taxableAmount, 2),

@@ -49,27 +49,27 @@ $details = $method->invoke($util, $invoice, $config);
 vatDisplayCheck($details === ['vat' => 1265.96, 'subtotal' => 7234.04, 'taxable_amount' => 7234.04, 'standard_rate' => '17.5'],
     'Receipt taxable amount and standard percentage must use fiscal totals/configuration');
 foreach ([
-    [100, 0, [['rateId' => 'B', 'taxableAmount' => 100]], 0.0],
-    [100, 0, [['rateId' => 'E', 'taxableAmount' => 100]], 0.0],
+    [100, 0, [['rateId' => 'B', 'taxableAmount' => 100]], 100.0],
+    [100, 0, [['rateId' => 'E', 'taxableAmount' => 100]], 100.0],
     [0, 0, [], 0.0],
     [357.5, 17.5, [
         ['rateId' => 'A', 'taxableAmount' => 100],
         ['rateId' => 'B', 'taxableAmount' => 90],
         ['rateId' => 'E', 'taxableAmount' => 150],
-    ], 100.0],
+    ], 340.0],
     [428.0, 28, [
         ['rateId' => 'A', 'taxableAmount' => 120],
         ['rateId' => 'C', 'taxableAmount' => 140],
         ['rateId' => 'B', 'taxableAmount' => 90],
         ['rateId' => 'E', 'taxableAmount' => 50],
-    ], 260.0],
+    ], 400.0],
     [0.01, 0, [['rateId' => 'A', 'taxableAmount' => 0.01]], 0.01],
 ] as [$gross, $vat, $breakdown, $expected]) {
     $result = $method->invoke($util, ['invoiceSummary' => [
         'invoiceTotal' => $gross, 'totalVAT' => $vat, 'taxBreakDown' => $breakdown,
     ]], $config);
     vatDisplayCheck($result['taxable_amount'] === $expected,
-        'Only positive-rate bases count, including multiple rates and VAT rounded to zero');
+        'Taxable Amount includes all item bases regardless of tax rate');
     vatDisplayCheck($result['subtotal'] === round($gross - $vat, 2),
         'Subtotal excludes VAT but includes zero-rated and exempt amounts');
 }
@@ -93,25 +93,16 @@ foreach ([null, [], 'invalid', [['rateId' => 'A']], [['rateId' => 'A', 'taxableA
         vatDisplayCheck(str_contains($e->getMessage(), 'Synchronize'), 'Invalid breakdown requires synchronization');
     }
 }
-foreach ([null, -1, INF, 'invalid'] as $rate) {
-    $invalidConfig = $config;
-    $invalidConfig['globalConfiguration']['taxrates'][0]['rate'] = $rate;
-    try {
-        $method->invoke($util, ['invoiceSummary' => ['invoiceTotal' => 100, 'totalVAT' => 0,
-            'taxBreakDown' => [['rateId' => 'B', 'taxableAmount' => 100]]]], $invalidConfig);
-        throw new RuntimeException('Invalid referenced rate must not print');
-    } catch (UnexpectedValueException $e) {
-        vatDisplayCheck(str_contains($e->getMessage(), 'Refresh'), 'Invalid referenced rate requires configuration refresh');
-    }
-}
 $unknown = $invoice;
 $unknown['invoiceSummary']['taxBreakDown'][0]['rateId'] = 'UNKNOWN';
-try {
-    $method->invoke($util, $unknown, $config);
-    throw new RuntimeException('Unknown rate must not be silently excluded');
-} catch (UnexpectedValueException $e) {
-    vatDisplayCheck(str_contains($e->getMessage(), 'Refresh'), 'Unknown rate requires configuration refresh');
-}
+$unknown['invoiceSummary']['taxBreakDown'][0]['taxableAmount'] = 7234.04;
+$unknownDetails = $method->invoke($util, $unknown, $config);
+vatDisplayCheck($unknownDetails['taxable_amount'] === 7234.04,
+    'Taxable Amount does not require tax-rate lookup for a valid fiscal breakdown');
+$unknownDetails = $method->invoke($util, ['invoiceSummary' => ['invoiceTotal' => 100, 'totalVAT' => 0,
+    'taxBreakDown' => [['rateId' => 'UNCONFIGURED', 'taxableAmount' => 100]]]], []);
+vatDisplayCheck($unknownDetails['taxable_amount'] === 100.0,
+    'Taxable Amount includes valid item bases even without a configured tax-rate list');
 $receipt = (object) ['eis_invoice_number' => 'TEST', 'vat_registered' => true,
     'vat_registered_label' => 'VAT Registered', 'taxable_amount_label' => 'Taxable Amount:',
     'taxable_amount' => '7,234.04', 'vat_total_label' => 'VAT (17.5%):', 'vat_amount' => '1,265.96'];
