@@ -26,15 +26,24 @@ Settings > MRA EIS > EIS Sales. Rollback sends no cancellation.
 
 ## Dashboard fiscal VAT
 
-Home dashboard VAT uses `invoiceSummary.totalVAT` from submitted, fully paid
-EIS sales rather than summing POS per-unit tax. A saved invoice lookup response
+Home dashboard VAT matches the portal gross submission total: it adds
+`invoiceSummary.totalVAT` from submitted, fully paid EIS sales and accepted
+credit/debit notes rather than summing POS per-unit tax. This is not a net VAT
+liability calculation; accepted notes contribute their reported VAT, not a
+locally inferred signed difference. Prepared, rejected and uncertain notes
+are excluded. Pending cancellation requests do not deduct VAT; request
+acceptance is not cancellation approval.
+A saved invoice lookup response
 is preferred; otherwise the submitted request is used. Date filters use the
-fiscal invoice date in Malawi (`Africa/Blantyre`), including conversion of
-offset-bearing submitted timestamps. Other dashboard figures still use ERP
+saved EIS submission date (`eis_sales.submitted_at`, or the accepted note's
+`submitted_at`), not the transaction date
+or fiscal invoice date. Backdated sales contribute VAT on the day they were
+submitted. The stored submission calendar date is used without reinterpreting
+the invoice timestamp or its timezone. Other dashboard figures still use ERP
 sale dates and amounts. Location and user filters remain enforced.
 
 This reports the quantity-aware, discounted fiscal VAT without changing saved
-sales, receipts, ERP transaction dates, or EIS records. Incomplete fiscal date
+sales, receipts, ERP transaction dates, or EIS records. Incomplete submission date
 or VAT data raises an explicit error requiring invoice synchronization.
 Run `php tests/Standalone/dashboard_fiscal_vat_checks.php` for isolated checks.
 

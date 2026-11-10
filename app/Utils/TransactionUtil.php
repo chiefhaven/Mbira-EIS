@@ -2800,7 +2800,7 @@ class TransactionUtil extends Util
     }
 
     /**
-    * Get total VAT (tax) amount for submitted sales including item-level tax
+    * Get portal VAT for submitted sales and accepted notes by submission date.
     *
     * @param  int  $business_id
     * @param  string|null  $start_date
@@ -2823,41 +2823,59 @@ class TransactionUtil extends Util
             ->where('transactions.status', 'final')
             ->where('transactions.payment_status', 'paid')
             ->where('eis_sales.status', 'submitted')
-            ->select('eis_sales.id', 'eis_sales.request_payload', 'eis_sales.response_payload');
+            ->select('eis_sales.id', 'eis_sales.submitted_at', 'eis_sales.request_payload', 'eis_sales.response_payload');
 
-        // Check for permitted locations
-        if ($permitted_locations !== null && $permitted_locations !== 'all') {
-            $query->whereIn('transactions.location_id', $permitted_locations);
+        $queries = [$query];
+        if (DB::getSchemaBuilder()->hasTable('eis_sale_adjustments')) {
+            $queries[] = DB::table('transactions')
+                ->join('eis_sale_adjustments as adjustment', function ($join) {
+                    $join->on('adjustment.sale_id', '=', 'transactions.id')
+                        ->on('adjustment.business_id', '=', 'transactions.business_id')
+                        ->on('adjustment.location_id', '=', 'transactions.location_id');
+                })
+                ->where('transactions.business_id', $business_id)
+                ->where('transactions.type', 'sell')
+                ->where('transactions.status', 'final')
+                ->where('transactions.payment_status', 'paid')
+                ->where('adjustment.status', 'accepted')
+                ->select('adjustment.id', 'adjustment.submitted_at',
+                    'adjustment.payload as request_payload', 'adjustment.response as response_payload');
         }
-
-        // Filter by location
-        if (!empty($location_id)) {
-            $query->where('transactions.location_id', $location_id);
+        foreach ($queries as $reportQuery) {
+            if ($permitted_locations !== null && $permitted_locations !== 'all') {
+                $reportQuery->whereIn('transactions.location_id', $permitted_locations);
+            }
+            if (!empty($location_id)) {
+                $reportQuery->where('transactions.location_id', $location_id);
+            }
+            if (!empty($created_by)) {
+                $reportQuery->where('transactions.created_by', $created_by);
+            }
         }
-
-        // Filter by user
-        if (!empty($created_by)) {
-            $query->where('transactions.created_by', $created_by);
+        foreach (array_slice($queries, 1) as $noteQuery) {
+            $query->unionAll($noteQuery);
         }
 
         $total_tax = 0.0;
         foreach ($query->cursor() as $sale) {
+            if (!is_string($sale->submitted_at)
+                || !preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(?:\.\d+)?$/', $sale->submitted_at)) {
+                Log::error('Submitted EIS sale has no valid submission timestamp', ['eis_sale_id' => $sale->id]);
+                throw new \UnexpectedValueException('A submitted EIS sale has an incomplete submission date. Synchronize its invoice before viewing fiscal VAT totals.');
+            }
+            $submissionDate = substr($sale->submitted_at, 0, 10);
+            if ((!empty($start_date) && $submissionDate < $start_date) || (!empty($end_date) && $submissionDate > $end_date)) {
+                continue;
+            }
             $request = json_decode($sale->request_payload ?? '', true);
             $response = json_decode($sale->response_payload ?? '', true);
             $remoteInvoice = $response['data']['data'] ?? $response['data'] ?? null;
             $invoice = is_array($remoteInvoice) && isset($remoteInvoice['invoiceHeader'], $remoteInvoice['invoiceSummary'])
                 ? $remoteInvoice : $request;
-            $date = $invoice['invoiceHeader']['invoiceDateTime'] ?? null;
             $vat = $invoice['invoiceSummary']['totalVAT'] ?? null;
-            if (!is_string($date) || !preg_match('/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})?$/', $date)
-                || !is_numeric($vat) || !is_finite((float) $vat) || $vat < 0) {
+            if (!is_numeric($vat) || !is_finite((float) $vat) || $vat < 0) {
                 Log::error('Submitted EIS sale has invalid fiscal VAT reporting data', ['eis_sale_id' => $sale->id]);
-                throw new \UnexpectedValueException('A submitted EIS sale has incomplete fiscal date or VAT data. Synchronize its invoice before viewing fiscal VAT totals.');
-            }
-            // EIS invoice lookup dates are Malawi local time, not the ERP sale timezone.
-            $fiscalDate = \Carbon\Carbon::parse($date, 'Africa/Blantyre')->setTimezone('Africa/Blantyre')->toDateString();
-            if ((!empty($start_date) && $fiscalDate < $start_date) || (!empty($end_date) && $fiscalDate > $end_date)) {
-                continue;
+                throw new \UnexpectedValueException('A submitted EIS sale has incomplete fiscal VAT data. Synchronize its invoice before viewing fiscal VAT totals.');
             }
             $total_tax += (float) $vat;
         }
