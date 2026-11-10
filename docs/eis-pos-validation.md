@@ -80,13 +80,13 @@ Saved gross line totals and fiscal totals remain unchanged. All eight sale recei
 product table; layout-specific tax and duplicated discounted-price columns are
 replaced by the six-column format. Invoice-level tax and total sections remain.
 Hidden-price receipts omit the monetary columns.
-Browser receipts set both Subtotal and Taxable Amount to the sum of all
-displayed, tax-inclusive item line subtotals, including zero-rated and exempt
-items; Taxable Amount is not filtered or netted by rate.
+Browser receipt Subtotal is the sum of all displayed, tax-inclusive item line
+subtotals. Taxable Amount is that same sum less total VAT, including zero-rated
+and exempt items without filtering by rate.
 VAT is calculated separately from saved fiscal summary data and shown with the
 standard percentage from the original terminal's EIS configuration. Fiscal
-receipt Subtotal and Taxable Amount sum `invoiceLineItems[].total`, matching
-the printed discounted gross line subtotals. VAT, Total, and payments remain
+receipt Subtotal sums `invoiceLineItems[].total`; Taxable Amount subtracts
+`invoiceSummary.totalVAT` from that gross sum. VAT, Total, and payments remain
 separate.
 Taxable Amount and VAT use the same label/value columns and alignment as the
 other receipt totals, including left-aligned labels in the slim2 layout.

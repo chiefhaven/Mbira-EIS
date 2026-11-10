@@ -3010,8 +3010,13 @@ class TransactionUtil extends Util
             }
             $itemsSubtotal += (float) $amount;
         }
+        $taxableAmount = round($itemsSubtotal - (float) $vat, 2);
+        if ($taxableAmount < 0) {
+            Log::error('EIS receipt fiscal VAT exceeds summed line subtotals');
+            throw new \UnexpectedValueException('The EIS invoice tax totals do not reconcile with line subtotals. Synchronize the invoice before printing.');
+        }
         return ['vat' => (float) $vat, 'subtotal' => round($itemsSubtotal, 2),
-            'taxable_amount' => round($itemsSubtotal, 2),
+            'taxable_amount' => $taxableAmount,
             'standard_rate' => $standardRate];
     }
 

@@ -47,8 +47,8 @@ $invoice = ['invoiceLineItems' => [['total' => 500], ['total' => 8000]],
     'invoiceSummary' => ['invoiceTotal' => 8500, 'totalVAT' => 1265.96,
     'taxBreakDown' => [['rateId' => 'A', 'taxableAmount' => 7234.04, 'taxAmount' => 1265.96]]]];
 $details = $method->invoke($util, $invoice, $config);
-vatDisplayCheck($details === ['vat' => 1265.96, 'subtotal' => 8500.0, 'taxable_amount' => 8500.0, 'standard_rate' => '17.5'],
-    'Receipt subtotal and taxable amount equal all tax-inclusive line subtotals');
+vatDisplayCheck($details === ['vat' => 1265.96, 'subtotal' => 8500.0, 'taxable_amount' => 7234.04, 'standard_rate' => '17.5'],
+    'Receipt subtotal sums gross lines and taxable amount subtracts VAT');
 foreach ([
     [100, 0, [['rateId' => 'B', 'taxableAmount' => 100]], [100.0]],
     [100, 0, [['rateId' => 'E', 'taxableAmount' => 100]], [100.0]],
@@ -70,9 +70,10 @@ foreach ([
         'invoiceSummary' => [
         'invoiceTotal' => $gross, 'totalVAT' => $vat, 'taxBreakDown' => $breakdown,
     ]], $config);
-    $expected = round(array_sum($lineTotals), 2);
-    vatDisplayCheck($result['taxable_amount'] === $expected && $result['subtotal'] === $expected,
-        'Subtotal and Taxable Amount equal the sum of all inclusive line subtotals');
+    $expectedSubtotal = round(array_sum($lineTotals), 2);
+    $expectedTaxable = round($expectedSubtotal - $vat, 2);
+    vatDisplayCheck($result['subtotal'] === $expectedSubtotal && $result['taxable_amount'] === $expectedTaxable,
+        'Subtotal sums gross line subtotals and Taxable Amount subtracts VAT');
 }
 foreach ([[], ['invoiceTotal' => 10], ['invoiceTotal' => 10, 'totalVAT' => 11],
     ['invoiceTotal' => INF, 'totalVAT' => 1], ['invoiceTotal' => 100, 'totalVAT' => -1]] as $summary) {
@@ -97,13 +98,13 @@ $unknown = $invoice;
 $unknown['invoiceSummary']['taxBreakDown'][0]['rateId'] = 'UNKNOWN';
 $unknown['invoiceSummary']['taxBreakDown'][0]['taxableAmount'] = 7234.04;
 $unknownDetails = $method->invoke($util, $unknown, $config);
-vatDisplayCheck($unknownDetails['taxable_amount'] === 8500.0,
-    'Taxable Amount comes from line subtotals and does not filter tax rates');
+vatDisplayCheck($unknownDetails['taxable_amount'] === 7234.04,
+    'Taxable Amount subtracts VAT without filtering tax rates');
 $invoice0043 = ['invoiceLineItems' => [['total' => 500], ['total' => 45000]],
     'invoiceSummary' => ['invoiceTotal' => 45500, 'totalVAT' => 74.47]];
 $details0043 = $method->invoke($util, $invoice0043, []);
-vatDisplayCheck($details0043['subtotal'] === 45500.0 && $details0043['taxable_amount'] === 45500.0,
-    'Invoice 0043 subtotal and taxable amount equal 500 plus 45,000 gross line subtotals');
+vatDisplayCheck($details0043['subtotal'] === 45500.0 && $details0043['taxable_amount'] === 45425.53,
+    'Invoice 0043 subtotal is 500 plus 45,000 and taxable amount subtracts K74.47 VAT');
 $receipt = (object) ['eis_invoice_number' => 'TEST', 'vat_registered' => true,
     'vat_registered_label' => 'VAT Registered', 'taxable_amount_label' => 'Taxable Amount:',
     'taxable_amount' => '7,234.04', 'vat_total_label' => 'VAT (17.5%):', 'vat_amount' => '1,265.96'];
