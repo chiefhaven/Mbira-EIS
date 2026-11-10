@@ -76,6 +76,7 @@
 
 
 			<!-- Title of receipt -->
+			@include('sale_pos.receipts.partial.vat_registered')
 			@if(!empty($receipt_details->invoice_heading))
 				<h3 class="text-center">
 					{!! $receipt_details->invoice_heading !!}

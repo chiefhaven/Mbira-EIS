@@ -82,6 +82,7 @@
 				</p>
 				</div>
 				<!-- Title of receipt -->
+				@include('sale_pos.receipts.partial.vat_registered')
 				@if(!empty($receipt_details->invoice_heading))
 					<div class="receipt-title">{!! $receipt_details->invoice_heading !!}</div>
 				@endif

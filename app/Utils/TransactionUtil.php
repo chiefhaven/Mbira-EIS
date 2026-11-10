@@ -1095,7 +1095,7 @@ class TransactionUtil extends Util
             'receipt_item_discount_label' => !empty($il->common_settings['item_discount_label'])
                 ? $il->common_settings['item_discount_label'] : __('sale.discount'),
         ];
-        $output['vat_registered'] = ($eis_configuration['taxpayerConfiguration']['isVATRegistered'] ?? false) === true;
+        $output['vat_registered'] = in_array($eis_configuration['taxpayerConfiguration']['isVATRegistered'] ?? null, [true, 1], true);
         $output['vat_registered_label'] = __('sale.vat_registered');
         $output['taxable_amount_label'] = __('sale.taxable_amount');
         $output['vat_total_label'] = __('sale.total_vat');
@@ -1419,6 +1419,7 @@ class TransactionUtil extends Util
         $output['lines'] = [];
         $total_exempt = 0;
         $total_line_taxes = 0;
+        $taxable_amount = 0;
         if (in_array($transaction_type, ['sell', 'sales_order'])) {
             $sell_line_relations = ['modifiers', 'sub_unit', 'warranties'];
 
@@ -1470,6 +1471,9 @@ class TransactionUtil extends Util
                     $total_exempt += $line['line_total_uf'];
                 }
                 $subtotal_exc_tax += $line['line_total_exc_tax_uf'];
+                if ($line['tax_percent'] > 0) {
+                    $taxable_amount += $line['line_total_exc_tax_uf'];
+                }
                 $total_quantity += $line['quantity_uf'];
                 $total_line_discount += ($line['line_discount_uf'] * $line['quantity_uf']);
                 $total_line_taxes += ($line['tax_unformatted'] * $line['quantity_uf']);
@@ -1516,6 +1520,9 @@ class TransactionUtil extends Util
                 }
 
                 $total_line_taxes += ($line['tax_unformatted'] * $line['quantity']);
+                if ($line['tax_percent'] > 0) {
+                    $taxable_amount += $line['unit_price_uf'] * $line['quantity_uf'];
+                }
             }
         }
 
@@ -1581,9 +1588,7 @@ class TransactionUtil extends Util
         $output['tax_label'] .= ':';
         $output['tax'] = ($transaction->tax_amount != 0) ? $this->num_f($transaction->tax_amount, $show_currency, $business_details) : 0;
         $output['vat_amount'] = $this->num_f($total_line_taxes + $transaction->tax_amount, $show_currency, $business_details);
-        $output['taxable_amount'] = $this->num_f(
-            $transaction->final_total - $total_line_taxes - $transaction->tax_amount, $show_currency, $business_details
-        );
+        $output['taxable_amount'] = $this->num_f($taxable_amount, $show_currency, $business_details);
         if ($is_eis_receipt) {
             $payload = $transaction->eisSale->request_payload;
             if (is_string($payload)) {
@@ -2940,7 +2945,11 @@ class TransactionUtil extends Util
             throw new \UnexpectedValueException('The EIS invoice tax totals are unavailable. Synchronize the invoice before printing.');
         }
         $standardRate = null;
+        $ratesById = [];
         foreach ($configuration['globalConfiguration']['taxrates'] ?? [] as $rate) {
+            if (isset($rate['id'])) {
+                $ratesById[(string) $rate['id']] = $rate['rate'] ?? null;
+            }
             if (strcasecmp(trim($rate['name'] ?? ''), 'Standard Rated') !== 0) {
                 continue;
             }
@@ -2949,9 +2958,30 @@ class TransactionUtil extends Util
                 throw new \UnexpectedValueException('Refresh the EIS terminal configuration before printing the VAT rate.');
             }
             $standardRate = rtrim(rtrim(number_format((float) $rate['rate'], 4, '.', ''), '0'), '.');
-            break;
         }
-        return ['vat' => (float) $vat, 'taxable_amount' => round((float) $total - (float) $vat, 2),
+        $breakdown = $summary['taxBreakDown'] ?? null;
+        if (!is_array($breakdown) || ($breakdown === [] && (float) $total > 0)) {
+            Log::error('EIS receipt fiscal tax breakdown is missing or invalid');
+            throw new \UnexpectedValueException('The EIS invoice tax breakdown is unavailable. Synchronize the invoice before printing.');
+        }
+        $taxableAmount = 0;
+        foreach ($breakdown as $tax) {
+            $rateId = is_array($tax) ? ($tax['rateId'] ?? null) : null;
+            $amount = is_array($tax) ? ($tax['taxableAmount'] ?? null) : null;
+            if (!is_scalar($rateId) || !is_numeric($amount) || !is_finite((float) $amount) || $amount < 0) {
+                Log::error('EIS receipt fiscal taxable amount is missing or invalid');
+                throw new \UnexpectedValueException('The EIS invoice tax breakdown is invalid. Synchronize the invoice before printing.');
+            }
+            $rate = $ratesById[(string) $rateId] ?? null;
+            if (!is_numeric($rate) || !is_finite((float) $rate) || $rate < 0) {
+                Log::error('EIS receipt tax breakdown rate is missing or invalid', ['rate_id' => $rateId]);
+                throw new \UnexpectedValueException('Refresh the EIS terminal configuration before printing the taxable amount.');
+            }
+            if ($rate > 0) {
+                $taxableAmount += (float) $amount;
+            }
+        }
+        return ['vat' => (float) $vat, 'taxable_amount' => round($taxableAmount, 2),
             'standard_rate' => $standardRate];
     }
 

@@ -40,6 +40,7 @@
                         <span>{!! $sub_headings !!}</span>
                     @endif
                 @endif
+                @include('sale_pos.receipts.partial.vat_registered')
                 @if (!empty($receipt_details->invoice_heading))
                     {{-- <p  style="font-weight: bold; font-size: 35px !important">{!! $receipt_details->invoice_heading !!}</p> --}}
                     <p style="font-weight: bold; font-size: 35px !important; line-height: 1;">{!! $receipt_details->invoice_heading !!}</p>

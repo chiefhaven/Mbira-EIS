@@ -31,6 +31,7 @@
     <div class="col-xs-6">
         <div style="display: flex; justify-content: center; align-items: center; margin-bottom: 10px;">
             <div style="font-size: 18px; font-weight: bold;">
+                    @include('sale_pos.receipts.partial.vat_registered')
                     SIMPLIFIED TAX INVOICE<br>
                     <span style="direction: rtl;">فاتورة ضريبية مبسطة</span>
             </div>

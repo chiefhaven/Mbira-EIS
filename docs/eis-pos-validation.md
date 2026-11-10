@@ -72,11 +72,17 @@ the saved discounted line total. All eight sale receipt layouts share this
 product table; layout-specific tax and duplicated discounted-price columns are
 replaced by the six-column format. Invoice-level tax and total sections remain.
 Hidden-price receipts omit the monetary columns.
-Browser receipts add Taxable Amount (fiscal invoice total less VAT) and
+Browser receipts add Taxable Amount (the sum of VAT-exclusive amounts for
+rates greater than zero, excluding zero-rated and exempt amounts) and
 Total VAT with the standard percentage from the original terminal's EIS
 configuration. Fiscal VAT uses the saved submitted invoice summary, not an
-estimate from the displayed unit prices. The heading shows VAT Registered
-only when that terminal configuration confirms VAT registration. Sale prices,
+estimate from the displayed unit prices. Fiscal Taxable Amount sums
+`invoiceSummary.taxBreakDown[].taxableAmount` only where `rateId` matches a
+positive rate in the terminal configuration; missing breakdowns or unknown
+rates must be synchronized/refreshed before printing. The heading shows VAT Registered
+above the receipt title only when `taxpayerConfiguration.isVATRegistered`
+in that terminal configuration is true (or the supported integer `1`).
+False or missing flags print no registration line. Sale prices,
 discounts, gross subtotals and payments are not rewritten.
 The external ESC/POS print-server implementation is not present in this
 checkout; deploy matching print-server changes separately for raw thermal output.

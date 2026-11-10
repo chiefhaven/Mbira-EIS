@@ -78,6 +78,10 @@
 
 	<div class="col-xs-12 text-center">
 
+		@include('sale_pos.receipts.partial.vat_registered')
+		@if(!empty($receipt_details->invoice_heading))
+			<h3>{!! $receipt_details->invoice_heading !!}</h3>
+		@endif
 		<p>
 			@if(!empty($receipt_details->invoice_no_prefix))
 				{!! $receipt_details->invoice_no_prefix !!}

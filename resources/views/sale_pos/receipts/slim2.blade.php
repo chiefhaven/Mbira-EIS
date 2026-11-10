@@ -85,6 +85,10 @@
 						<img style="width: 100%;margin-bottom: 10px;" src="{{$receipt_details->letter_head}}">
 					</div>
 				@endif
+			@include('sale_pos.receipts.partial.vat_registered')
+			@if(!empty($receipt_details->invoice_heading))
+				<div class="text-center"><strong>{!! $receipt_details->invoice_heading !!}</strong></div>
+			@endif
 			<div class="border-top textbox-info">
 				<p class="f-left"><strong>{!! $receipt_details->invoice_no_prefix !!}</strong></p>
 				<p class="f-left">
