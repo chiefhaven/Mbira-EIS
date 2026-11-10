@@ -43,35 +43,36 @@ $config = ['globalConfiguration' => ['taxrates' => [
     ['id' => 'E', 'name' => 'Exempt', 'rate' => 0],
     ['id' => 'C', 'name' => 'Reduced Rate', 'rate' => 5],
 ]]];
-$invoice = ['invoiceSummary' => ['invoiceTotal' => 8500, 'totalVAT' => 1265.96,
+$invoice = ['invoiceLineItems' => [['total' => 500], ['total' => 8000]],
+    'invoiceSummary' => ['invoiceTotal' => 8500, 'totalVAT' => 1265.96,
     'taxBreakDown' => [['rateId' => 'A', 'taxableAmount' => 7234.04, 'taxAmount' => 1265.96]]]];
 $details = $method->invoke($util, $invoice, $config);
-vatDisplayCheck($details === ['vat' => 1265.96, 'subtotal' => 7234.04, 'taxable_amount' => 7234.04, 'standard_rate' => '17.5'],
-    'Receipt taxable amount and standard percentage must use fiscal totals/configuration');
+vatDisplayCheck($details === ['vat' => 1265.96, 'subtotal' => 8500.0, 'taxable_amount' => 8500.0, 'standard_rate' => '17.5'],
+    'Receipt subtotal and taxable amount equal all tax-inclusive line subtotals');
 foreach ([
-    [100, 0, [['rateId' => 'B', 'taxableAmount' => 100]], 100.0],
-    [100, 0, [['rateId' => 'E', 'taxableAmount' => 100]], 100.0],
-    [0, 0, [], 0.0],
+    [100, 0, [['rateId' => 'B', 'taxableAmount' => 100]], [100.0]],
+    [100, 0, [['rateId' => 'E', 'taxableAmount' => 100]], [100.0]],
+    [0, 0, [], []],
     [357.5, 17.5, [
         ['rateId' => 'A', 'taxableAmount' => 100],
         ['rateId' => 'B', 'taxableAmount' => 90],
         ['rateId' => 'E', 'taxableAmount' => 150],
-    ], 340.0],
+    ], [117.5, 90, 150]],
     [428.0, 28, [
         ['rateId' => 'A', 'taxableAmount' => 120],
         ['rateId' => 'C', 'taxableAmount' => 140],
         ['rateId' => 'B', 'taxableAmount' => 90],
         ['rateId' => 'E', 'taxableAmount' => 50],
-    ], 400.0],
-    [0.01, 0, [['rateId' => 'A', 'taxableAmount' => 0.01]], 0.01],
-] as [$gross, $vat, $breakdown, $expected]) {
-    $result = $method->invoke($util, ['invoiceSummary' => [
+    ], [141, 147, 90, 50]],
+    [0.01, 0, [['rateId' => 'A', 'taxableAmount' => 0.01]], [0.01]],
+] as [$gross, $vat, $breakdown, $lineTotals]) {
+    $result = $method->invoke($util, ['invoiceLineItems' => array_map(fn ($total) => ['total' => $total], $lineTotals),
+        'invoiceSummary' => [
         'invoiceTotal' => $gross, 'totalVAT' => $vat, 'taxBreakDown' => $breakdown,
     ]], $config);
-    vatDisplayCheck($result['taxable_amount'] === $expected,
-        'Taxable Amount includes all item bases regardless of tax rate');
-    vatDisplayCheck($result['subtotal'] === round($gross - $vat, 2),
-        'Subtotal excludes VAT but includes zero-rated and exempt amounts');
+    $expected = round(array_sum($lineTotals), 2);
+    vatDisplayCheck($result['taxable_amount'] === $expected && $result['subtotal'] === $expected,
+        'Subtotal and Taxable Amount equal the sum of all inclusive line subtotals');
 }
 foreach ([[], ['invoiceTotal' => 10], ['invoiceTotal' => 10, 'totalVAT' => 11],
     ['invoiceTotal' => INF, 'totalVAT' => 1], ['invoiceTotal' => 100, 'totalVAT' => -1]] as $summary) {
@@ -82,27 +83,27 @@ foreach ([[], ['invoiceTotal' => 10], ['invoiceTotal' => 10, 'totalVAT' => 11],
         vatDisplayCheck(str_contains($e->getMessage(), 'Synchronize'), 'Invalid fiscal tax totals require synchronization');
     }
 }
-foreach ([null, [], 'invalid', [['rateId' => 'A']], [['rateId' => 'A', 'taxableAmount' => -1]],
-    [['rateId' => 'A', 'taxableAmount' => INF]]] as $breakdown) {
+foreach ([null, [], 'invalid', [['total' => null]], [['total' => -1]], [['total' => INF]]] as $lineItems) {
     $invalid = $invoice;
-    $invalid['invoiceSummary']['taxBreakDown'] = $breakdown;
+    $invalid['invoiceLineItems'] = $lineItems;
     try {
         $method->invoke($util, $invalid, $config);
-        throw new RuntimeException('Invalid breakdown must not print');
+        throw new RuntimeException('Invalid line subtotals must not print');
     } catch (UnexpectedValueException $e) {
-        vatDisplayCheck(str_contains($e->getMessage(), 'Synchronize'), 'Invalid breakdown requires synchronization');
+        vatDisplayCheck(str_contains($e->getMessage(), 'Synchronize'), 'Invalid line subtotals require synchronization');
     }
 }
 $unknown = $invoice;
 $unknown['invoiceSummary']['taxBreakDown'][0]['rateId'] = 'UNKNOWN';
 $unknown['invoiceSummary']['taxBreakDown'][0]['taxableAmount'] = 7234.04;
 $unknownDetails = $method->invoke($util, $unknown, $config);
-vatDisplayCheck($unknownDetails['taxable_amount'] === 7234.04,
-    'Taxable Amount does not require tax-rate lookup for a valid fiscal breakdown');
-$unknownDetails = $method->invoke($util, ['invoiceSummary' => ['invoiceTotal' => 100, 'totalVAT' => 0,
-    'taxBreakDown' => [['rateId' => 'UNCONFIGURED', 'taxableAmount' => 100]]]], []);
-vatDisplayCheck($unknownDetails['taxable_amount'] === 100.0,
-    'Taxable Amount includes valid item bases even without a configured tax-rate list');
+vatDisplayCheck($unknownDetails['taxable_amount'] === 8500.0,
+    'Taxable Amount comes from line subtotals and does not filter tax rates');
+$invoice0043 = ['invoiceLineItems' => [['total' => 500], ['total' => 45000]],
+    'invoiceSummary' => ['invoiceTotal' => 45500, 'totalVAT' => 74.47]];
+$details0043 = $method->invoke($util, $invoice0043, []);
+vatDisplayCheck($details0043['subtotal'] === 45500.0 && $details0043['taxable_amount'] === 45500.0,
+    'Invoice 0043 subtotal and taxable amount equal 500 plus 45,000 gross line subtotals');
 $receipt = (object) ['eis_invoice_number' => 'TEST', 'vat_registered' => true,
     'vat_registered_label' => 'VAT Registered', 'taxable_amount_label' => 'Taxable Amount:',
     'taxable_amount' => '7,234.04', 'vat_total_label' => 'VAT (17.5%):', 'vat_amount' => '1,265.96'];

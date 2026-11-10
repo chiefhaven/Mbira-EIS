@@ -1420,6 +1420,7 @@ class TransactionUtil extends Util
         $total_exempt = 0;
         $total_line_taxes = 0;
         $taxable_amount = 0;
+        $receipt_items_subtotal = 0;
         if (in_array($transaction_type, ['sell', 'sales_order'])) {
             $sell_line_relations = ['modifiers', 'sub_unit', 'warranties'];
 
@@ -1475,6 +1476,10 @@ class TransactionUtil extends Util
                 $total_quantity += $line['quantity_uf'];
                 $total_line_discount += $line['total_line_discount_uf'];
                 $total_line_taxes += ($line['tax_unformatted'] * $line['quantity_uf']);
+                $receipt_items_subtotal += $line['line_total_uf'];
+                foreach ($line['modifiers'] ?? [] as $modifier) {
+                    $receipt_items_subtotal += $modifier['line_total_uf'];
+                }
                 if (! empty($line['variation_id']) && ! in_array($line['variation_id'], $unique_items)) {
                     $unique_items[] = $line['variation_id'];
                 }
@@ -1530,6 +1535,11 @@ class TransactionUtil extends Util
         $output['subtotal_label'] = $il->sub_total_label.':';
         $output['subtotal'] = ($transaction->total_before_tax != 0) ? $this->num_f($transaction->total_before_tax, $show_currency, $business_details) : 0;
         $output['subtotal_unformatted'] = ($transaction->total_before_tax != 0) ? $transaction->total_before_tax : 0;
+        if (in_array($transaction_type, ['sell', 'sales_order'])) {
+            $output['subtotal'] = $this->num_f($receipt_items_subtotal, $show_currency, $business_details);
+            $output['subtotal_unformatted'] = $receipt_items_subtotal;
+            $output['subtotal_exc_tax'] = $this->num_f($receipt_items_subtotal, $show_currency, $business_details);
+        }
 
         //round off
         $output['round_off_label'] = ! empty($il->round_off_label) ? $il->round_off_label.':' : __('lang_v1.round_off').':';
@@ -1585,6 +1595,9 @@ class TransactionUtil extends Util
         $output['tax'] = ($transaction->tax_amount != 0) ? $this->num_f($transaction->tax_amount, $show_currency, $business_details) : 0;
         $output['vat_amount'] = $this->num_f($total_line_taxes + $transaction->tax_amount, $show_currency, $business_details);
         $output['taxable_amount'] = $this->num_f($taxable_amount, $show_currency, $business_details);
+        if (in_array($transaction_type, ['sell', 'sales_order'])) {
+            $output['taxable_amount'] = $this->num_f($receipt_items_subtotal, $show_currency, $business_details);
+        }
         if ($is_eis_receipt) {
             $payload = $transaction->eisSale->request_payload;
             if (is_string($payload)) {
@@ -2398,6 +2411,7 @@ class TransactionUtil extends Util
 
                         //Fields for 4th column
                         'line_total' => $this->num_f($modifier_line->unit_price_inc_tax * $line->quantity, false, $business_details),
+                        'line_total_uf' => $modifier_line->unit_price_inc_tax * $modifier_line->quantity,
                     ];
 
                     if ($il->show_sku == 1) {
@@ -2982,23 +2996,22 @@ class TransactionUtil extends Util
             }
             $standardRate = rtrim(rtrim(number_format((float) $rate['rate'], 4, '.', ''), '0'), '.');
         }
-        $breakdown = $summary['taxBreakDown'] ?? null;
-        if (!is_array($breakdown) || ($breakdown === [] && (float) $total > 0)) {
-            Log::error('EIS receipt fiscal tax breakdown is missing or invalid');
-            throw new \UnexpectedValueException('The EIS invoice tax breakdown is unavailable. Synchronize the invoice before printing.');
+        $invoiceItems = $invoice['invoiceLineItems'] ?? null;
+        if (!is_array($invoiceItems) || ($invoiceItems === [] && (float) $total > 0)) {
+            Log::error('EIS receipt fiscal line items are missing or invalid');
+            throw new \UnexpectedValueException('The EIS invoice line subtotals are unavailable. Synchronize the invoice before printing.');
         }
-        $taxableAmount = 0;
-        foreach ($breakdown as $tax) {
-            $rateId = is_array($tax) ? ($tax['rateId'] ?? null) : null;
-            $amount = is_array($tax) ? ($tax['taxableAmount'] ?? null) : null;
-            if (!is_scalar($rateId) || !is_numeric($amount) || !is_finite((float) $amount) || $amount < 0) {
-                Log::error('EIS receipt fiscal taxable amount is missing or invalid');
-                throw new \UnexpectedValueException('The EIS invoice tax breakdown is invalid. Synchronize the invoice before printing.');
+        $itemsSubtotal = 0;
+        foreach ($invoiceItems as $item) {
+            $amount = is_array($item) ? ($item['total'] ?? null) : null;
+            if (!is_numeric($amount) || !is_finite((float) $amount) || $amount < 0) {
+                Log::error('EIS receipt fiscal line subtotal is missing or invalid');
+                throw new \UnexpectedValueException('The EIS invoice line subtotals are invalid. Synchronize the invoice before printing.');
             }
-            $taxableAmount += (float) $amount;
+            $itemsSubtotal += (float) $amount;
         }
-        return ['vat' => (float) $vat, 'subtotal' => round((float) $total - (float) $vat, 2),
-            'taxable_amount' => round($taxableAmount, 2),
+        return ['vat' => (float) $vat, 'subtotal' => round($itemsSubtotal, 2),
+            'taxable_amount' => round($itemsSubtotal, 2),
             'standard_rate' => $standardRate];
     }
 
