@@ -7,6 +7,7 @@ use Illuminate\Http\Request;
 use Illuminate\Routing\Controller;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
+use Modules\EIS\Models\EisConfiguration;
 use Modules\EIS\Models\EisSetting;
 
 class TillController extends Controller
@@ -24,6 +25,14 @@ class TillController extends Controller
             ->whereIn('location_id', $locationIds)->where('is_active', true)->orderBy('name')->get();
         $terminals = EisSetting::where('business_id', $user->business_id)->whereIn('location_id', $locationIds)
             ->get(['id', 'location_id', 'device_id']);
+        $vatRegistrationByTerminal = EisConfiguration::where('business_id', $user->business_id)
+            ->whereIn('eis_setting_id', $terminals->pluck('id'))
+            ->get(['eis_setting_id', 'is_vat_registered'])
+            ->keyBy('eis_setting_id');
+        foreach ($terminals as $terminal) {
+            $configuration = $vatRegistrationByTerminal->get($terminal->id);
+            $terminal->is_vat_registered = $configuration ? $configuration->is_vat_registered : null;
+        }
         return response()->json(['data' => ['tills' => $tills, 'terminals' => $terminals]]);
     }
 
