@@ -2247,10 +2247,13 @@ class TransactionUtil extends Util
             $unit_price_before_discount_inc_tax = $discount_per_unit > 0
                 ? (float) $line->unit_price_before_discount * $tax_inclusive_multiplier
                 : (float) $line->unit_price_inc_tax;
-            $total_line_discount_inc_tax = max(
-                0,
-                ($unit_price_before_discount_inc_tax - (float) $line->unit_price_inc_tax) * (float) $line->quantity
-            );
+            $enteredDiscount = max(0, (float) $line->line_discount_amount);
+            $discountPerUnitIncTax = $line->line_discount_type == 'percentage'
+                ? $unit_price_before_discount_inc_tax * $enteredDiscount / 100
+                : ($line->line_discount_type == 'fixed' ? $enteredDiscount : 0);
+            $unit_price_after_discount_inc_tax = max(0, $unit_price_before_discount_inc_tax - $discountPerUnitIncTax);
+            $total_line_discount_inc_tax = ($unit_price_before_discount_inc_tax - $unit_price_after_discount_inc_tax)
+                * (float) $line->quantity;
 
             $show_product_description = $il->common_settings['show_product_description'] ?? null;
             $line_array = [
@@ -2288,8 +2291,8 @@ class TransactionUtil extends Util
                 'unit_price_before_discount_inc_tax' => $this->num_f($unit_price_before_discount_inc_tax, false, $business_details),
                 'unit_price_before_discount_inc_tax_uf' => $unit_price_before_discount_inc_tax,
                 //Fields for 4th column
-                'line_total' => $this->num_f($line->unit_price_inc_tax * $line->quantity, false, $business_details),
-                'line_total_uf' => $line->unit_price_inc_tax * $line->quantity,
+                'line_total' => $this->num_f($unit_price_after_discount_inc_tax * $line->quantity, false, $business_details),
+                'line_total_uf' => $unit_price_after_discount_inc_tax * $line->quantity,
                 'line_total_exc_tax' => $this->num_f($line->unit_price * $line->quantity, false, $business_details),
                 'line_total_exc_tax_uf' => $line->unit_price * $line->quantity,
                 'variation_id' => $variation->id,
@@ -2353,7 +2356,11 @@ class TransactionUtil extends Util
             $line_array['line_discount_entered'] = $line->line_discount_type == 'percentage'
                 ? $this->num_f($line->line_discount_amount, false, $business_details).'%'
                 : $this->num_f($line->line_discount_amount, false, $business_details);
-            $line_array['unit_price_quantity_subtotal'] = $this->num_f($line->unit_price_inc_tax * $line->quantity, false, $business_details);
+            $line_array['unit_price_quantity_subtotal'] = $this->num_f(
+                $unit_price_after_discount_inc_tax * $line->quantity,
+                false,
+                $business_details
+            );
 
             if ($il->show_brand == 1) {
                 $line_array['brand'] = ! empty($brand->name) ? $brand->name : '';
