@@ -2247,11 +2247,14 @@ class TransactionUtil extends Util
             $unit_price_before_discount_inc_tax = $discount_per_unit > 0
                 ? (float) $line->unit_price_before_discount * $tax_inclusive_multiplier
                 : (float) $line->unit_price_inc_tax;
-            $enteredDiscount = max(0, (float) $line->line_discount_amount);
-            $discountPerUnitIncTax = $line->line_discount_type == 'percentage'
-                ? $unit_price_before_discount_inc_tax * $enteredDiscount / 100
-                : ($line->line_discount_type == 'fixed' ? $enteredDiscount : 0);
-            $unit_price_after_discount_inc_tax = max(0, $unit_price_before_discount_inc_tax - $discountPerUnitIncTax);
+            $entered_discount = max(0, (float) $line->line_discount_amount);
+            $discount_per_unit_inc_tax = $line->line_discount_type == 'percentage'
+                ? $unit_price_before_discount_inc_tax * $entered_discount / 100
+                : ($line->line_discount_type == 'fixed' ? $entered_discount : 0);
+            $unit_price_after_discount_inc_tax = max(
+                0,
+                $unit_price_before_discount_inc_tax - $discount_per_unit_inc_tax
+            );
             $total_line_discount_inc_tax = ($unit_price_before_discount_inc_tax - $unit_price_after_discount_inc_tax)
                 * (float) $line->quantity;
 

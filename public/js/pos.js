@@ -460,8 +460,7 @@ $(document).ready(function() {
 
         var tr = $(this).parents('tr');
 
-        var unit_price_inc_tax = __read_number(tr.find('input.pos_unit_price_inc_tax'));
-        var line_total = entered_qty * unit_price_inc_tax;
+        var line_total = calculate_line_subtotal(tr, entered_qty);
 
         __write_number(tr.find('input.pos_line_total'), line_total, false);
         tr.find('span.pos_line_total_text').text(__currency_trans_from_en(line_total, true));
@@ -490,7 +489,7 @@ $(document).ready(function() {
 
         var item_tax = __read_number(tr.find('input.item_tax'));
         var unit_price_inc_tax = discounted_unit_price + item_tax;
-        var line_total = quantity * unit_price_inc_tax;
+        var line_total = calculate_line_subtotal(tr, quantity);
 
         __write_number(tr.find('input.pos_unit_price_inc_tax'), unit_price_inc_tax);
         __write_number(tr.find('input.pos_line_total'), line_total);
@@ -527,12 +526,12 @@ $(document).ready(function() {
 
         var quantity = __read_number(tr.find('input.pos_quantity'));
 
-        var line_total = quantity * unit_price_inc_tax;
         var tax_rate = Number(tr.find('select.tax_id :selected').data('rate')) || 0;
         var discounted_unit_price = unit_price_inc_tax / (1 + tax_rate / 100);
         var unit_price = get_unit_price_from_discounted_unit_price(tr, discounted_unit_price);
 
         __write_number(tr.find('input.pos_unit_price'), unit_price);
+        var line_total = calculate_line_subtotal(tr, quantity);
         __write_number(tr.find('input.pos_line_total'), line_total, false);
         tr.find('span.pos_line_total_text').text(__currency_trans_from_en(line_total, true));
 
@@ -617,7 +616,7 @@ $(document).ready(function() {
 
             var item_tax = __read_number(tr.find('input.item_tax'));
             var unit_price_inc_tax = discounted_unit_price + item_tax;
-            var line_total = quantity * unit_price_inc_tax;
+            var line_total = calculate_line_subtotal(tr, quantity);
 
             __write_number(tr.find('input.pos_unit_price_inc_tax'), unit_price_inc_tax);
             __write_number(tr.find('input.pos_line_total'), line_total, false);
@@ -2066,7 +2065,7 @@ function pos_each_row(row_obj) {
     var unit_price_inc_tax = discounted_unit_price + item_tax;
     __write_number(row_obj.find('input.pos_unit_price_inc_tax'), unit_price_inc_tax);
     var qty = __read_number(row_obj.find('input.pos_quantity'));
-    var line_total = qty * unit_price_inc_tax;
+    var line_total = calculate_line_subtotal(row_obj, qty);
     __write_number(row_obj.find('input.pos_line_total'), line_total);
     row_obj.find('span.pos_line_total_text').text(__currency_trans_from_en(line_total, true));
 }
@@ -2549,6 +2548,22 @@ function calculate_discounted_unit_price(row) {
     return row_discounted_unit_price;
 }
 
+function calculate_line_subtotal(row, quantity) {
+    var unit_price = __read_number(row.find('input.pos_unit_price'));
+    var tax_rate = Number(row.find('select.tax_id :selected').data('rate')) || 0;
+    var price_inc_tax = unit_price + __calculate_amount('percentage', tax_rate, unit_price);
+    var discount_type = row.find('select.row_discount_type').val();
+    var discount_amount = __read_number(row.find('input.row_discount_amount'));
+
+    if (discount_type == 'fixed') {
+        price_inc_tax -= discount_amount;
+    } else if (discount_type == 'percentage') {
+        price_inc_tax = __substract_percent(price_inc_tax, discount_amount);
+    }
+
+    return Math.max(0, price_inc_tax) * quantity;
+}
+
 function get_unit_price_from_discounted_unit_price(row, discounted_unit_price) {
     var this_unit_price = discounted_unit_price;
     var row_discount_type = row.find('select.row_discount_type').val();
@@ -2570,8 +2585,7 @@ $('table#pos_table tbody').on('change', 'input.pos_line_total', function() {
     var subtotal = __read_number($(this));
     var tr = $(this).parents('tr');
     var quantity_element = tr.find('input.pos_quantity');
-    var unit_price_inc_tax = __read_number(tr.find('input.pos_unit_price_inc_tax'));
-    var quantity = subtotal / unit_price_inc_tax;
+    var quantity = subtotal / calculate_line_subtotal(tr, 1);
     __write_number(quantity_element, quantity);
 
     __write_number($(this), subtotal, false);

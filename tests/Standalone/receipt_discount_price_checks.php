@@ -90,12 +90,12 @@ foreach (['fixed', 'percentage', null] as $type) {
         receiptDiscountCheck($line->getAttributes() === $before, 'Receipt generation must not mutate prices');
         receiptDiscountCheck($receiptLine['unit_price_before_discount_inc_tax'] === number_format(117.5 * $multiplier, 2),
             'Tax-inclusive pre-discount unit price must handle fixed, percentage and sub-unit discounts');
-        $grossUnitPrice = 117.5 * $multiplier;
         $enteredDiscountPerUnit = $type === 'fixed' ? 10 * $multiplier
-            : ($type === 'percentage' ? $grossUnitPrice * 0.1 : 0);
-        $expectedSubtotal = ($grossUnitPrice - $enteredDiscountPerUnit) * $line->quantity;
-        receiptDiscountCheck($receiptLine['line_total_uf'] === $expectedSubtotal,
-            'Line subtotal equals inclusive-tax price less the entered discount');
+            : ($type === 'percentage' ? 11.75 * $multiplier : 0);
+        $expectedSubtotal = max(0, 117.5 * $multiplier - $enteredDiscountPerUnit) * $line->quantity;
+        receiptDiscountCheck($receiptLine['unit_price_inc_tax'] === number_format(($type ? 105.75 : 117.5) * $multiplier, 2)
+            && $receiptLine['line_total_uf'] === $expectedSubtotal,
+            'Line subtotal must subtract the entered discount from the tax-inclusive price before multiplying by quantity');
         $html = renderDiscountPrice($compiler, $receiptLine, $receipt_details);
         $dom = new DOMDocument();
         $dom->loadHTML($html);
@@ -110,11 +110,11 @@ foreach (['fixed', 'percentage', null] as $type) {
             'Item discounts display the exact entered amount or percentage');
         receiptDiscountCheck(count($cells) === 6 && $cells[0] === '1' && $cells[3] === $receiptLine['unit_price_before_discount_inc_tax']
             && $cells[5] === number_format($expectedSubtotal, 2),
-            'Rows must display inclusive price and discounted inclusive subtotal');
+            'Rows must display inclusive price, discount and the discounted inclusive subtotal');
         receiptDiscountCheck($receiptLine['unit_price_before_discount_inc_tax'] === number_format(117.5 * $multiplier, 2)
             && $receiptLine['total_line_discount'] === number_format($enteredDiscountPerUnit * $line->quantity, 2)
             && $receiptLine['unit_price_quantity_subtotal'] === number_format($expectedSubtotal, 2),
-            'Displayed inclusive price, entered discount and subtotal reconcile');
+            'Every monetary product column must be VAT-inclusive and reconcile');
         $printedLines[] = $receiptLine;
     }
 }
