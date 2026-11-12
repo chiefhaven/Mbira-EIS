@@ -88,6 +88,13 @@ $(document).ready(function() {
     } else {
         pos_form_obj = $('form#add_pos_sell_form');
     }
+    var existing_product_rows = $('table#pos_table tbody tr.product_row');
+    existing_product_rows.each(function() {
+        pos_each_row($(this));
+    });
+    if (existing_product_rows.length > 0) {
+        pos_total_row();
+    }
     if ($('form#edit_pos_sell_form').length > 0 || $('form#add_pos_sell_form').length > 0) {
         initialize_printer();
     }
@@ -2064,6 +2071,9 @@ function pos_each_row(row_obj) {
     __write_number(row_obj.find('input.hidden_base_unit_item_tax'), item_tax / multiplier);
     var unit_price_inc_tax = discounted_unit_price + item_tax;
     __write_number(row_obj.find('input.pos_unit_price_inc_tax'), unit_price_inc_tax);
+    row_obj.find('.pos_unit_price_inc_tax_text').text(
+        __currency_trans_from_en(calculate_unit_price_inc_tax(row_obj), false, false, __currency_precision, true)
+    );
     var qty = __read_number(row_obj.find('input.pos_quantity'));
     var line_total = calculate_line_subtotal(row_obj, qty);
     __write_number(row_obj.find('input.pos_line_total'), line_total);
@@ -2549,9 +2559,7 @@ function calculate_discounted_unit_price(row) {
 }
 
 function calculate_line_subtotal(row, quantity) {
-    var unit_price = __read_number(row.find('input.pos_unit_price'));
-    var tax_rate = Number(row.find('select.tax_id :selected').data('rate')) || 0;
-    var price_inc_tax = unit_price + __calculate_amount('percentage', tax_rate, unit_price);
+    var price_inc_tax = calculate_unit_price_inc_tax(row);
     var discount_type = row.find('select.row_discount_type').val();
     var discount_amount = __read_number(row.find('input.row_discount_amount'));
 
@@ -2562,6 +2570,12 @@ function calculate_line_subtotal(row, quantity) {
     }
 
     return Math.max(0, price_inc_tax) * quantity;
+}
+
+function calculate_unit_price_inc_tax(row) {
+    var unit_price = __read_number(row.find('input.pos_unit_price'));
+    var tax_rate = Number(row.find('select.tax_id :selected').data('rate')) || 0;
+    return unit_price + __calculate_amount('percentage', tax_rate, unit_price);
 }
 
 function get_unit_price_from_discounted_unit_price(row, discounted_unit_price) {

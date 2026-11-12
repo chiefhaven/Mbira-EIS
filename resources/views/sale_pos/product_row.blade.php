@@ -403,7 +403,8 @@
 		@endif
 	@endif
 	<td class="{{$hide_tax}}">
-		<input type="text" style="width: auto" name="products[{{$row_count}}][unit_price_inc_tax]" class="form-control pos_unit_price_inc_tax input_number" value="{{@num_format($unit_price_inc_tax)}}" readonly @if(!empty($pos_settings['enable_msp'])) data-rule-min-value="{{$unit_price_inc_tax}}" data-msg-min-value="{{__('lang_v1.minimum_selling_price_error_msg', ['price' => @num_format($unit_price_inc_tax)])}}" @endif>
+		<input type="hidden" name="products[{{$row_count}}][unit_price_inc_tax]" class="pos_unit_price_inc_tax input_number" value="{{@num_format($unit_price_inc_tax)}}">
+		<span class="pos_unit_price_inc_tax_text">{{@num_format($unit_price_inc_tax)}}</span>
 	</td>
 	@if(!empty($common_settings['enable_product_warranty']) && !empty($is_direct_sell))
 		<td>

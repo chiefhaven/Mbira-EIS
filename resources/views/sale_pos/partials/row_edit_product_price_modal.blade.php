@@ -10,12 +10,14 @@
 					@php
 						$pos_unit_price = !empty($product->unit_price_before_discount) ? $product->unit_price_before_discount : $product->default_sell_price;
 					@endphp
-					<label>@lang('sale.unit_price')</label>
-						<input type="text" name="products[{{$row_count}}][unit_price]" class="form-control pos_unit_price input_number mousetrap" value="{{@num_format($pos_unit_price)}}" readonly @if(!empty($pos_settings['enable_msp'])) data-rule-min-value="{{$pos_unit_price}}" data-msg-min-value="{{__('lang_v1.minimum_selling_price_error_msg', ['price' => @num_format($pos_unit_price)])}}" @endif>
+					<label>@lang('sale.price_inc_tax')</label>
+					<input type="hidden" name="products[{{$row_count}}][unit_price]" class="pos_unit_price input_number mousetrap" value="{{@num_format($pos_unit_price)}}">
+					<span class="pos_unit_price_inc_tax_text">{{@num_format($unit_price_inc_tax)}}</span>
 				</div>
 				@if(!$edit_price)
 					<div class="form-group col-xs-12">
-						<strong>@lang('sale.unit_price'):</strong> {{@num_format(!empty($product->unit_price_before_discount) ? $product->unit_price_before_discount : $product->default_sell_price)}}
+						<strong>@lang('sale.price_inc_tax'):</strong>
+						<span class="pos_unit_price_inc_tax_text">{{@num_format($unit_price_inc_tax)}}</span>
 					</div>
 				@endif
 				<div class="form-group col-xs-12 col-sm-6 @if(!$edit_discount) hide @endif">
