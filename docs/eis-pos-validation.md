@@ -92,10 +92,11 @@ All sale receipt layouts omit the invoice-level Subtotal row; the product table
 still shows each line Subtotal.
 Taxable Amount and VAT use the same label/value columns and alignment as the
 other receipt totals, including left-aligned labels in the slim2 layout.
-The heading shows `***VAT Registered***`
-above the receipt title only when `taxpayerConfiguration.isVATRegistered`
-in that terminal configuration is true (or the supported integer `1`).
-False or missing flags print no registration line. Sale prices,
+The heading shows `***VAT Registered***` above the receipt title when
+`taxpayerConfiguration.isVATRegistered` in that terminal configuration is true,
+and `***Not VAT Registered***` when it is false. Boolean values, integers 0/1
+and their string forms are supported. Missing or invalid flags print no
+registration line. Sale prices,
 discounts, gross subtotals and payments are not rewritten.
 The external ESC/POS print-server implementation is not present in this
 checkout; deploy matching print-server changes separately for raw thermal output.
@@ -148,9 +149,13 @@ Different sites are permitted for the same identity. Trading-name comparisons
 ignore casing and surrounding whitespace. Missing TIN or trading name blocks
 activation because ownership cannot be verified.
 
-Only VAT-registered taxpayers can activate terminals. If EIS reports
-`isVATRegistered` as false or omits it, activation is rejected (HTTP 422,
-SweetAlert error) before anything is saved locally.
+Both VAT-registered and non-VAT-registered taxpayers can activate terminals.
+EIS `isVATRegistered` accepts boolean values, 0/1, or their string forms
+(`"false"`/`"true"` and `"0"`/`"1"`), and is saved as a boolean.
+Missing or invalid registration status is rejected (HTTP 422, SweetAlert error)
+before anything is saved locally. Product sync uses this status to calculate
+VAT only for registered taxpayers; otherwise inclusive and exclusive prices
+remain equal.
 
 Successful activation turns on "Enable inline tax in purchase and sell"
 (`business.enable_inline_tax`) for the owning business.
@@ -383,8 +388,12 @@ or live payments are made by this fixture.
   invoice allocation, the header and signing all use it rather than separate clock reads.
   Invalid identities, missing signing keys or mismatched dates
   fail explicitly rather than producing blank signatures.
-- Fractional item quantities are preserved in signing parameters. HMAC-SHA256,
-  Base64 and signature URL encoding are covered by independent synthetic tests.
+- Offline signatures follow the MRA [Signing Offline Receipts guide](https://eis-api.mra.mw/docs/signing_offline_receipts.htm).
+  Signed parameters are ordered `TI`, `N`, `I`, `V`, `T`; `N` is the invoice
+  line-item count, not the sum of quantities. HMAC-SHA256 uses the activation
+  secret key as UTF-8 bytes and unpadded Base64URL (`+` becomes `-`, `/` becomes `_`,
+  trailing `=` is removed), followed by URL encoding. These rules are covered
+  by independent synthetic tests.
   Validation links use the development portal for development/dev/sandbox and
   the production portal for production; unsupported environments fail explicitly.
 - The HTTP client removes local `offlineSignatureData` and summary `validationURL`
@@ -411,5 +420,5 @@ memory, a fixture signature generator and HTTP fakes, without real EIS calls.
 `tests/Standalone/eis_offline_signature_checks.php` exercises the real signer
 using synthetic keys, including RFC 4231 HMAC validation, timezone boundaries,
 invoice identity and environment-specific URLs. Swagger describes the request
-schema but does not publish the canonical signing algorithm or an MRA signature
-test vector; cryptographic acceptance still requires MRA verification.
+schema; the signing guide supplies the algorithm but no MRA signature test
+vector. Cryptographic acceptance still requires MRA verification.

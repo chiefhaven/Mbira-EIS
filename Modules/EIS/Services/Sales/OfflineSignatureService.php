@@ -230,7 +230,7 @@ class OfflineSignatureService
     {
         // Compute HMAC-SHA256 hash
         $hash = hash_hmac('sha256', $param, $secretKey, true);
-        return base64_encode($hash);
+        return rtrim(strtr(base64_encode($hash), '+/', '-_'), '=');
     }
 
     /**

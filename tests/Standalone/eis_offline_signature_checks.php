@@ -33,8 +33,8 @@ function signingCheck(bool $condition, string $message): void
 }
 
 signingCheck($signer->computeHMACSHA256('Hi There', str_repeat(chr(0x0b), 20))
-    === base64_encode(hex2bin('b0344c61d8db38535ca8afceaf0bf12b881dc200c9833da726e9376c2e32cff7')),
-    'HMAC-SHA256 matches RFC 4231 test case 1');
+    === rtrim(strtr(base64_encode(hex2bin('b0344c61d8db38535ca8afceaf0bf12b881dc200c9833da726e9376c2e32cff7')), '+/', '-_'), '='),
+    'HMAC-SHA256 matches RFC 4231 test case 1 in the MRA Base64URL format');
 foreach (['2026-11-10T00:30:00+02:00', '2026-11-10T23:30:00-03:00', '2026-11-10T12:00:00Z'] as $date) {
     $number = $signer->generateCombinedString(12345, 5, $signer->toJulianDate($date), 10);
     $payload = [
@@ -45,11 +45,18 @@ foreach (['2026-11-10T00:30:00+02:00', '2026-11-10T23:30:00-03:00', '2026-11-10T
     $data = $transformer->generateOfflineValidationData($setting, $transaction, $payload);
     signingCheck($data['combinedString'] === $number, 'Signed TI uses fiscal taxpayer ID, not seller TIN');
     signingCheck($data['julianDate'] === 2461355, 'Invoice local calendar date survives timezone offsets');
-    signingCheck($data['param'] === 'TI='.$number.'&N=3.5&I=8500&V=1265.96&T=JY6r',
-        'Canonical signing parameters retain quantities, values and invoice date');
-    signingCheck($data['offlineDataSignature'] === urlencode(base64_encode(hash_hmac(
+    signingCheck($data['param'] === 'TI='.$number.'&N=2&I=8500&V=1265.96&T=JY6r',
+        'Canonical signing parameters use line count rather than summed fractional quantities');
+    signingCheck($data['offlineDataSignature'] === rtrim(strtr(base64_encode(hash_hmac(
         'sha256', $data['param'], 'synthetic-signing-check-key', true
-    ))), 'Signature uses the exact canonical parameter bytes and one URL-encoding pass');
+    )), '+/', '-_'), '='), 'Signature uses exact canonical parameter bytes and unpadded Base64URL');
+    signingCheck((bool) preg_match('/^[A-Za-z0-9_-]{43}$/', $data['offlineDataSignature']),
+        'Signature has no standard Base64 punctuation, padding or percent escapes');
+    signingCheck($signer->validateOfflineSignature($data['param'], $data['offlineDataSignature'], $setting->secret_key)
+        && !$signer->validateOfflineSignature($data['param'].'&N=3', $data['offlineDataSignature'], $setting->secret_key),
+        'Generated signatures verify and reject modified signing parameters');
+    signingCheck(str_ends_with($data['validationURL'], '?'.$data['param'].'&S='.$data['offlineDataSignature']),
+        'Validation URL carries the identical signed parameters and signature');
     signingCheck(str_starts_with($data['validationURL'], 'https://dev-eis-portal.mra.mw/ReceiptValidation/Validate/?'),
         'Development configuration uses the sandbox portal');
 }

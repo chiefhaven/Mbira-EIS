@@ -79,7 +79,7 @@ function openingFixture() {
         'product_locations' => ['product_id', 'location_id'],
         'units' => ['business_id', 'short_name', 'actual_name'],
         'tax_rates' => ['business_id', 'configuration_id', 'tax_rate_id', 'name', 'is_activated', 'rate', 'deleted_at'],
-        'eis_configurations' => ['business_id', 'eis_setting_id', 'location_id', 'deleted_at'],
+        'eis_configurations' => ['business_id', 'eis_setting_id', 'location_id', 'is_vat_registered', 'deleted_at'],
         'eis_product_maps' => ['business_id', 'product_id', 'eis_product_id', 'sku', 'last_synced_at', 'meta', 'deleted_at'],
         'transactions' => ['business_id', 'location_id', 'type', 'status', 'payment_status', 'opening_stock_product_id',
             'created_by', 'transaction_date', 'total_before_tax', 'final_total', 'tax_amount', 'additional_notes'],
@@ -105,7 +105,8 @@ function openingFixture() {
     }
     $db->table('business')->insert([['id' => 1], ['id' => 2]]);
     $db->table('eis_settings')->insert(['id' => 1, 'business_id' => 1, 'location_id' => 2, 'site_id' => 'SITE-A']);
-    $db->table('eis_configurations')->insert(['id' => 1, 'business_id' => 1, 'eis_setting_id' => 1, 'location_id' => 2]);
+    $db->table('eis_configurations')->insert(['id' => 1, 'business_id' => 1, 'eis_setting_id' => 1,
+        'location_id' => 2, 'is_vat_registered' => 1]);
     $db->table('business_locations')->insert([
         ['id' => 2, 'business_id' => 1, 'eis_site_id' => 'SITE-A', 'name' => 'One'],
         ['id' => 3, 'business_id' => 2, 'eis_site_id' => 'SITE-A', 'name' => 'Other tenant'],

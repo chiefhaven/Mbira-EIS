@@ -1095,8 +1095,15 @@ class TransactionUtil extends Util
             'receipt_item_discount_label' => !empty($il->common_settings['item_discount_label'])
                 ? $il->common_settings['item_discount_label'] : __('sale.discount'),
         ];
-        $output['vat_registered'] = in_array($eis_configuration['taxpayerConfiguration']['isVATRegistered'] ?? null, [true, 1], true);
-        $output['vat_registered_label'] = __('sale.vat_registered');
+        $vat_registration = $eis_configuration['taxpayerConfiguration']['isVATRegistered'] ?? null;
+        if (is_string($vat_registration)) {
+            $vat_registration = strtolower(trim($vat_registration));
+        }
+        $output['vat_registered'] = in_array($vat_registration, [true, 1, '1', 'true'], true)
+            ? true
+            : (in_array($vat_registration, [false, 0, '0', 'false'], true) ? false : null);
+        $output['vat_registered_label'] = $output['vat_registered'] === false
+            ? __('sale.not_vat_registered') : __('sale.vat_registered');
         $output['taxable_amount_label'] = __('sale.taxable_amount').':';
         $output['vat_total_label'] = __('sale.vat');
 

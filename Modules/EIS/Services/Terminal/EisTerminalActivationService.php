@@ -557,7 +557,7 @@ class EisTerminalActivationService
                     throw new \InvalidArgumentException('EIS activation response contains mismatched terminal identities.');
                 }
                 $this->assertActivationBusinessIdentity($businessId, $configurationData, $taxpayerId);
-                $this->assertVatRegistered($configurationData);
+                $this->normalizeVatRegistration($configurationData);
                 $location = $this->syncService->locationForActivation($businessId, $configurationData, $activatedBy);
                 // A terminal can only serve an active location: reopen it and bring back its retired products.
                 if ($location->is_active !== null && !$location->is_active) {
@@ -666,13 +666,18 @@ class EisTerminalActivationService
         }
     }
 
-    private function assertVatRegistered(object $data): void
+    private function normalizeVatRegistration(object $data): void
     {
         $flag = $data->taxpayerConfiguration->isVATRegistered ?? null;
-        $registered = $flag === true || $flag === 1
-            || (is_string($flag) && in_array(strtolower(trim($flag)), ['1', 'true'], true));
-        if (!$registered) {
-            throw new \InvalidArgumentException('This taxpayer is not VAT registered in EIS. Only VAT-registered taxpayers can activate terminals.', 422);
+        if (is_string($flag)) {
+            $flag = strtolower(trim($flag));
+        }
+        if (in_array($flag, [true, 1, '1', 'true'], true)) {
+            $data->taxpayerConfiguration->isVATRegistered = true;
+        } elseif (in_array($flag, [false, 0, '0', 'false'], true)) {
+            $data->taxpayerConfiguration->isVATRegistered = false;
+        } else {
+            throw new \InvalidArgumentException('EIS activation requires a valid taxpayer VAT registration status.', 422);
         }
     }
 

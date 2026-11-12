@@ -70,7 +70,6 @@ class SaleTransformer
         $taxBreakdown = [];
         $totalVat = 0;
         $subtotal = 0;
-        $totalItems = 0;
 
         foreach ($transaction->sell_lines as $index => $line) {
             if ($line->product && (int) $line->product->business_id !== (int) $transaction->business_id) {
@@ -108,7 +107,6 @@ class SaleTransformer
             }
             
             $subtotal += $lineTotal;
-            $totalItems += $quantity;
             $totalVat += $vat;
 
             // Get product details with fallbacks
@@ -186,7 +184,7 @@ class SaleTransformer
                 $transaction,
                 $eisInvoiceNumber,
                 $invoiceSummary,
-                $totalItems
+                count($invoiceItems)
             );
         }
 
@@ -553,7 +551,7 @@ class SaleTransformer
                 }
             }
             if ($invoiceSummary['totalVAT'] > $invoiceSummary['invoiceTotal'] || !is_finite($totalItems) || $totalItems <= 0) {
-                throw new \InvalidArgumentException('Valid fiscal VAT and item quantities are required for offline signing.');
+                throw new \InvalidArgumentException('Valid fiscal VAT and line-item count are required for offline signing.');
             }
             
             // Prepare request data for signature
@@ -606,13 +604,11 @@ class SaleTransformer
             throw new \UnexpectedValueException('The submitted EIS invoice payload is incomplete; offline validation data cannot be generated.');
         }
 
-        $totalItems = 0;
         foreach ($invoiceLines as $line) {
             if (!is_array($line) || !is_numeric($line['quantity'] ?? null)
                 || !is_finite((float) $line['quantity']) || $line['quantity'] <= 0) {
                 throw new \UnexpectedValueException('The submitted EIS invoice lines are invalid; offline validation data cannot be generated.');
             }
-            $totalItems += (float) $line['quantity'];
         }
 
         $fiscalTransaction = clone $transaction;
@@ -622,7 +618,7 @@ class SaleTransformer
             $fiscalTransaction,
             $invoiceNumber,
             $invoiceSummary,
-            $totalItems
+            count($invoiceLines)
         );
     }
 

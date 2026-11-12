@@ -157,8 +157,12 @@ vatDisplayCheck(substr_count($breakdownTableHtml, '<tr class="receipt-total-vat"
 vatDisplayCheck(str_contains(renderVatPartial('vat_registered', $receipt), '***VAT Registered***'),
     'VAT registered fiscal receipt wraps the heading marker in literal asterisks');
 $receipt->vat_registered = false;
+$receipt->vat_registered_label = __('sale.not_vat_registered');
+vatDisplayCheck(str_contains(renderVatPartial('vat_registered', $receipt), '***Not VAT Registered***'),
+    'Non-VAT registered terminal explicitly displays Not VAT Registered');
+$receipt->vat_registered = null;
 vatDisplayCheck(trim(renderVatPartial('vat_registered', $receipt)) === '',
-    'Non-VAT registered terminal does not claim registration');
+    'Unknown registration status prints nothing');
 unset($receipt->vat_registered);
 vatDisplayCheck(trim(renderVatPartial('vat_registered', $receipt)) === '',
     'Missing registration flag prints nothing');

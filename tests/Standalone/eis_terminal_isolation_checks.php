@@ -242,11 +242,25 @@ $missingTin = activationResponse('MISSING-TIN', 'FOREIGN-SITE', 3);
 unset($missingTin->data->configuration->taxpayerConfiguration->tin);
 locationReject(fn () => $process->invoke($activation, 1, $missingTin, 'CODE', [], 1),
     'Unverifiable taxpayer TIN blocks registration');
-foreach ([false, 0, '0', 'false', null] as $vatFlag) {
-    $notVat = activationResponse('NOT-VAT', 'FOREIGN-SITE', 3);
-    $notVat->data->configuration->taxpayerConfiguration->isVATRegistered = $vatFlag;
-    locationReject(fn () => $process->invoke($activation, 1, $notVat, 'CODE', [], 1),
-        'Taxpayer that is not VAT registered cannot activate a terminal');
+foreach ([false, 0, '0', 'false'] as $vatFlag) {
+    foreach (['NOT-VAT', 'A2'] as $device) {
+        DB::beginTransaction();
+        $notVat = activationResponse($device, 'A', 3);
+        $notVat->data->configuration->taxpayerConfiguration->isVATRegistered = $vatFlag;
+        $notVatResult = $process->invoke($activation, 1, $notVat, 'CODE', [], 1);
+        locationCheck($notVatResult['success'],
+            'Non-VAT registered taxpayers can activate and reactivate terminals');
+        locationCheck(Modules\EIS\Models\EisConfiguration::where('eis_setting_id', $notVatResult['terminal_setting_id'])
+            ->firstOrFail()->is_vat_registered === false,
+            'Non-VAT activation persists a false registration flag, including string false');
+        DB::rollBack();
+    }
+}
+foreach ([null, '', 'unknown', 2, []] as $vatFlag) {
+    $invalidVat = activationResponse('INVALID-VAT', 'A', 3);
+    $invalidVat->data->configuration->taxpayerConfiguration->isVATRegistered = $vatFlag;
+    locationReject(fn () => $process->invoke($activation, 1, $invalidVat, 'CODE', [], 1),
+        'Invalid VAT registration status still blocks activation');
 }
 $missingVat = activationResponse('MISSING-VAT', 'FOREIGN-SITE', 3);
 unset($missingVat->data->configuration->taxpayerConfiguration->isVATRegistered);
@@ -257,6 +271,9 @@ $vatAsString->data->configuration->taxpayerConfiguration->isVATRegistered = '1';
 DB::beginTransaction();
 locationCheck($process->invoke($activation, 1, $vatAsString, 'CODE', [], 1)['success'],
     'VAT registration reported as "1" is accepted');
+locationCheck(Modules\EIS\Models\EisConfiguration::where('eis_setting_id', 1)
+    ->firstOrFail()->is_vat_registered === true,
+    'VAT-registered activation persists a true registration flag');
 DB::rollBack();
 locationCheck(activationSnapshot() === $identityBefore,
     'Rejected identities preserve business names, sites, credentials and all terminal configuration');

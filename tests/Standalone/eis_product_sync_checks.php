@@ -83,7 +83,7 @@ function catalogFixture(): array
         'product_locations' => ['product_id', 'location_id'],
         'units' => ['business_id', 'short_name', 'actual_name'],
         'tax_rates' => ['business_id', 'configuration_id', 'tax_rate_id', 'name', 'is_activated', 'rate', 'deleted_at'],
-        'eis_configurations' => ['business_id', 'eis_setting_id', 'location_id', 'deleted_at'],
+        'eis_configurations' => ['business_id', 'eis_setting_id', 'location_id', 'is_vat_registered', 'deleted_at'],
         'eis_product_maps' => ['business_id', 'product_id', 'eis_product_id', 'sku', 'last_synced_at', 'meta', 'deleted_at'],
         'variation_location_details' => ['product_id', 'product_variation_id', 'variation_id', 'location_id', 'qty_available', 'deleted_at'],
         'transactions' => ['business_id', 'location_id', 'type', 'status', 'payment_status', 'opening_stock_product_id',
@@ -112,7 +112,8 @@ function catalogFixture(): array
         ['id' => 1, 'business_id' => 1, 'eis_site_id' => 'SITE-A', 'is_active' => 1],
         ['id' => 2, 'business_id' => 2, 'eis_site_id' => 'SITE-A', 'is_active' => 1],
     ]);
-    $db->table('eis_configurations')->insert(['id' => 1, 'business_id' => 1, 'eis_setting_id' => 1, 'location_id' => 1]);
+    $db->table('eis_configurations')->insert(['id' => 1, 'business_id' => 1, 'eis_setting_id' => 1,
+        'location_id' => 1, 'is_vat_registered' => 1]);
     $db->table('units')->insert(['business_id' => 1, 'short_name' => 'pcs', 'actual_name' => 'Pieces']);
     $db->table('tax_rates')->insert(['business_id' => 1, 'configuration_id' => 1,
         'tax_rate_id' => 'A', 'name' => 'Zero', 'is_activated' => 1, 'rate' => '0']);
@@ -183,6 +184,23 @@ $oneVariation = $db->table('variations')->where('product_id', $one->product_id)-
 catalogCheck((float) $oneVariation->default_sell_price === 8.51
     && (float) $oneVariation->sell_price_inc_tax === 10.0,
     'Catalog resync recalculates the product price from the latest tax rate');
+catalogCheck(abs((float) $oneVariation->default_purchase_price - 3 / 1.175) < 0.000001
+    && (float) $oneVariation->dpp_inc_tax === 3.0,
+    'VAT-registered product sync calculates tax-exclusive purchase prices');
+$db->table('eis_configurations')->where('id', 1)->update(['is_vat_registered' => 0]);
+pullCatalog($sync);
+$oneVariation = $db->table('variations')->where('product_id', $one->product_id)->first();
+catalogCheck((float) $oneVariation->default_sell_price === 10.0
+    && (float) $oneVariation->sell_price_inc_tax === 10.0
+    && (float) $oneVariation->default_purchase_price === 3.0
+    && (float) $oneVariation->dpp_inc_tax === 3.0,
+    'Non-VAT-registered resync keeps inclusive and exclusive sale and purchase prices equal despite a positive tax rate');
+$db->table('eis_configurations')->where('id', 1)->update(['is_vat_registered' => 1]);
+pullCatalog($sync);
+$oneVariation = $db->table('variations')->where('product_id', $one->product_id)->first();
+catalogCheck((float) $oneVariation->default_sell_price === 8.51
+    && (float) $oneVariation->sell_price_inc_tax === 10.0,
+    'Reusing a product sync service recalculates prices when VAT registration becomes true');
 $db->table('tax_rates')->where('configuration_id', 1)->where('tax_rate_id', 'A')->update(['rate' => '0']);
 $db->table('business_locations')->insert(['id' => 3, 'business_id' => 1, 'eis_site_id' => 'SITE-A']);
 $db->table('eis_settings')->insert(['id' => 2, 'business_id' => 1, 'location_id' => 3,

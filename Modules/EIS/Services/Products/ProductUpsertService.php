@@ -55,8 +55,10 @@ class ProductUpsertService {
             $settings,
             $locationId
         ) {
-            $configurationId = EisConfiguration::where('business_id', $businessId)
-                ->where('eis_setting_id', $settings->id)->lockForUpdate()->value('id');
+            $configuration = EisConfiguration::where('business_id', $businessId)
+                ->where('eis_setting_id', $settings->id)->lockForUpdate()->first();
+            $configurationId = $configuration?->id;
+            $this->taxRateCache = [];
 
             Log::info('EIS product sync started', [
                 'business_id' => $businessId,
@@ -359,7 +361,8 @@ class ProductUpsertService {
                 $product,
                 $item,
                 $locationId,
-                $configurationId ? (int) $configurationId : null
+                $configurationId ? (int) $configurationId : null,
+                $configuration?->is_vat_registered === true
             );
         }));
     }
@@ -372,7 +375,8 @@ class ProductUpsertService {
         Product $product,
         array $item,
         int $locationId,
-        ?int $configurationId
+        ?int $configurationId,
+        bool $isVatRegistered
     ): Product {
 
         if ($product->type !== 'single' || $product->variations()->withTrashed()->count() > 1
@@ -446,7 +450,7 @@ class ProductUpsertService {
         |--------------------------------------------------------------------------
         */
         $taxRate = $this->getTaxRateByShortName($businessId, $item, $configurationId);
-        $taxPercentage = $taxRate ? (float) $taxRate->rate : 0;
+        $taxPercentage = $isVatRegistered && $taxRate ? (float) $taxRate->rate : 0;
 
         /*
         |--------------------------------------------------------------------------
@@ -467,6 +471,7 @@ class ProductUpsertService {
         $taxAmount = $sellPrice - $sellPriceExclTax;
 
         Log::debug('Price calculation with tax', [
+            'is_vat_registered' => $isVatRegistered,
             'tax_percentage' => $taxPercentage,
             'tax_rate_short_name' => $item['taxRateId'] ?? null,
             'tax_rate_id' => $taxRate->id ?? null,
