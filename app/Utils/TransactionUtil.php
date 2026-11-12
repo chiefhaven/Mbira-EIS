@@ -1552,17 +1552,20 @@ class TransactionUtil extends Util
         $output['taxed_subtotal'] = $this->num_f($taxed_subtotal, $show_currency, $business_details);
 
         //Discount
-        $discount_amount = $this->num_f($transaction->discount_amount, $show_currency, $business_details);
         $output['line_discount_label'] = $invoice_layout->discount_label;
         $output['discount_label'] = $invoice_layout->discount_label;
-        $output['discount_label'] .= ($transaction->discount_type == 'percentage') ? ' <small>('.$this->num_f($transaction->discount_amount, false, $business_details).'%)</small> :' : '';
 
         if ($transaction->discount_type == 'percentage') {
             $discount = ($transaction->discount_amount / 100) * $transaction->total_before_tax;
         } else {
             $discount = $transaction->discount_amount;
         }
-        $output['discount'] = ($discount != 0) ? $this->num_f($discount, $show_currency, $business_details) : 0;
+        $output['discount'] = $this->formatReceiptDiscountValue(
+            $transaction->discount_amount,
+            $transaction->discount_type,
+            $show_currency,
+            $business_details
+        );
 
         $output['discount_amount_unformatted'] = $discount;
 
@@ -2347,6 +2350,9 @@ class TransactionUtil extends Util
 
             $line_array['total_line_discount'] = $this->num_f($total_line_discount_inc_tax, false, $business_details);
             $line_array['total_line_discount_uf'] = $total_line_discount_inc_tax;
+            $line_array['line_discount_entered'] = $line->line_discount_type == 'percentage'
+                ? $this->num_f($line->line_discount_amount, false, $business_details).'%'
+                : $this->num_f($line->line_discount_amount, false, $business_details);
             $line_array['unit_price_quantity_subtotal'] = $this->num_f($line->unit_price_inc_tax * $line->quantity, false, $business_details);
 
             if ($il->show_brand == 1) {
@@ -2441,6 +2447,19 @@ class TransactionUtil extends Util
         }
 
         return ['lines' => $output_lines];
+    }
+
+    private function formatReceiptDiscountValue($amount, $type, $show_currency, $business_details)
+    {
+        if ((float) $amount === 0.0) {
+            return 0;
+        }
+
+        if ($type === 'percentage') {
+            return $this->num_f($amount, false, $business_details).'%';
+        }
+
+        return $this->num_f($amount, $show_currency, $business_details);
     }
 
     /**
