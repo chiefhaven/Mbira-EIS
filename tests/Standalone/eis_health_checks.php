@@ -93,6 +93,31 @@ $container['config']->set('eis.base_url', '');
 checkHealth(! $health->isOnline(7, 'fixture-token') && count(Http::recorded()) === 0, 'No request without host');
 $header = file_get_contents(dirname(__DIR__, 2).'/resources/views/layouts/partials/header.blade.php');
 checkHealth(! str_contains($header, 'Cache::remember') && ! str_contains($header, 'eis_status_'), 'Header has no duplicate stale cache');
+$statusStart = strpos($header, '                        if ($terminals->isEmpty())');
+$statusBlock = substr($header, $statusStart, strpos($header, '                    } catch', $statusStart) - $statusStart);
+$container->instance(EisHealthService::class, $health);
+$container['config']->set('eis.base_url', 'https://eis.invalid');
+$businessId = 7;
+$activeTerminal = (object) ['status' => true, 'jwt_token' => 'fixture-token'];
+$inactiveTerminal = (object) ['status' => false, 'jwt_token' => 'inactive-token'];
+$unsignedTerminal = (object) ['status' => true, 'jwt_token' => ''];
+foreach ([
+    [[$activeTerminal, $activeTerminal], 503, 'offline', 1],
+    [[$activeTerminal, $activeTerminal], 200, 'online', 1],
+    [[$inactiveTerminal, $unsignedTerminal, $activeTerminal], 503, 'offline', 1],
+    [[$inactiveTerminal, $unsignedTerminal, $activeTerminal], 200, 'online', 1],
+    [[$inactiveTerminal, $unsignedTerminal], 200, 'offline', 0],
+    [[$activeTerminal], 200, 'online', 1],
+    [[$activeTerminal], 503, 'offline', 1],
+    [[], 200, 'not configured', 0],
+] as [$settings, $status, $expected, $requests]) {
+    $health->clearCache($businessId);
+    fakeHealth(fn () => Http::response($pong, $status));
+    $terminals = collect($settings);
+    eval($statusBlock);
+    checkHealth($eisStatus === $expected, 'Header health status takes precedence over multiple terminals: '.$expected);
+    checkHealth(count(Http::recorded()) === $requests, 'Header probes once with usable credentials, including beyond the first two terminals');
+}
 $source = file_get_contents(dirname(__DIR__, 2).'/Modules/EIS/Services/Http/EisHealthService.php');
 checkHealth(str_contains($source, '->connectTimeout($connectTimeout)->timeout($timeout)')
     && str_contains($source, "'allow_redirects' => false"), 'Bounded probe does not follow login redirects');

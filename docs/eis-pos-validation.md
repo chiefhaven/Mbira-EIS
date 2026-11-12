@@ -141,6 +141,11 @@ omitted from submission; compare it with the locally saved request payload.
 
 ## Terminal activation ownership
 
+The header checks EIS health even when multiple permitted terminals exist.
+Configured terminals show only "Online" or "Offline", regardless of count. The probe
+uses an enabled permitted terminal with credentials; no usable terminal is
+shown as offline, while no configured terminals remains "Not configured".
+
 Receipt VAT registration uses the original sale terminal's saved registration
 status. Legacy double-encoded activation configuration is also decoded when
 reading receipt tax settings; new activations save configuration without double

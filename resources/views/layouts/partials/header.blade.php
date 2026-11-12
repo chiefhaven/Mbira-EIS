@@ -67,16 +67,15 @@
                                 if ($permittedLocations !== 'all') {
                                     $query->whereIn('id', $permittedLocations);
                                 }
-                            })->limit(2)->get();
-                        if ($terminals->count() > 1) {
-                            $eisStatus = 'multiple terminals';
-                        } elseif ($terminals->isEmpty()) {
+                            })->get();
+                        if ($terminals->isEmpty()) {
                             $eisStatus = 'not configured';
                         } else {
-                            $terminal = $terminals->first();
+                            $terminal = $terminals->first(fn ($setting) => $setting->status && trim((string) $setting->jwt_token) !== '');
                             $eisHealth = app(\Modules\EIS\Services\Http\EisHealthService::class);
-                            $eisStatus = $terminal->status && $terminal->jwt_token
-                                && $eisHealth->isOnline($businessId, $terminal->jwt_token) ? 'online' : 'offline';
+                            $eisStatus = $terminal && $eisHealth->isOnline($businessId, $terminal->jwt_token)
+                                ? 'online'
+                                : 'offline';
                         }
                         
                     } catch (\Exception $e) {
