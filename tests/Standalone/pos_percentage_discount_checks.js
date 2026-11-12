@@ -10,6 +10,7 @@ function extract(name) {
     return source.slice(start, end);
 }
 const context = {
+    APP: { SALES_TAX_ENABLED: true },
     __read_number: element => Number(element.value),
     __write_number: (element, value) => { element.value = value; },
     __calculate_amount: (type, rate, base) => rate * base / 100,
@@ -21,7 +22,7 @@ const context = {
 };
 vm.createContext(context);
 vm.runInContext(['calculate_discounted_unit_price', 'calculate_unit_price_inc_tax',
-    'calculate_line_subtotal', 'pos_each_row'].map(extract).join('\n'), context);
+    'calculate_line_subtotal', 'pos_each_row', 'pos_order_tax'].map(extract).join('\n'), context);
 let checks = 0;
 for (const type of ['percentage', 'fixed']) {
     for (const rate of [0, 17.5]) {
@@ -79,7 +80,12 @@ for (const [type, discount, expected] of [['fixed', 100, 1800], ['percentage', 1
     assert.strictEqual(context.calculate_line_subtotal(row, 2), expected);
     checks += 2;
 }
-for (const [net, gross, multiplier] of [[1000, 1000, 1], [100, 103.33, 1], [100, 117.5, 3], [0, 0, 1]]) {
+for (const [enabled, net, gross, multiplier] of [
+    [true, 1000, 1000, 1], [true, 100, 103.33, 1], [true, 100, 117.5, 3], [true, 0, 0, 1],
+    [false, 100, 117.5, 1], [false, 100, 117.5, 3], [false, 0, 0, 1],
+]) {
+    context.APP.SALES_TAX_ENABLED = enabled;
+    const expectedGross = enabled ? gross : net;
     const fields = {
         'input.pos_unit_price': { value: 999 },
         'input.hidden_base_unit_sell_price': { value: net },
@@ -101,11 +107,34 @@ for (const [net, gross, multiplier] of [[1000, 1000, 1], [100, 103.33, 1], [100,
     } };
     context.pos_each_row(row);
     assert.strictEqual(fields['input.pos_unit_price'].value, net * multiplier);
-    assert.strictEqual(fields['input.pos_unit_price_inc_tax'].value, gross * multiplier);
-    assert.strictEqual(fields['input.pos_line_total'].value, gross * multiplier * 2);
+    assert.strictEqual(fields['input.pos_unit_price_inc_tax'].value, expectedGross * multiplier);
+    assert.strictEqual(fields['input.pos_line_total'].value, expectedGross * multiplier * 2);
     fields['input.row_discount_amount'].value = 10;
     context.pos_each_row(row);
-    assert(Math.abs(fields['input.pos_line_total'].value - gross * multiplier * 1.8) < 0.000001);
+    assert(Math.abs(fields['input.pos_line_total'].value - expectedGross * multiplier * 1.8) < 0.000001);
+    if (net === gross || !enabled) {
+        assert.strictEqual(fields['input.item_tax'].value, 0, 'Non-VAT percentage discounts keep item tax at zero');
+        fields['select.row_discount_type'].val = () => 'fixed';
+        fields['input.row_discount_amount'].value = net === 0 ? 0 : 100;
+        context.pos_each_row(row);
+        assert.strictEqual(fields['input.item_tax'].value, 0, 'Non-VAT fixed discounts keep item tax at zero');
+        checks += 2;
+    }
+    for (const enabled of [true, false]) {
+        context.APP.SALES_TAX_ENABLED = enabled;
+        const fields = {
+            '#tax_rate_id': { value: '1', val(value) { if (value !== undefined) this.value = value; return this.value; } },
+            '#tax_calculation_amount': { value: 17.5 },
+            'span#order_tax': { text(value) { this.value = value; } },
+        };
+        context.$ = selector => fields[selector];
+        assert.strictEqual(context.pos_order_tax(200, 20), enabled ? 31.5 : 0);
+        if (!enabled) {
+            assert.strictEqual(fields['#tax_rate_id'].value, '');
+            assert.strictEqual(fields['#tax_calculation_amount'].value, 0);
+        }
+        checks++;
+    }
     checks += 4;
 }
 console.log(`PASS: ${checks} POS fixed/percentage discount checks`);

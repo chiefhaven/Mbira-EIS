@@ -651,6 +651,49 @@ class ProductUtil extends Util
         return $details;
     }
 
+    public function applySalesTaxConfiguration(int $businessId, array $input, bool $ufNumber = true): array
+    {
+        if (empty($input['products']) || !in_array($input['type'] ?? 'sell', ['sell', 'sales_order'], true)) {
+            return $input;
+        }
+        $business = Business::findOrFail($businessId);
+        if ((int) $business->enable_inline_tax === 1) {
+            return $input;
+        }
+
+        $discount = [
+            'discount_type' => $input['discount_type'] ?? 'fixed',
+            'discount_amount' => $input['discount_amount'] ?? 0,
+        ];
+        $oldTotal = $this->calculateInvoiceTotal(
+            $input['products'], $input['tax_rate_id'] ?? $input['tax_id'] ?? null, $discount, $ufNumber
+        );
+        $format = static fn ($value) => $ufNumber
+            ? number_format($value, 4, session('currency.decimal_separator', '.'), '')
+            : $value;
+        foreach ($input['products'] as &$product) {
+            $price = $ufNumber ? $this->num_uf($product['unit_price']) : (float) $product['unit_price'];
+            $amount = $ufNumber ? $this->num_uf($product['line_discount_amount'] ?? 0)
+                : (float) ($product['line_discount_amount'] ?? 0);
+            $discounted = ($product['line_discount_type'] ?? 'fixed') === 'percentage'
+                ? $price * (1 - $amount / 100) : $price - $amount;
+            $product['unit_price_inc_tax'] = $format($discounted);
+            $product['item_tax'] = $format(0);
+            $product['tax_id'] = null;
+        }
+        unset($product);
+        $input['tax_rate_id'] = null;
+        $input['tax_id'] = null;
+        $input['tax_calculation_amount'] = $format(0);
+        $newTotal = $this->calculateInvoiceTotal($input['products'], null, $discount, $ufNumber);
+        if (isset($input['final_total'])) {
+            $finalTotal = $ufNumber ? $this->num_uf($input['final_total']) : (float) $input['final_total'];
+            $input['final_total'] = $format($finalTotal - $oldTotal['final_total'] + $newTotal['final_total']);
+        }
+
+        return $input;
+    }
+
     /**
      * Calculates the total amount of invoice
      *

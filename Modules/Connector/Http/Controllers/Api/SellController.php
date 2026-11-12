@@ -1422,6 +1422,7 @@ class SellController extends ApiController
     private function __formatSellData($data, $transaction = null)
     {
         $business_id = $data['business_id'];
+        $salesTaxEnabled = (int) Business::findOrFail($business_id)->enable_inline_tax === 1;
         if (array_key_exists('is_kitchen_order', $data)) {
             if (!in_array($data['is_kitchen_order'], [true, false, 0, 1, '0', '1'], true)) {
                 throw new \InvalidArgumentException('Kitchen order must be a boolean.');
@@ -1529,7 +1530,9 @@ class SellController extends ApiController
                     throw new \Exception('Product #'.$product_id.' has no valid variation for the selected sale item.');
                 }
 
-                $variation_price = $variation->sell_price_inc_tax ?? $variation->default_sell_price ?? 0;
+                $variation_price = $salesTaxEnabled
+                    ? ($variation->sell_price_inc_tax ?? $variation->default_sell_price ?? 0)
+                    : $variation->default_sell_price;
 
                 //Calculate line discount
                 $unit_price = $this->__getValue('unit_price', $product_data, $sell_line, $variation_price, 'unit_price_before_discount');
@@ -1547,15 +1550,15 @@ class SellController extends ApiController
                 //calculate line tax
                 $item_tax = 0;
                 $unit_price_inc_tax = $discounted_price;
-                $tax_id = $this->__getValue('tax_rate_id', $product_data, $sell_line, null, 'tax_id');
-                $catalog_price = $this->__desktopPosCatalogPrice(
+                $tax_id = $salesTaxEnabled ? $this->__getValue('tax_rate_id', $product_data, $sell_line, null, 'tax_id') : null;
+                $catalog_price = $salesTaxEnabled ? $this->__desktopPosCatalogPrice(
                     $formated_data['source'] ?? null,
                     $unit_price,
                     $discount_amount,
                     $tax_id,
                     $product->tax,
                     $variation
-                );
+                ) : null;
                 if ($catalog_price !== null) {
                     $item_tax = $catalog_price['item_tax'];
                     $unit_price_inc_tax = $catalog_price['unit_price_inc_tax'];
@@ -1629,7 +1632,7 @@ class SellController extends ApiController
         //calculate line tax
         $order_tax = 0;
         $final_total = $discounted_total;
-        $order_tax_id = $this->__getValue('tax_rate_id', $data, $transaction);
+        $order_tax_id = $salesTaxEnabled ? $this->__getValue('tax_rate_id', $data, $transaction) : null;
         if (! empty($order_tax_id)) {
             $tax = TaxRate::where('business_id', $business_id)
                         ->findOrFail($order_tax_id);

@@ -9,6 +9,7 @@ use Illuminate\Database\Capsule\Manager as Capsule;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Facade;
 use Modules\EIS\Models\EisSetting;
+use Modules\EIS\Models\EisConfiguration;
 use Modules\EIS\Models\EisTaxRate;
 use Modules\EIS\Services\Http\EisSaleClient;
 use Modules\EIS\Services\Sales\InvoiceNumberGenerator;
@@ -36,6 +37,7 @@ $capsule->table('tax_rates')->insert([
 ]);
 $transformer = new SaleTransformer(new EisTaxRate(), new OfflineSignatureService(), new InvoiceNumberGenerator());
 $settings = new EisSetting(['business_id' => 6, 'tpin' => 'FIXTURE', 'branch_id' => 'FIXTURE-SITE']);
+$settings->setRelation('configuration', new EisConfiguration(['business_id' => 6, 'is_vat_registered' => true]));
 $checks = 0;
 function discountCheck(bool $condition, string $message): void
 {
@@ -45,7 +47,7 @@ function discountCheck(bool $condition, string $message): void
     }
     ++$checks;
 }
-function discountPayload(SaleTransformer $transformer, EisSetting $settings, array $attributes, float $total, array $invoiceDiscount = []): array
+function discountPayload(SaleTransformer $transformer, EisSetting $settings, array $attributes, float $total, array $invoiceDiscount = [], bool $inlineTaxEnabled = true): array
 {
     $lines = [];
     foreach ($attributes as $index => $values) {
@@ -57,7 +59,8 @@ function discountPayload(SaleTransformer $transformer, EisSetting $settings, arr
     }
     $transaction = new Transaction();
     $transaction->setRawAttributes(['id' => 1, 'business_id' => 6, 'transaction_date' => '2026-11-08 10:00:00', 'final_total' => $total] + $invoiceDiscount);
-    $transaction->setRelation('business', null)->setRelation('location', null)->setRelation('contact', null)
+    $transaction->setRelation('business', new App\Business(['enable_inline_tax' => (int) $inlineTaxEnabled]))
+        ->setRelation('location', null)->setRelation('contact', null)
         ->setRelation('sell_lines', new Illuminate\Database\Eloquent\Collection($lines));
     $before = array_map(fn ($line) => $line->getAttributes(), $lines);
     $payload = $transformer->transform($transaction, $settings, 'FIXTURE-1');
@@ -174,6 +177,50 @@ foreach ([['percentage', 101, 0], ['fixed', 500, 0], ['percentage', 10, 200]] as
         discountCheck(true, 'Oversized discounts and inconsistent saved totals are rejected');
     }
 }
+$nonVatSettings = clone $settings;
+$nonVatSettings->setRelation('configuration', new EisConfiguration(['business_id' => 6, 'is_vat_registered' => false]));
+$nonVatLine = ['quantity' => 2, 'unit_price_before_discount' => 100, 'unit_price' => 90,
+    'unit_price_inc_tax' => 90, 'item_tax' => 0, 'line_discount_type' => 'fixed',
+    'line_discount_amount' => 10, 'tax_id' => 1];
+foreach (['fixed', 'percentage'] as $type) {
+    $nonVatLine['line_discount_type'] = $type;
+    $nonVatPayload = discountPayload($transformer, $nonVatSettings, [$nonVatLine], 180, [], false);
+    discountCheck($nonVatPayload['invoiceLineItems'][0]['unitPrice'] === 100.0
+        && $nonVatPayload['invoiceLineItems'][0]['discount'] === 20.0
+        && $nonVatPayload['invoiceLineItems'][0]['total'] === 180.0
+        && $nonVatPayload['invoiceLineItems'][0]['totalVAT'] === 0.0
+        && $nonVatPayload['invoiceSummary']['totalVAT'] === 0.0,
+        'Non-VAT item discounts do not inflate prices or force the configured standard VAT rate');
+    foreach ([['percentage', 10, 162.0], ['fixed', 18, 162.0], ['percentage', 100, 0.0]] as [$invoiceType, $amount, $total]) {
+        $nonVatPayload = discountPayload($transformer, $nonVatSettings, [$nonVatLine], $total,
+            ['discount_type' => $invoiceType, 'discount_amount' => $amount], false);
+        discountCheck($nonVatPayload['invoiceLineItems'][0]['total'] === $total
+            && $nonVatPayload['invoiceLineItems'][0]['totalVAT'] === 0.0
+            && $nonVatPayload['invoiceSummary']['totalVAT'] === 0.0
+            && $nonVatPayload['invoiceSummary']['taxBreakDown'] === [
+                ['rateId' => 'A', 'taxableAmount' => $total, 'taxAmount' => 0.0],
+            ], 'Combined non-VAT item and invoice discounts retain zero VAT and reconcile tax breakdowns');
+    }
+}
+$freeNonVat = $nonVatLine;
+$freeNonVat['unit_price'] = $freeNonVat['unit_price_inc_tax'] = 0;
+$freeNonVat['line_discount_amount'] = 100;
+$nonVatPayload = discountPayload($transformer, $nonVatSettings, [$freeNonVat], 0, [], false);
+discountCheck($nonVatPayload['invoiceLineItems'][0]['discount'] === 200.0
+    && $nonVatPayload['invoiceSummary']['totalVAT'] === 0.0,
+    'Fully discounted non-VAT items do not add VAT to the original price');
+$plainNonVat = $nonVatLine;
+$plainNonVat['line_discount_amount'] = 0;
+$plainNonVat['unit_price'] = $plainNonVat['unit_price_inc_tax'] = 100;
+$plainNonVat['item_tax'] = 17.5;
+$nonVatPayload = discountPayload($transformer, $nonVatSettings, [$plainNonVat], 180,
+    ['discount_type' => 'percentage', 'discount_amount' => 10], false);
+discountCheck($nonVatPayload['invoiceLineItems'][0]['discount'] === 20.0
+    && $nonVatPayload['invoiceSummary']['totalVAT'] === 0.0,
+    'Invoice-only discounts ignore stale saved item VAT for a non-VAT terminal');
+$payload = discountPayload($transformer, $nonVatSettings, [$correct], 211.5);
+discountCheck($payload['invoiceSummary']['totalVAT'] === 31.5,
+    'Enabled business inline tax controls discount VAT even if terminal VAT registration differs');
 $capsule->table('tax_rates')->where('id', 1)->delete();
 try {
     discountPayload($transformer, $settings, [$first], 900);
@@ -181,6 +228,9 @@ try {
 } catch (InvalidArgumentException $exception) {
     discountCheck(str_contains($exception->getMessage(), 'valid EIS tax rate'), 'Missing rates must surface an explicit fiscal validation error');
 }
+$nonVatPayload = discountPayload($transformer, $settings, [$nonVatLine], 180, [], false);
+discountCheck($nonVatPayload['invoiceSummary']['totalVAT'] === 0.0,
+    'Disabled business inline tax skips VAT lookup even for a VAT-registered terminal');
 
 $client = (new ReflectionClass(EisSaleClient::class))->newInstanceWithoutConstructor();
 $parse = new ReflectionMethod(EisSaleClient::class, 'parseErrorMessage');

@@ -88,6 +88,10 @@ $(document).ready(function() {
     } else {
         pos_form_obj = $('form#add_pos_sell_form');
     }
+    if (!APP.SALES_TAX_ENABLED) {
+        $('select#tax_rate_id, #order_tax_modal').val('').prop('disabled', true);
+        $('#pos-edit-tax').hide();
+    }
     var existing_product_rows = $('table#pos_table tbody tr.product_row');
     existing_product_rows.each(function() {
         pos_each_row($(this));
@@ -2015,12 +2019,15 @@ function pos_product_row(variation_id = null, purchase_line_id = null, weighing_
 function pos_each_row(row_obj) {
     var multiplier = parseFloat(row_obj.find('input.base_unit_multiplier').val()) || 1;
     var unit_price = __read_number(row_obj.find('input.hidden_base_unit_sell_price')) * multiplier;
+    if (!APP.SALES_TAX_ENABLED) {
+        unit_price = calculate_unit_price_inc_tax(row_obj);
+    }
     __write_number(row_obj.find('input.pos_unit_price'), unit_price);
     var discounted_unit_price = calculate_discounted_unit_price(row_obj);
     var price_inc_tax = calculate_unit_price_inc_tax(row_obj);
-    var unit_price_inc_tax = unit_price === 0 ? price_inc_tax
-        : price_inc_tax * discounted_unit_price / unit_price;
-    var item_tax = unit_price_inc_tax - discounted_unit_price;
+    var unit_price_inc_tax = !APP.SALES_TAX_ENABLED ? discounted_unit_price
+        : (unit_price === 0 ? price_inc_tax : price_inc_tax * discounted_unit_price / unit_price);
+    var item_tax = APP.SALES_TAX_ENABLED ? unit_price_inc_tax - discounted_unit_price : 0;
     __write_number(row_obj.find('input.item_tax'), item_tax);
     __write_number(row_obj.find('input.hidden_base_unit_item_tax'), item_tax / multiplier);
     __write_number(row_obj.find('input.pos_unit_price_inc_tax'), unit_price_inc_tax);
@@ -2169,6 +2176,12 @@ function pos_discount(total_amount) {
 }
 
 function pos_order_tax(price_total, discount) {
+    if (!APP.SALES_TAX_ENABLED) {
+        $('#tax_rate_id').val('');
+        __write_number($('#tax_calculation_amount'), 0);
+        $('span#order_tax').text(__currency_trans_from_en(0, false));
+        return 0;
+    }
     var tax_rate_id = $('#tax_rate_id').val();
     var calculation_type = 'percentage';
     var calculation_amount = __read_number($('#tax_calculation_amount'));
@@ -2526,7 +2539,8 @@ function calculate_line_subtotal(row, quantity) {
 }
 
 function calculate_unit_price_inc_tax(row) {
-    var base_price_inc_tax = __read_number(row.find('input.hidden_base_unit_sell_price_inc_tax'));
+    var price_field = APP.SALES_TAX_ENABLED ? 'input.hidden_base_unit_sell_price_inc_tax' : 'input.hidden_base_unit_sell_price';
+    var base_price_inc_tax = __read_number(row.find(price_field));
     var multiplier = parseFloat(row.find('input.base_unit_multiplier').val()) || 1;
     var price_inc_tax = base_price_inc_tax * multiplier;
     return __number_uf(__number_f(price_inc_tax));

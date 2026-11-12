@@ -78,6 +78,15 @@ class TransactionUtil extends Util
     public function createSellTransaction($business_id, $input, $invoice_total, $user_id, $uf_data = true)
     {
         $input = $this->applyEisBuyerValidation($business_id, $input);
+        $productUtil = new ProductUtil();
+        $normalized = $productUtil->applySalesTaxConfiguration((int) $business_id, $input, $uf_data);
+        if ($normalized !== $input) {
+            $input = $normalized;
+            $invoice_total = $productUtil->calculateInvoiceTotal($input['products'], $input['tax_rate_id'], [
+                'discount_type' => $input['discount_type'] ?? 'fixed',
+                'discount_amount' => $input['discount_amount'] ?? 0,
+            ], $uf_data);
+        }
 
         $sale_type = ! empty($input['type']) ? $input['type'] : 'sell';
         $invoice_scheme_id = ! empty($input['invoice_scheme_id']) ? $input['invoice_scheme_id'] : null;
@@ -208,6 +217,15 @@ class TransactionUtil extends Util
         $existing = is_object($transaction) ? $transaction : Transaction::where('id', $transaction_id)->where('business_id', $business_id)->first();
         if ($existing) {
             $input = $this->applyEisBuyerValidation($business_id, $input, $existing);
+        }
+        $productUtil = new ProductUtil();
+        $normalized = $productUtil->applySalesTaxConfiguration((int) $business_id, $input, $uf_data);
+        if ($normalized !== $input) {
+            $input = $normalized;
+            $invoice_total = $productUtil->calculateInvoiceTotal($input['products'], $input['tax_rate_id'], [
+                'discount_type' => $input['discount_type'] ?? 'fixed',
+                'discount_amount' => $input['discount_amount'] ?? 0,
+            ], $uf_data);
         }
 
         if (! is_object($transaction)) {
@@ -344,6 +362,10 @@ class TransactionUtil extends Util
     public function createOrUpdateSellLines($transaction, $products, $location_id, $return_deleted = false, $status_before = null, $extra_line_parameters = [], $uf_data = true)
     {
         \App\Services\Sales\SavedSaleWriteGuard::lock(DB::connection(), is_object($transaction) ? $transaction->id : $transaction);
+        $sale = is_object($transaction) ? $transaction : Transaction::findOrFail($transaction);
+        $products = (new ProductUtil())->applySalesTaxConfiguration((int) $sale->business_id, [
+            'type' => $sale->type, 'products' => $products,
+        ], $uf_data)['products'];
         $lines_formatted = [];
         $modifiers_array = [];
         $edit_ids = [0];
@@ -618,6 +640,10 @@ class TransactionUtil extends Util
         //Get the old order quantity
         $sell_line = TransactionSellLine::with(['product', 'warranties'])
                     ->find($product['transaction_sell_lines_id']);
+        $sale = Transaction::findOrFail($header_id);
+        $product = (new ProductUtil())->applySalesTaxConfiguration((int) $sale->business_id, [
+            'type' => $sale->type, 'products' => [$product],
+        ], $uf_data)['products'][0];
 
         $old_qty = $sell_line->quantity;
         $edit_ids[] = $product['transaction_sell_lines_id'];

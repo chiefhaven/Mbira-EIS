@@ -503,6 +503,22 @@ foreach ([true, false] as $flag) {
     $data = $format->invoke($controller, ['business_id' => 1, 'location_id' => 2, 'contact_id' => 3, 'is_kitchen_order' => $flag]);
     check((bool) $data['is_kitchen_order'] === $flag, 'normal Connector sale formatter retains explicit kitchen checkbox value');
 }
+$db->getSchemaBuilder()->table('tax_rates', function (Blueprint $t) { $t->softDeletes(); });
+foreach ([true, false] as $taxEnabled) {
+    $db->table('business')->where('id', 1)->update(['enable_inline_tax' => (int) $taxEnabled]);
+    $data = $format->invoke($controller, [
+        'business_id' => 1, 'location_id' => 2, 'contact_id' => 3, 'tax_rate_id' => 6,
+        'discount_type' => 'percentage', 'discount_amount' => 10,
+        'products' => [['product_id' => 4, 'variation_id' => 5, 'quantity' => 2,
+            'unit_price' => 10, 'tax_rate_id' => 6, 'discount_type' => 'percentage', 'discount_amount' => 10]],
+    ]);
+    check(abs((float) $data['products'][0]['item_tax'] - ($taxEnabled ? 1.8 : 0)) < 0.000001
+        && $data['products'][0]['tax_id'] === ($taxEnabled ? 6 : null),
+        'Connector item discounts follow the business inline-tax setting despite supplied tax IDs');
+    check(abs($data['final_total'] - ($taxEnabled ? 23.328 : 16.2)) < 0.000001
+        && $data['tax_rate_id'] === ($taxEnabled ? 6 : null),
+        'Connector invoice tax and final totals follow the same setting after discounts');
+}
 $db->table('business')->update(['enabled_modules' => '["tables"]']);
 try {
     $format->invoke($controller, ['business_id' => 1, 'location_id' => 2, 'contact_id' => 3, 'is_kitchen_order' => true]);

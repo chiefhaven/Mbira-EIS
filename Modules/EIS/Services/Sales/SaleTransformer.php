@@ -70,6 +70,10 @@ class SaleTransformer
         $taxBreakdown = [];
         $totalVat = 0;
         $subtotal = 0;
+        if (!$transaction->business) {
+            throw new \InvalidArgumentException('The sale business configuration is required to calculate sales tax.');
+        }
+        $salesTaxDisabled = (int) $transaction->business->enable_inline_tax !== 1;
 
         foreach ($transaction->sell_lines as $index => $line) {
             if ($line->product && (int) $line->product->business_id !== (int) $transaction->business_id) {
@@ -91,11 +95,11 @@ class SaleTransformer
             $discountPerUnit = $this->getDiscountAmount($line);
             $unitPrice = $this->getUnitPrice($line);
             if ($discountPerUnit > 0) {
-                $rate = $this->discountTaxRate($settings->business_id, $taxRateId);
+                $rate = $salesTaxDisabled ? 0 : $this->discountTaxRate($settings->business_id, $taxRateId);
                 $unitPrice = round((float) $line->unit_price_before_discount * (1 + $rate / 100), 2);
             }
             $quantity = round($this->getQuantity($line), 2);
-            $vat = round($this->getVatAmount($line) * $quantity, 2);
+            $vat = $salesTaxDisabled ? 0.0 : round($this->getVatAmount($line) * $quantity, 2);
             $discount = $discountPerUnit > 0
                 ? round($unitPrice * $quantity - round($this->getUnitPrice($line) * $quantity, 2), 2) : 0;
             if ($discount < 0) {
@@ -103,7 +107,7 @@ class SaleTransformer
             }
             $lineTotal = round($unitPrice * $quantity - $discount, 2);
             if ($discount > 0) {
-                $vat = $this->getDiscountedVat($settings->business_id, $taxRateId, $lineTotal);
+                $vat = $salesTaxDisabled ? 0.0 : $this->getDiscountedVat($settings->business_id, $taxRateId, $lineTotal);
             }
             
             $subtotal += $lineTotal;
@@ -153,7 +157,8 @@ class SaleTransformer
                 $allocated = $target;
                 $item['discount'] = round($item['discount'] + $share, 2);
                 $item['total'] = round($item['total'] - $share, 2);
-                $item['totalVAT'] = $this->getDiscountedVat($settings->business_id, $item['taxRateId'], $item['total']);
+                $item['totalVAT'] = $salesTaxDisabled ? 0.0
+                    : $this->getDiscountedVat($settings->business_id, $item['taxRateId'], $item['total']);
                 $totalVat += $item['totalVAT'];
                 $this->updateTaxBreakdown($taxBreakdown, $item['taxRateId'], $item['total'], $item['totalVAT']);
             }

@@ -114,6 +114,12 @@ gross line total, rather than a VAT-exclusive discount subtracted from a gross p
 VAT and tax breakdowns for discounted lines are recomputed from that
 total using the business's configured EIS rate. Stored POS prices, item tax,
 payments and totals are not rewritten. Non-discounted lines retain stored VAT.
+The business's "Enable inline tax in purchase and sell" setting controls sales
+tax, including item VAT and order/invoice tax, rather than terminal registration
+alone. When off, POS, Direct Sale, sales orders, and Connector/API sale
+creation/edits use the exclusive price, zero item tax and no invoice tax.
+The server normalizes supplied tax values and adjusts totals while preserving
+discounts, shipping and other charges. When on, existing tax calculations apply.
 POS and Direct Sale use the database's exclusive and inclusive price pair;
 the browser does not reconstruct either price from the selected tax rate.
 Both prices scale together for sub-units. Row tax selection is read-only,
@@ -124,6 +130,12 @@ Discount changes adjust the stored price pair proportionally for submitted
 item VAT, including removal of a discount. A K100 net / K117.50 gross item
 with 10% discount is K90 net + K15.75 VAT = K105.75 gross.
 Fully discounted products remain in fiscal invoices with zero total and VAT.
+When business inline tax is disabled, neither item nor invoice
+discounts add VAT: original prices are not grossed up, line/summary VAT remains
+zero, and tax breakdowns retain zero tax even if a standard rate is configured.
+Activation and latest configuration set this business option from VAT
+registration. Already issued invoices and returns against their original fiscal
+payload retain the recorded tax; toggling the setting does not rewrite history.
 Invoice-level fixed/percentage discounts are allocated proportionally across
 the already line-discounted gross totals, with cumulative cent rounding.
 VAT and rate breakdowns are rebuilt after allocation, including zero-rated lines.

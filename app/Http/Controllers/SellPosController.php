@@ -383,6 +383,9 @@ class SellPosController extends Controller
 
         try {
             $input = $request->except('_token');
+            $input = $this->productUtil->applySalesTaxConfiguration(
+                (int) $request->session()->get('user.business_id'), $input
+            );
 
             \Log::info('POS sale requested', ['business_id' => $request->session()->get('user.business_id')]);
 
@@ -1283,6 +1286,9 @@ class SellPosController extends Controller
 
         try {
             $input = $request->except('_token');
+            $input = $this->productUtil->applySalesTaxConfiguration(
+                (int) $request->session()->get('user.business_id'), $input
+            );
 
             //status is send as quotation from edit sales screen.
             $input['is_quotation'] = 0;

@@ -252,6 +252,31 @@ $result = $header->invoke($transformer, $transaction, $settings, 'FIXTURE', '00'
 checkEis($result['vat5CertificateDetails'] === null, 'Ordinary invoice excludes certificate');
 
 // Real store action rejects validation before DB writes, uploads, or sale dispatch.
+$schema->create('business', function (Blueprint $t) {
+    $t->increments('id'); $t->boolean('enable_inline_tax');
+});
+DB::table('business')->insert(['id' => 8, 'enable_inline_tax' => 0]);
+$schema->create('tax_rates', function (Blueprint $t) {
+    $t->increments('id'); $t->decimal('amount', 8, 3); $t->softDeletes();
+});
+DB::table('tax_rates')->insert(['id' => 1, 'amount' => 10]);
+$taxedInput = array_replace($input, [
+    'contact_id' => 4, 'invoice_no' => 'TAX-OFF', 'tax_rate_id' => 1,
+    'discount_type' => 'percentage', 'discount_amount' => 10, 'shipping_charges' => 5,
+    'products' => [['unit_price' => 1000, 'unit_price_inc_tax' => 1057.5, 'quantity' => 2,
+        'item_tax' => 157.5, 'tax_id' => 1, 'line_discount_type' => 'fixed', 'line_discount_amount' => 100]],
+]);
+$taxedTotals = (new App\Utils\ProductUtil())->calculateInvoiceTotal($taxedInput['products'], 1, $taxedInput, false);
+$taxedInput['final_total'] = $taxedTotals['final_total'] + 5;
+$taxFreeSale = $util->createSellTransaction(8, $taxedInput, $taxedTotals, 1, false);
+checkEis($taxFreeSale->tax_id === null && (float) $taxFreeSale->tax_amount === 0.0
+    && (float) $taxFreeSale->final_total === 1625.0,
+    'Sale persistence ignores submitted item/order taxes when the business setting is off');
+$taxFreeSale = $util->updateSellTransaction($taxFreeSale, 8, $taxedInput, $taxedTotals, 1, false)->fresh();
+checkEis($taxFreeSale->tax_id === null && (float) $taxFreeSale->tax_amount === 0.0
+    && (float) $taxFreeSale->final_total === 1625.0,
+    'Sale update enforces tax-free totals without double discounts or lost shipping');
+
 Request::macro('validate', function ($rules) use ($factory) { return $factory->make($this->all(), $rules)->validate(); });
 $user = Mockery::mock(); $user->shouldReceive('can')->andReturn(true);
 $auth = Mockery::mock(); $auth->shouldReceive('user')->andReturn($user);
@@ -259,6 +284,7 @@ $container->instance(Illuminate\Contracts\Auth\Factory::class, $auth);
 $register = Mockery::mock(App\Utils\CashRegisterUtil::class); $register->shouldReceive('countOpenedRegister')->andReturn(1);
 $contactUtil = Mockery::mock(App\Utils\ContactUtil::class);
 $productUtil = Mockery::mock(App\Utils\ProductUtil::class); $productUtil->shouldReceive('calculateInvoiceTotal')->andReturn($totals);
+$productUtil->shouldReceive('applySalesTaxConfiguration')->andReturnUsing(fn ($businessId, $input) => $input);
 $moduleUtil = Mockery::mock(App\Utils\ModuleUtil::class); $moduleUtil->shouldReceive('isSubscribed', 'isQuotaAvailable')->andReturn(true);
 $util->shouldReceive('isCustomerCreditLimitExeeded')->andReturn(false);
 $controller = new SellPosController($contactUtil, $productUtil, Mockery::mock(App\Utils\BusinessUtil::class), $util, $register, $moduleUtil, Mockery::mock(App\Utils\NotificationUtil::class));

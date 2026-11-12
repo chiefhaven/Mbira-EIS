@@ -2,6 +2,7 @@
     base_path = "{{ url('/') }}";
     //used for push notification
     APP = {};
+    APP.SALES_TAX_ENABLED = @json((int) session('business.enable_inline_tax') === 1);
     APP.PUSHER_APP_KEY = '{{ config('broadcasting.connections.pusher.key') }}';
     APP.PUSHER_APP_CLUSTER = '{{ config('broadcasting.connections.pusher.options.cluster') }}';
     APP.INVOICE_SCHEME_SEPARATOR = '{{ config('constants.invoice_scheme_separator') }}';

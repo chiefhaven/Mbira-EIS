@@ -67,12 +67,6 @@
 			$discounted_unit_price = $product->default_sell_price;
 			$has_saved_price = isset($product->unit_price_before_discount);
 
-			if($hide_tax == 'hide'){
-				$tax_id = null;
-				$base_item_tax = 0;
-				$item_tax = 0;
-			}
-
 			if(!empty($so_line) && $action !== 'edit') {
 				$tax_id = $so_line->tax_id;
 				$base_item_tax = $so_line->item_tax;
@@ -81,6 +75,12 @@
 				$pos_unit_price = $so_line->unit_price_before_discount;
 				$discounted_unit_price = $so_line->unit_price;
 				$has_saved_price = true;
+			}
+			if ($hide_tax == 'hide') {
+				$tax_id = null;
+				$base_item_tax = 0;
+				$item_tax = 0;
+				$unit_price_inc_tax = $discounted_unit_price;
 			}
 
 			$unit_price_before_discount_inc_tax = $unit_price_inc_tax;

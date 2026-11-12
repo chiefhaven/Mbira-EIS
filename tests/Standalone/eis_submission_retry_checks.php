@@ -167,7 +167,8 @@ function fixtureSale(): Transaction {
     return fixtureRelations(Transaction::findOrFail($id));
 }
 function fixtureRelations(Transaction $transaction): Transaction {
-    $transaction->setRelation('business', null)->setRelation('location', null)->setRelation('contact', null);
+    $transaction->setRelation('business', new App\Business(['enable_inline_tax' => 1]))
+        ->setRelation('location', null)->setRelation('contact', null);
     $lines = [];
     foreach ([
         ['id' => 1, 'unit_price' => 10, 'unit_price_inc_tax' => 11.25, 'item_tax' => 1.25, 'quantity' => 2],
