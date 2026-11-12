@@ -114,8 +114,14 @@ gross line total, rather than a VAT-exclusive discount subtracted from a gross p
 VAT and tax breakdowns for discounted lines are recomputed from that
 total using the business's configured EIS rate. Stored POS prices, item tax,
 payments and totals are not rewritten. Non-discounted lines retain stored VAT.
-POS and classic sale discount/price changes recalculate item VAT from the
-discounted net price, including removal of a discount. A K100 net item at 17.5%
+POS and Direct Sale use the database's exclusive and inclusive price pair;
+the browser does not reconstruct either price from the selected tax rate.
+Both prices scale together for sub-units. Row tax selection is read-only,
+matching the stored prices, including equal inclusive/exclusive prices for
+non-VAT businesses. Existing saved sale/order lines retain their saved price
+ratio rather than being repriced from the current tax dropdown.
+Discount changes adjust the stored price pair proportionally for submitted
+item VAT, including removal of a discount. A K100 net / K117.50 gross item
 with 10% discount is K90 net + K15.75 VAT = K105.75 gross.
 Fully discounted products remain in fiscal invoices with zero total and VAT.
 Invoice-level fixed/percentage discounts are allocated proportionally across

@@ -28,6 +28,8 @@ for (const type of ['percentage', 'fixed']) {
         for (const discount of [0, 10, 100]) {
             const fields = {
                 'input.pos_unit_price': { value: 100 },
+                'input.hidden_base_unit_sell_price': { value: 100 / 3 },
+                'input.hidden_base_unit_sell_price_inc_tax': { value: 100 * (1 + rate / 100) / 3 },
                 'input.pos_quantity': { value: 2 },
                 'select.row_discount_type': { val: () => type },
                 'input.row_discount_amount': { value: discount },
@@ -50,10 +52,10 @@ for (const type of ['percentage', 'fixed']) {
             const gross = 100 * (1 + rate / 100);
             const discountIncTax = type === 'percentage' ? gross * discount / 100 : discount;
             const subtotal = 2 * (gross - discountIncTax);
-            assert.strictEqual(fields['input.item_tax'].value, tax);
-            assert.strictEqual(fields['input.pos_unit_price_inc_tax'].value, net + tax);
+            assert(Math.abs(fields['input.item_tax'].value - tax) < 0.000001);
+            assert(Math.abs(fields['input.pos_unit_price_inc_tax'].value - (net + tax)) < 0.000001);
             assert(Math.abs(fields['input.pos_line_total'].value - subtotal) < 0.000001);
-            assert.strictEqual(fields['input.hidden_base_unit_item_tax'].value, tax / 3);
+            assert(Math.abs(fields['input.hidden_base_unit_item_tax'].value - tax / 3) < 0.000001);
             assert.strictEqual(fields['span.pos_line_total_text'].value, String(fields['input.pos_line_total'].value));
             assert.strictEqual(fields['.pos_unit_price_inc_tax_text'].value, String(gross));
             fields['input.row_discount_amount'].value = 0;
@@ -66,6 +68,8 @@ for (const type of ['percentage', 'fixed']) {
 for (const [type, discount, expected] of [['fixed', 100, 1800], ['percentage', 10, 1800]]) {
     const fields = {
         'input.pos_unit_price': { value: 851.06 },
+        'input.hidden_base_unit_sell_price_inc_tax': { value: 1000 },
+        'input.base_unit_multiplier': { val: () => 1 },
         'select.tax_id :selected': { data: () => 17.5 },
         'select.row_discount_type': { val: () => type },
         'input.row_discount_amount': { value: discount },
@@ -74,5 +78,34 @@ for (const [type, discount, expected] of [['fixed', 100, 1800], ['percentage', 1
     assert.strictEqual(context.calculate_unit_price_inc_tax(row), 1000);
     assert.strictEqual(context.calculate_line_subtotal(row, 2), expected);
     checks += 2;
+}
+for (const [net, gross, multiplier] of [[1000, 1000, 1], [100, 103.33, 1], [100, 117.5, 3], [0, 0, 1]]) {
+    const fields = {
+        'input.pos_unit_price': { value: 999 },
+        'input.hidden_base_unit_sell_price': { value: net },
+        'input.hidden_base_unit_sell_price_inc_tax': { value: gross },
+        'input.base_unit_multiplier': { val: () => multiplier },
+        'input.pos_quantity': { value: 2 },
+        'select.row_discount_type': { val: () => 'percentage' },
+        'input.row_discount_amount': { value: 0 },
+        'input.item_tax': {},
+        'input.hidden_base_unit_item_tax': {},
+        'input.pos_unit_price_inc_tax': {},
+        'input.pos_line_total': {},
+        'span.pos_line_total_text': { text(value) { this.value = value; } },
+        '.pos_unit_price_inc_tax_text': { text(value) { this.value = value; } },
+    };
+    const row = { find: selector => {
+        assert(fields[selector], 'Prices must not be reconstructed from a selected tax rate: ' + selector);
+        return fields[selector];
+    } };
+    context.pos_each_row(row);
+    assert.strictEqual(fields['input.pos_unit_price'].value, net * multiplier);
+    assert.strictEqual(fields['input.pos_unit_price_inc_tax'].value, gross * multiplier);
+    assert.strictEqual(fields['input.pos_line_total'].value, gross * multiplier * 2);
+    fields['input.row_discount_amount'].value = 10;
+    context.pos_each_row(row);
+    assert(Math.abs(fields['input.pos_line_total'].value - gross * multiplier * 1.8) < 0.000001);
+    checks += 4;
 }
 console.log(`PASS: ${checks} POS fixed/percentage discount checks`);

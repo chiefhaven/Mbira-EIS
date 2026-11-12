@@ -489,59 +489,21 @@ $(document).ready(function() {
     $('table#pos_table tbody').on('change', 'input.pos_unit_price', function() {
         var tr = $(this).parents('tr');
 
-        //calculate discounted unit price
-        var discounted_unit_price = calculate_discounted_unit_price(tr);
-
-        var quantity = __read_number(tr.find('input.pos_quantity'));
-
-        var item_tax = __read_number(tr.find('input.item_tax'));
-        var unit_price_inc_tax = discounted_unit_price + item_tax;
-        var line_total = calculate_line_subtotal(tr, quantity);
-
-        __write_number(tr.find('input.pos_unit_price_inc_tax'), unit_price_inc_tax);
-        __write_number(tr.find('input.pos_line_total'), line_total);
-        tr.find('span.pos_line_total_text').text(__currency_trans_from_en(line_total, true));
         pos_each_row(tr);
         pos_total_row();
         round_row_to_iraqi_dinnar(tr);
     });
 
-    //Refresh the per-unit tax from the selected database rate.
+    //Keep the database price pair when refreshing a row.
     $('table#pos_table tbody').on('change', 'select.tax_id', function() {
         var tr = $(this).parents('tr');
-        var tax_rate = $(this).find(':selected').data('rate') || 0;
-        var discounted_unit_price = calculate_discounted_unit_price(tr);
-        var item_tax = __calculate_amount('percentage', tax_rate, discounted_unit_price);
-        var multiplier = parseFloat(tr.find('input.base_unit_multiplier').val()) || 1;
-
-        __write_number(tr.find('input.item_tax'), item_tax);
-        __write_number(tr.find('input.hidden_base_unit_item_tax'), item_tax / multiplier);
         pos_each_row(tr);
         pos_total_row();
     });
 
-    //If change in unit price including tax, update unit price
+    //Refresh totals without deriving either stored price from a tax rate.
     $('table#pos_table tbody').on('change', 'input.pos_unit_price_inc_tax', function() {
-        var unit_price_inc_tax = __read_number($(this));
-
-        if (iraqi_selling_price_adjustment) {
-            unit_price_inc_tax = round_to_iraqi_dinnar(unit_price_inc_tax);
-            __write_number($(this), unit_price_inc_tax);
-        }
-
         var tr = $(this).parents('tr');
-
-        var quantity = __read_number(tr.find('input.pos_quantity'));
-
-        var tax_rate = Number(tr.find('select.tax_id :selected').data('rate')) || 0;
-        var discounted_unit_price = unit_price_inc_tax / (1 + tax_rate / 100);
-        var unit_price = get_unit_price_from_discounted_unit_price(tr, discounted_unit_price);
-
-        __write_number(tr.find('input.pos_unit_price'), unit_price);
-        var line_total = calculate_line_subtotal(tr, quantity);
-        __write_number(tr.find('input.pos_line_total'), line_total, false);
-        tr.find('span.pos_line_total_text').text(__currency_trans_from_en(line_total, true));
-
         pos_each_row(tr);
         pos_total_row();
     });
@@ -616,18 +578,6 @@ $(document).ready(function() {
         function() {
             var tr = $(this).parents('tr');
 
-            //calculate discounted unit price
-            var discounted_unit_price = calculate_discounted_unit_price(tr);
-
-            var quantity = __read_number(tr.find('input.pos_quantity'));
-
-            var item_tax = __read_number(tr.find('input.item_tax'));
-            var unit_price_inc_tax = discounted_unit_price + item_tax;
-            var line_total = calculate_line_subtotal(tr, quantity);
-
-            __write_number(tr.find('input.pos_unit_price_inc_tax'), unit_price_inc_tax);
-            __write_number(tr.find('input.pos_line_total'), line_total, false);
-            tr.find('span.pos_line_total_text').text(__currency_trans_from_en(line_total, true));
             pos_each_row(tr);
             pos_total_row();
             round_row_to_iraqi_dinnar(tr);
@@ -2063,16 +2013,19 @@ function pos_product_row(variation_id = null, purchase_line_id = null, weighing_
 
 //Update values for each row
 function pos_each_row(row_obj) {
-    var discounted_unit_price = calculate_discounted_unit_price(row_obj);
-    var tax_rate = Number(row_obj.find('select.tax_id :selected').data('rate')) || 0;
-    var item_tax = __calculate_amount('percentage', tax_rate, discounted_unit_price);
     var multiplier = parseFloat(row_obj.find('input.base_unit_multiplier').val()) || 1;
+    var unit_price = __read_number(row_obj.find('input.hidden_base_unit_sell_price')) * multiplier;
+    __write_number(row_obj.find('input.pos_unit_price'), unit_price);
+    var discounted_unit_price = calculate_discounted_unit_price(row_obj);
+    var price_inc_tax = calculate_unit_price_inc_tax(row_obj);
+    var unit_price_inc_tax = unit_price === 0 ? price_inc_tax
+        : price_inc_tax * discounted_unit_price / unit_price;
+    var item_tax = unit_price_inc_tax - discounted_unit_price;
     __write_number(row_obj.find('input.item_tax'), item_tax);
     __write_number(row_obj.find('input.hidden_base_unit_item_tax'), item_tax / multiplier);
-    var unit_price_inc_tax = discounted_unit_price + item_tax;
     __write_number(row_obj.find('input.pos_unit_price_inc_tax'), unit_price_inc_tax);
     row_obj.find('.pos_unit_price_inc_tax_text').text(
-        __currency_trans_from_en(calculate_unit_price_inc_tax(row_obj), false, false, __currency_precision, true)
+        __currency_trans_from_en(price_inc_tax, false, false, __currency_precision, true)
     );
     var qty = __read_number(row_obj.find('input.pos_quantity'));
     var line_total = calculate_line_subtotal(row_obj, qty);
@@ -2573,9 +2526,9 @@ function calculate_line_subtotal(row, quantity) {
 }
 
 function calculate_unit_price_inc_tax(row) {
-    var unit_price = __read_number(row.find('input.pos_unit_price'));
-    var tax_rate = Number(row.find('select.tax_id :selected').data('rate')) || 0;
-    var price_inc_tax = unit_price + __calculate_amount('percentage', tax_rate, unit_price);
+    var base_price_inc_tax = __read_number(row.find('input.hidden_base_unit_sell_price_inc_tax'));
+    var multiplier = parseFloat(row.find('input.base_unit_multiplier').val()) || 1;
+    var price_inc_tax = base_price_inc_tax * multiplier;
     return __number_uf(__number_f(price_inc_tax));
 }
 

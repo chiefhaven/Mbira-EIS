@@ -7,9 +7,6 @@
 		<div class="modal-body">
 			<div class="row">
 				<div class="form-group col-xs-12 @if(!$edit_price) hide @endif">
-					@php
-						$pos_unit_price = !empty($product->unit_price_before_discount) ? $product->unit_price_before_discount : $product->default_sell_price;
-					@endphp
 					<label>@lang('sale.price_inc_tax')</label>
 					<input type="hidden" name="products[{{$row_count}}][unit_price]" class="pos_unit_price input_number mousetrap" value="{{@num_format($pos_unit_price)}}">
 					<span class="pos_unit_price_inc_tax_text">{{@num_format($unit_price_inc_tax)}}</span>

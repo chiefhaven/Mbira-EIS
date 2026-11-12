@@ -63,12 +63,14 @@
 			$base_item_tax = $product->item_tax ?? 0;
 			$item_tax = $base_item_tax * $multiplier;
 			$unit_price_inc_tax = $product->sell_price_inc_tax;
+			$pos_unit_price = $product->unit_price_before_discount ?? $product->default_sell_price;
+			$discounted_unit_price = $product->default_sell_price;
+			$has_saved_price = isset($product->unit_price_before_discount);
 
 			if($hide_tax == 'hide'){
 				$tax_id = null;
 				$base_item_tax = 0;
 				$item_tax = 0;
-				$unit_price_inc_tax = $product->default_sell_price;
 			}
 
 			if(!empty($so_line) && $action !== 'edit') {
@@ -76,6 +78,19 @@
 				$base_item_tax = $so_line->item_tax;
 				$item_tax = $base_item_tax * $multiplier;
 				$unit_price_inc_tax = $so_line->unit_price_inc_tax;
+				$pos_unit_price = $so_line->unit_price_before_discount;
+				$discounted_unit_price = $so_line->unit_price;
+				$has_saved_price = true;
+			}
+
+			$unit_price_before_discount_inc_tax = $unit_price_inc_tax;
+			if ($has_saved_price) {
+				$price_ratio = $discounted_unit_price > 0
+					? $unit_price_inc_tax / $discounted_unit_price
+					: (($product->catalog_price_exc_tax ?? $product->default_sell_price) > 0
+						? ($product->catalog_price_inc_tax ?? $product->sell_price_inc_tax) / ($product->catalog_price_exc_tax ?? $product->default_sell_price)
+						: 1);
+				$unit_price_before_discount_inc_tax = $pos_unit_price * $price_ratio;
 			}
 
 			$discount_type = !empty($product->line_discount_type) ? $product->line_discount_type : 'fixed';
@@ -298,7 +313,8 @@
 
 		<input type="hidden" class="base_unit_multiplier" name="products[{{$row_count}}][base_unit_multiplier]" value="{{$multiplier}}">
 
-		<input type="hidden" class="hidden_base_unit_sell_price" value="{{$product->default_sell_price / $multiplier}}">
+		<input type="hidden" class="hidden_base_unit_sell_price" value="{{$pos_unit_price / $multiplier}}">
+		<input type="hidden" class="hidden_base_unit_sell_price_inc_tax" value="{{$unit_price_before_discount_inc_tax / $multiplier}}">
 		<input type="hidden" class="hidden_base_unit_item_tax" value="{{$base_item_tax}}">
 		
 		{{-- Hidden fields for combo products --}}
@@ -351,13 +367,6 @@
 				</div>
 			</td>
 		@endif
-		@php
-			$pos_unit_price = !empty($product->unit_price_before_discount) ? $product->unit_price_before_discount : $product->default_sell_price;
-
-			if(!empty($so_line) && $action !== 'edit') {
-				$pos_unit_price = $so_line->unit_price_before_discount;
-			}
-		@endphp
 		<td class="@if(!$edit_price) hide @endif">
 			<input type="text" name="products[{{$row_count}}][unit_price]" class="form-control pos_unit_price input_number mousetrap" value="{{@num_format($pos_unit_price)}}" readonly @if(!empty($pos_settings['enable_msp'])) data-rule-min-value="{{$pos_unit_price}}" data-msg-min-value="{{__('lang_v1.minimum_selling_price_error_msg', ['price' => @num_format($pos_unit_price)])}}" @endif>
 
@@ -388,7 +397,8 @@
 		<td class="text-center {{$hide_tax}}">
 			{!! Form::hidden("products[$row_count][item_tax]", @num_format($item_tax), ['class' => 'item_tax']); !!}
 		
-			{!! Form::select("products[$row_count][tax_id]", $tax_dropdown['tax_rates'], $tax_id, ['placeholder' => 'Select', 'class' => 'form-control tax_id'], $tax_dropdown['attributes']); !!}
+			{!! Form::hidden("products[$row_count][tax_id]", $tax_id); !!}
+			{!! Form::select("products[$row_count][tax_id]", $tax_dropdown['tax_rates'], $tax_id, ['placeholder' => 'Select', 'class' => 'form-control tax_id', 'disabled' => true], $tax_dropdown['attributes']); !!}
 		</td>
 
 	@else
