@@ -132,6 +132,23 @@ receiptDiscountCheck($freeReceiptLine['unit_price_before_discount_inc_tax'] === 
     && $freeReceiptLine['line_discount_entered'] === '100.00%'
     && $freeReceiptLine['unit_price_quantity_subtotal'] === '0.00',
     'Fully discounted taxable product retains tax-inclusive original price and discount');
+foreach ([[null, 'Free product'], ['', 'Free product'], ['   ', 'Free product'],
+    ['<p> </p>', 'Free product'], [' Product description ', 'Product description'],
+    ['<p>Soup &amp; bread</p>', 'Soup & bread'], ['0', '0']] as [$description, $expected]) {
+    $descriptionLine = clone $freeLine;
+    $descriptionLine->setRelation('product', (object) [
+        'name' => 'Free product', 'product_description' => $description,
+        'unit' => (object) ['short_name' => 'pc'], 'brand' => null, 'category' => null, 'tax' => null,
+    ]);
+    $descriptionLayout = clone $layout;
+    $descriptionLayout->common_settings['show_product_description'] = true;
+    $descriptionReceipt = $method->invoke($util, [$descriptionLine], $descriptionLayout, $business)['lines'][0];
+    receiptDiscountCheck($descriptionReceipt['name'] === $expected && $descriptionReceipt['product_description'] === null,
+        'Receipts replace the product name with a plain description without repeating it, with a fallback for blank descriptions');
+    $html = renderDiscountPrice($compiler, $descriptionReceipt, $receipt_details);
+    receiptDiscountCheck(str_contains($html, e($expected)) && !str_contains($html, '<p>Soup'),
+        'Receipt product descriptions must be escaped rather than rendered as HTML');
+}
 $escapedLine = $printedLines[0];
 $escapedLine['unit_price_before_discount_inc_tax'] = '<script>bad</script>';
 $escapedReceipt = clone $receipt_details;

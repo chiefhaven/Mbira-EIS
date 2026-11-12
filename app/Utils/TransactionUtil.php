@@ -2199,6 +2199,17 @@ class TransactionUtil extends Util
         return pack('H*', sprintf('%02X', $value));
     }
 
+    protected function receiptProductName($product): string
+    {
+        $description = trim(html_entity_decode(
+            strip_tags((string) ($product->product_description ?? '')),
+            ENT_QUOTES,
+            'UTF-8'
+        ));
+
+        return $description !== '' ? $description : (string) $product->name;
+    }
+
     /**
      * Returns each line details for sell invoice display
      *
@@ -2258,11 +2269,10 @@ class TransactionUtil extends Util
             $total_line_discount_inc_tax = ($unit_price_before_discount_inc_tax - $unit_price_after_discount_inc_tax)
                 * (float) $line->quantity;
 
-            $show_product_description = $il->common_settings['show_product_description'] ?? null;
             $line_array = [
                 //Field for 1st column
-                'name' => $product->name,
-                'product_description' => ! empty($show_product_description) ? $product->product_description : null,
+                'name' => $this->receiptProductName($product),
+                'product_description' => null,
                 'variation' => (empty($variation->name) || $variation->name == 'DUMMY') ? '' : $variation->name,
                 'product_variation' => (empty($product_variation->name) || $product_variation->name == 'DUMMY') ? '' : $product_variation->name,
                 //Field for 2nd column
@@ -2421,7 +2431,7 @@ class TransactionUtil extends Util
 
                     $modifier_line_array = [
                         //Field for 1st column
-                        'name' => $product->name,
+                        'name' => $this->receiptProductName($product),
                         'variation' => (empty($variation->name) || $variation->name == 'DUMMY') ? '' : $variation->name,
                         //Field for 2nd column
                         'quantity' => $this->num_f($modifier_line->quantity, false, $business_details),
@@ -2518,7 +2528,7 @@ class TransactionUtil extends Util
 
             $line_array = [
                 //Field for 1st column
-                'name' => $product->name,
+                'name' => $this->receiptProductName($product),
                 'variation' => (empty($variation->name) || $variation->name == 'DUMMY') ? '' : $variation->name,
                 //Field for 2nd column
                 'quantity' => $this->num_f($line->quantity_returned, false, $business_details, true),
