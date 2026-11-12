@@ -644,14 +644,24 @@ DB::table('eis_configurations')->where('id', 2)->update([
 ]);
 $configurationValidator = Mockery::mock(Modules\EIS\Services\Configuration\Validators\ConfigurationValidator::class);
 $configurationValidator->shouldReceive('validate')->times(6)->andReturnNull();
-$configService = new Modules\EIS\Services\Configuration\ConfigurationSyncService(
-    $configurationClient, $configurationValidator
-);
+$configService = new class($configurationClient, $configurationValidator)
+    extends Modules\EIS\Services\Configuration\ConfigurationSyncService {
+    public array $productSyncRequests = [];
+
+    protected function dispatchProductsSyncAfterConfigurationChange(int $businessId, int $terminalId): void
+    {
+        $this->productSyncRequests[] = [$businessId, $terminalId];
+    }
+};
 DB::table('eis_settings')->where('id', 7)->update(['jwt_token' => 'token2']);
 locationCheck($configService->sync(1, 'token2', false, 2)->id === 2, 'Latest configuration uses explicit terminal selection even when JWTs are shared');
 $otherLocations = DB::table('business_locations')->where('id', '!=', 2)->orderBy('id')->get()->toJson();
 $configurationClient->data->terminalConfiguration->terminalSite->siteName = 'Renamed EIS site';
+$productSyncCount = count($configService->productSyncRequests);
 $renamed = $configService->sync(1, 'token2', false, 2);
+locationCheck(count($configService->productSyncRequests) === $productSyncCount + 1
+    && end($configService->productSyncRequests) === [1, 2],
+    'Unversioned configuration changes schedule product resync for the selected terminal');
 $storedResponse = $renamed->raw_response;
 if (is_string($storedResponse)) { $storedResponse = json_decode($storedResponse, true, 512, JSON_THROW_ON_ERROR); }
 locationCheck(data_get($storedResponse, 'data.terminalConfiguration.terminalSite.siteName') === 'Renamed EIS site',
@@ -663,7 +673,9 @@ locationCheck(DB::table('business_locations')->where('id', 2)->value('name') ===
     'Site-name-only refresh updates the assigned business location');
 locationCheck(DB::table('business_locations')->where('id', '!=', 2)->orderBy('id')->get()->toJson() === $otherLocations,
     'Site rename preserves other locations and tenants');
-locationCheck($configService->sync(1, 'token2', false, 2)->id === 2,
+ $productSyncCount = count($configService->productSyncRequests);
+locationCheck($configService->sync(1, 'token2', false, 2)->id === 2
+    && count($configService->productSyncRequests) === $productSyncCount,
     'Repeated unchanged configuration still skips validation and duplicate persistence');
 $configurationClient->data->terminalConfiguration->terminalLabel = 'Updated till label';
 $configurationClient->data->terminalConfiguration->tradingName = 'Updated trading name';
@@ -714,16 +726,22 @@ $configurationClient->data->globalConfiguration->taxrates = [
 ];
 $configurationClient->data->taxpayerConfiguration->activatedTaxRateIds = ['VAT'];
 DB::table('eis_settings')->where('id', 2)->update(['status' => 0]);
+$productSyncCount = count($configService->productSyncRequests);
 $configService->sync(1, 'token2', false, 2);
 $vat = DB::table('tax_rates')->where('configuration_id', 2)->where('tax_rate_id', 'VAT')->first();
 locationCheck($vat && (float) $vat->rate === 16.5 && (bool) $vat->is_activated,
     'Global tax rate and taxpayer activation changes synchronize even at unchanged versions');
+locationCheck(count($configService->productSyncRequests) === $productSyncCount + 1,
+    'Changed global tax rates schedule product and price resynchronization');
 $configurationClient->data->globalConfiguration->taxrates[0]->rate = 17;
 $configurationClient->data->taxpayerConfiguration->activatedTaxRateIds = [];
+$productSyncCount = count($configService->productSyncRequests);
 $configService->sync(1, 'token2', false, 2);
 $vat = DB::table('tax_rates')->where('configuration_id', 2)->where('tax_rate_id', 'VAT')->first();
 locationCheck((float) $vat->rate === 17.0 && !$vat->is_activated && DB::table('tax_rates')->count() === 1,
     'Existing rate amount and activation update without duplicate rate rows');
+locationCheck(count($configService->productSyncRequests) === $productSyncCount + 1,
+    'Updated tax rate and activation schedule another product resync');
 locationCheck(!DB::table('eis_settings')->where('id', 2)->value('status'),
     'Full configuration refresh never re-enables a locally deactivated terminal');
 $schema->table('products', function (Blueprint $table) { $table->integer('tax')->nullable(); });

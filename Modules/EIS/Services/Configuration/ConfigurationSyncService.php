@@ -7,6 +7,7 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
 use Modules\EIS\Models\EisConfiguration;
 use Modules\EIS\Exceptions\SyncException;
+use Modules\EIS\Jobs\SyncProductsJob;
 use Modules\EIS\Models\EisOfflineLimit;
 use Modules\EIS\Models\EisSetting;
 use Modules\EIS\Models\EisTaxRate;
@@ -157,6 +158,8 @@ class ConfigurationSyncService
                         ->findOrFail($settings->location_id)->update($locationData);
                 }
 
+                $this->dispatchProductsSyncAfterConfigurationChange($businessId, (int) $settings->id);
+
                 Log::info('Configuration sync completed successfully', [
                     'business_id' => $businessId,
                     'configuration_id' => $configuration->id,
@@ -183,6 +186,19 @@ class ConfigurationSyncService
                 $e
             );
         }
+    }
+
+    protected function dispatchProductsSyncAfterConfigurationChange(int $businessId, int $terminalId): void
+    {
+        dispatch(new SyncProductsJob($businessId, $terminalId))
+            ->onQueue('eis-products')
+            ->afterCommit();
+
+        Log::info('EIS product sync scheduled after configuration changes', [
+            'business_id' => $businessId,
+            'terminal_id' => $terminalId,
+            'queue' => 'eis-products',
+        ]);
     }
 
     /**

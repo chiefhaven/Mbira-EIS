@@ -173,6 +173,15 @@ catalogCheck($db->table('variation_location_details')->where('product_id', $one-
     'Stock exactly matches four-decimal EIS quantity');
 catalogCheck($db->table('variation_location_details')->where('product_id', $two->product_id)->value('qty_available') === '0.0000',
     'Explicit zero stock is persisted');
+$db->table('tax_rates')->where('configuration_id', 1)->where('tax_rate_id', 'A')->update(['rate' => '17.5']);
+$client->pages = [['data' => [catalogItem('ONE'), catalogItem('TWO', '0')]]];
+(new ProductSyncService($client, new ProductTransformer(), new ProductUpsertService()))
+    ->sync((object) ['id' => 1, 'business_id' => 1, 'location_id' => 1, 'site_id' => 'SITE-A'], 1);
+$oneVariation = $db->table('variations')->where('product_id', $one->product_id)->first();
+catalogCheck((float) $oneVariation->default_sell_price === 8.51
+    && (float) $oneVariation->sell_price_inc_tax === 10.0,
+    'Catalog resync recalculates the product price from the latest tax rate');
+$db->table('tax_rates')->where('configuration_id', 1)->where('tax_rate_id', 'A')->update(['rate' => '0']);
 $db->table('business_locations')->insert(['id' => 3, 'business_id' => 1, 'eis_site_id' => 'SITE-A']);
 $db->table('eis_settings')->insert(['id' => 2, 'business_id' => 1, 'location_id' => 3,
     'status' => 0, 'branch_id' => 'SITE-A']);
