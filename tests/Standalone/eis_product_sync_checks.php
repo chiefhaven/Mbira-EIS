@@ -158,7 +158,7 @@ $db->table('products')->insert([
     ['id' => 100, 'business_id' => 1, 'name' => 'Manual', 'sku' => 'LOCAL'],
     ['id' => 101, 'business_id' => 2, 'name' => 'Other business', 'sku' => 'OTHER'],
 ]);
-$client->pages = [['data' => [catalogItem('ONE')], 'has_more' => true],
+$client->pages = [['data' => [array_merge(catalogItem('ONE'), ['productDescription' => ' EIS product description '])], 'has_more' => true],
     ['data' => [catalogItem('TWO', '0')], 'has_more' => false]];
 pullCatalog($sync);
 catalogCheck($client->requests === [1, 2], 'All catalog pages are fetched');
@@ -169,6 +169,8 @@ catalogCheck(Product::where('business_id', 1)->count() === 3
 catalogCheck(!Product::findOrFail(101)->trashed(), 'Other businesses remain unchanged');
 $one = EisProductMap::where('eis_product_id', 'ONE')->firstOrFail();
 $two = EisProductMap::where('eis_product_id', 'TWO')->firstOrFail();
+catalogCheck(Product::findOrFail($one->product_id)->product_description === 'EIS product description',
+    'New products sync the EIS productDescription field');
 catalogCheck($db->table('variation_location_details')->where('product_id', $one->product_id)->value('qty_available') === '12.3456',
     'Stock exactly matches four-decimal EIS quantity');
 catalogCheck($db->table('variation_location_details')->where('product_id', $two->product_id)->value('qty_available') === '0.0000',
@@ -463,6 +465,14 @@ catalogCheck($owned->name === 'New EIS name' && $owned->sku === 'OWNED'
 foreach ($local as $field => $value) {
     catalogCheck((string) $owned->$field === (string) $value, 'Repull preserves local '.$field);
 }
+$client->pages = [['data' => [array_merge(catalogItem('OWNED'), [
+    'productName' => 'New EIS name',
+    'productDescription' => ' Updated EIS product description ',
+    'description' => 'Legacy description',
+])]]];
+pullCatalog($sync);
+catalogCheck($owned->fresh()->product_description === 'Updated EIS product description',
+    'Repull updates productDescription and prefers it over the legacy description alias');
 try {
     \App\Services\EisProductPolicy::duringSync(1, function () {
         catalogCheck(!\App\Services\EisProductPolicy::syncing(2), 'Trusted sync scope cannot authorize another business');

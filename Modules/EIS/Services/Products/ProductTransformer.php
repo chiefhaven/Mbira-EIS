@@ -395,8 +395,8 @@ class ProductTransformer
      */
     private function extractDescription(array $item): ?string
     {
-        // Primary: Check description field
-        $description = $item['description'] ?? null;
+        // Primary: Check the EIS description field before the legacy alias.
+        $description = $item['productDescription'] ?? $item['description'] ?? null;
         
         // Secondary: Clean
         if ($description && !empty(trim($description))) {
