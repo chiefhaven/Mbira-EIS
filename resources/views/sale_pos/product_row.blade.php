@@ -90,6 +90,11 @@
 					: (($product->catalog_price_exc_tax ?? $product->default_sell_price) > 0
 						? ($product->catalog_price_inc_tax ?? $product->sell_price_inc_tax) / ($product->catalog_price_exc_tax ?? $product->default_sell_price)
 						: 1);
+				if (!empty($transaction->is_relief) && $hide_tax !== 'hide'
+					&& ($tax_dropdown['attributes'][$tax_id]['data-rate'] ?? 0) > 0
+					&& ($product->catalog_price_exc_tax ?? 0) > 0) {
+					$price_ratio = $product->catalog_price_inc_tax / $product->catalog_price_exc_tax;
+				}
 				$unit_price_before_discount_inc_tax = $pos_unit_price * $price_ratio;
 			}
 

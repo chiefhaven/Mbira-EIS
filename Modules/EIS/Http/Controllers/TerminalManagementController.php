@@ -57,6 +57,18 @@ class TerminalManagementController extends Controller
         ]);
     }
 
+    public function blockingStatus(Request $request)
+    {
+        abort_unless($request->user() && $request->user()->business_id, 403);
+        $terminals = \Modules\EIS\Services\Terminal\TerminalBlockService::visibleTo($request->user())
+            ->map(fn ($terminal) => [
+                'device_id' => $terminal->device_id,
+                'message' => $terminal->blocking_reason
+                    ?: \Modules\EIS\Services\Terminal\TerminalBlockService::DEFAULT_REASON,
+            ])->values();
+        return response()->json(['terminals' => $terminals]);
+    }
+
     public function page(Request $request)
     {
         $this->businessId($request);

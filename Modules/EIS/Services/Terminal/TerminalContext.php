@@ -77,6 +77,7 @@ final class TerminalContext
 
     public static function assertActive(EisSetting $settings): void
     {
+        TerminalBlockService::assertAllowed($settings);
         $configuration = \Modules\EIS\Models\EisConfiguration::where('eis_setting_id', $settings->id)
             ->where('business_id', $settings->business_id)->firstOrFail();
         $terminal = \Modules\EIS\Models\EisTerminalConfiguration::where('configuration_id', $configuration->id)->firstOrFail();

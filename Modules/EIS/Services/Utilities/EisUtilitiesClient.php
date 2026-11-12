@@ -23,6 +23,10 @@ class EisUtilitiesClient
             ? $request->send('POST', $base.'/'.$path)
             : $request->post($base.'/'.$path, $payload);
         $body = $response->json();
+        if ($response->successful() && is_array($body)) {
+            app(\Modules\EIS\Services\Terminal\TerminalBlockService::class)
+                ->handleUtilityResponse($setting, $operation, $body);
+        }
         $outcome = 'unknown';
         if (is_array($body) && !$response->serverError()) {
             if ($response->successful() && ($body['statusCode'] ?? null) === 1

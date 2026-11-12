@@ -281,6 +281,9 @@ class StockAdjustmentController extends Controller
             if (get_class($e) == \App\Exceptions\PurchaseSellMismatch::class) {
                 $msg = $e->getMessage();
             }
+            if ($e instanceof \Illuminate\Validation\ValidationException) {
+                $msg = implode(' ', \Illuminate\Support\Arr::flatten($e->errors()));
+            }
 
             $output = ['success' => 0,
                 'msg' => $msg,

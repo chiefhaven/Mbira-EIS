@@ -766,7 +766,7 @@ class SellPosController extends Controller
                 $msg = $e->getMessage();
             }
             if ($e instanceof \Illuminate\Validation\ValidationException) {
-                $msg = $e->errors()['account_id'][0] ?? $e->getMessage();
+                $msg = implode(' ', \Illuminate\Support\Arr::flatten($e->errors()));
             }
 
             $output = ['success' => 0,
@@ -1286,9 +1286,6 @@ class SellPosController extends Controller
 
         try {
             $input = $request->except('_token');
-            $input = $this->productUtil->applySalesTaxConfiguration(
-                (int) $request->session()->get('user.business_id'), $input
-            );
 
             //status is send as quotation from edit sales screen.
             $input['is_quotation'] = 0;
@@ -1309,6 +1306,10 @@ class SellPosController extends Controller
             if (!empty($input['products'])) {
                 //Get transaction value before updating.
                 $transaction_before = Transaction::where('business_id', $request->session()->get('user.business_id'))->findOrFail($id);
+                $input += ['is_relief' => (bool) $transaction_before->is_relief];
+                $input = $this->productUtil->applySalesTaxConfiguration(
+                    (int) $request->session()->get('user.business_id'), $input
+                );
                 $status_before = $transaction_before->status;
                 $rp_earned_before = $transaction_before->rp_earned;
                 $rp_redeemed_before = $transaction_before->rp_redeemed;

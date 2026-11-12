@@ -73,10 +73,14 @@ class TransactionUtil extends Util
      * @param  array  $input
      * @param  float  $invoice_total
      * @param  int  $user_id
+     * @param  int|null  $connectorTillId
      * @return object
      */
-    public function createSellTransaction($business_id, $input, $invoice_total, $user_id, $uf_data = true)
+    public function createSellTransaction($business_id, $input, $invoice_total, $user_id, $uf_data = true, ?int $connectorTillId = null)
     {
+        if ($connectorTillId !== null) {
+            $input['connector_till_id'] = $connectorTillId;
+        }
         $input = $this->applyEisBuyerValidation($business_id, $input);
         $productUtil = new ProductUtil();
         $normalized = $productUtil->applySalesTaxConfiguration((int) $business_id, $input, $uf_data);
@@ -194,7 +198,7 @@ class TransactionUtil extends Util
             'additional_expense_key_4' => ! empty($input['additional_expense_key_4']) ? $input['additional_expense_key_4'] : null,
             'is_kitchen_order' => ! empty($input['is_kitchen_order']) ? 1 : 0,
 
-        ]);
+        ] + ($connectorTillId === null ? [] : ['connector_till_id' => $connectorTillId]));
 
         return $transaction;
     }
@@ -217,6 +221,7 @@ class TransactionUtil extends Util
         $existing = is_object($transaction) ? $transaction : Transaction::where('id', $transaction_id)->where('business_id', $business_id)->first();
         if ($existing) {
             $input = $this->applyEisBuyerValidation($business_id, $input, $existing);
+            $input += ['is_relief' => (bool) $existing->is_relief];
         }
         $productUtil = new ProductUtil();
         $normalized = $productUtil->applySalesTaxConfiguration((int) $business_id, $input, $uf_data);
@@ -364,7 +369,7 @@ class TransactionUtil extends Util
         \App\Services\Sales\SavedSaleWriteGuard::lock(DB::connection(), is_object($transaction) ? $transaction->id : $transaction);
         $sale = is_object($transaction) ? $transaction : Transaction::findOrFail($transaction);
         $products = (new ProductUtil())->applySalesTaxConfiguration((int) $sale->business_id, [
-            'type' => $sale->type, 'products' => $products,
+            'type' => $sale->type, 'is_relief' => $sale->is_relief, 'products' => $products,
         ], $uf_data)['products'];
         $lines_formatted = [];
         $modifiers_array = [];
@@ -642,7 +647,7 @@ class TransactionUtil extends Util
                     ->find($product['transaction_sell_lines_id']);
         $sale = Transaction::findOrFail($header_id);
         $product = (new ProductUtil())->applySalesTaxConfiguration((int) $sale->business_id, [
-            'type' => $sale->type, 'products' => [$product],
+            'type' => $sale->type, 'is_relief' => $sale->is_relief, 'products' => [$product],
         ], $uf_data)['products'][0];
 
         $old_qty = $sell_line->quantity;

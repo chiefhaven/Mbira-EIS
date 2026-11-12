@@ -46,6 +46,7 @@ class EisSetting extends Model
     ];
     
     protected $casts = [
+        'is_blocked' => 'boolean',
         'status' => 'boolean',
         'last_sync_at' => 'datetime',
         'products_last_synced_at' => 'datetime',

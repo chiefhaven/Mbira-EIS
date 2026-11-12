@@ -168,6 +168,14 @@ class SaleSubmissionService
             // SUBMIT (OUTSIDE DB TRANSACTION)
             // ----------------------------
             $response = $this->client->submit($payload, $settings);
+            $terminalResponse = $response['data'] ?? $response['response'] ?? null;
+            app(\Modules\EIS\Services\Terminal\TerminalBlockService::class)->handleResponse(
+                $eisSetting, is_array($terminalResponse) ? $terminalResponse : []
+            );
+            $blockedTerminal = $eisSetting->fresh();
+            if ($blockedTerminal->is_blocked && (!($response['success'] ?? false) || ($response['data']['statusCode'] ?? null) !== 1)) {
+                $response['error'] = \Modules\EIS\Services\Terminal\TerminalBlockService::message($blockedTerminal);
+            }
 
             // The client returns failures instead of throwing. Persist these so
             // queue/manual retries are recognized and include the signature.
@@ -214,6 +222,9 @@ class SaleSubmissionService
                 'eis_invoice_number' => $eisInvoiceNumber ?? null,
             ]);
 
+            if ($payload === [] && is_array($eisSale->request_payload)) {
+                $payload = $eisSale->request_payload;
+            }
             $payload = $this->prepareOfflineValidationData($transaction, $settings, $eisSale, $payload);
 
             $eisSale->update([

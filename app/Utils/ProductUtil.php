@@ -657,9 +657,14 @@ class ProductUtil extends Util
             return $input;
         }
         $business = Business::findOrFail($businessId);
-        if ((int) $business->enable_inline_tax === 1) {
+        $taxEnabled = (int) $business->enable_inline_tax === 1;
+        $relief = filter_var($input['is_relief'] ?? false, FILTER_VALIDATE_BOOLEAN);
+        if ($taxEnabled && !$relief) {
             return $input;
         }
+        $taxableIds = $taxEnabled ? TaxRate::where('business_id', $businessId)
+            ->whereIn('id', array_column($input['products'], 'tax_id'))->where('amount', '>', 0)
+            ->pluck('id')->flip()->all() : [];
 
         $discount = [
             'discount_type' => $input['discount_type'] ?? 'fixed',
@@ -672,6 +677,9 @@ class ProductUtil extends Util
             ? number_format($value, 4, session('currency.decimal_separator', '.'), '')
             : $value;
         foreach ($input['products'] as &$product) {
+            if ($taxEnabled && !isset($taxableIds[$product['tax_id'] ?? ''])) {
+                continue;
+            }
             $price = $ufNumber ? $this->num_uf($product['unit_price']) : (float) $product['unit_price'];
             $amount = $ufNumber ? $this->num_uf($product['line_discount_amount'] ?? 0)
                 : (float) ($product['line_discount_amount'] ?? 0);
@@ -679,7 +687,9 @@ class ProductUtil extends Util
                 ? $price * (1 - $amount / 100) : $price - $amount;
             $product['unit_price_inc_tax'] = $format($discounted);
             $product['item_tax'] = $format(0);
-            $product['tax_id'] = null;
+            if (!$taxEnabled) {
+                $product['tax_id'] = null;
+            }
         }
         unset($product);
         $input['tax_rate_id'] = null;

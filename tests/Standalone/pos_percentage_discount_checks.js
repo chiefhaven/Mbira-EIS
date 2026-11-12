@@ -3,6 +3,7 @@ const vm = require('vm');
 const assert = require('assert');
 const path = require('path');
 const source = fs.readFileSync(path.join(__dirname, '..', '..', 'public', 'js', 'pos.js'), 'utf8');
+let reliefChecked = false;
 function extract(name) {
     const start = source.indexOf('function ' + name + '(');
     const end = source.indexOf('\n}', start) + 2;
@@ -11,6 +12,7 @@ function extract(name) {
 }
 const context = {
     APP: { SALES_TAX_ENABLED: true },
+    $: () => ({is: () => reliefChecked}),
     __read_number: element => Number(element.value),
     __write_number: (element, value) => { element.value = value; },
     __calculate_amount: (type, rate, base) => rate * base / 100,
@@ -21,7 +23,7 @@ const context = {
     __number_uf: value => Number(value),
 };
 vm.createContext(context);
-vm.runInContext(['calculate_discounted_unit_price', 'calculate_unit_price_inc_tax',
+vm.runInContext(['pos_row_uses_exclusive_price', 'calculate_discounted_unit_price', 'calculate_unit_price_inc_tax',
     'calculate_line_subtotal', 'pos_each_row', 'pos_order_tax'].map(extract).join('\n'), context);
 let checks = 0;
 for (const type of ['percentage', 'fixed']) {
@@ -123,6 +125,7 @@ for (const [enabled, net, gross, multiplier] of [
     for (const enabled of [true, false]) {
         context.APP.SALES_TAX_ENABLED = enabled;
         const fields = {
+            '#isRelief': {is: () => reliefChecked},
             '#tax_rate_id': { value: '1', val(value) { if (value !== undefined) this.value = value; return this.value; } },
             '#tax_calculation_amount': { value: 17.5 },
             'span#order_tax': { text(value) { this.value = value; } },
@@ -138,3 +141,77 @@ for (const [enabled, net, gross, multiplier] of [
     checks += 4;
 }
 console.log(`PASS: ${checks} POS fixed/percentage discount checks`);
+
+context.APP.SALES_TAX_ENABLED = true;
+const reliefRows = [16.5, 17.5, 0, 0].map(rate => {
+    const fields = {
+        'input.pos_unit_price': {value: 100},
+        'input.hidden_base_unit_sell_price': {value: 100},
+        'input.hidden_base_unit_sell_price_inc_tax': {value: 100 + rate},
+        'input.base_unit_multiplier': {val: () => 1},
+        'input.pos_quantity': {value: 1},
+        'select.tax_id :selected': {data: () => rate},
+        'select.row_discount_type': {val: () => 'fixed'},
+        'input.row_discount_amount': {value: 0},
+        'input.item_tax': {}, 'input.hidden_base_unit_item_tax': {},
+        'input.pos_unit_price_inc_tax': {}, 'input.pos_line_total': {},
+        'span.pos_line_total_text': {text() {}}, '.pos_unit_price_inc_tax_text': {text() {}},
+    };
+    return {fields, find: selector => fields[selector]};
+});
+let visible = false;
+let disabled = false;
+let totalUpdates = 0;
+const orderTax = {value: '1', val(value) {if (value !== undefined) this.value = value; return this.value;}};
+const calculation = {value: 16.5};
+context.$ = selector => {
+    if (typeof selector === 'object') return selector;
+    return {
+        '#isRelief': {is: () => reliefChecked},
+        '#pos_vat5_fields': {toggleClass(name, hidden) {visible = !hidden;}},
+        'select#tax_rate_id, #order_tax_modal': {prop(name, value) {disabled = value;}},
+        '#pos-edit-tax': {toggle() {}},
+        'table#pos_table tbody tr.product_row': {length: reliefRows.length, each(callback) {reliefRows.forEach(row => callback.call(row));}},
+        '#tax_rate_id': orderTax,
+        '#tax_calculation_amount': calculation,
+        'span#order_tax': {text() {}},
+    }[selector];
+};
+context.pos_total_row = () => {
+    totalUpdates++;
+    context.pos_order_tax(reliefRows.reduce((total, row) => total + row.fields['input.pos_line_total'].value, 0), 0);
+};
+const marker = "$(document).on('change', '#isRelief', function() {";
+const start = source.indexOf(marker) + marker.length;
+vm.runInContext('this.toggleRelief = function() {' + source.slice(start, source.indexOf('\n    });', start)) + '};', context);
+for (const checked of [true, false, true]) {
+    reliefChecked = checked;
+    context.toggleRelief.call({checked});
+    assert.strictEqual(visible, checked);
+    assert.strictEqual(disabled, checked);
+    reliefRows.forEach((row, index) => {
+        const gross = [116.5, 117.5, 100, 100][index];
+        assert.strictEqual(row.fields['input.pos_unit_price_inc_tax'].value, checked ? 100 : gross);
+        assert.strictEqual(row.fields['input.pos_line_total'].value, checked ? 100 : gross);
+        assert.strictEqual(row.fields['input.item_tax'].value, checked ? 0 : gross - 100);
+        assert.strictEqual(row.fields['input.hidden_base_unit_sell_price_inc_tax'].value, gross);
+    });
+}
+assert.strictEqual(totalUpdates, 3);
+assert.strictEqual(orderTax.value, '');
+assert.strictEqual(calculation.value, 0);
+const row = reliefRows[0];
+row.fields['input.base_unit_multiplier'].val = () => 3;
+row.fields['input.pos_quantity'].value = 2;
+for (const [type, discount, expected] of [['fixed', 10, 580], ['percentage', 10, 540], ['percentage', 100, 0]]) {
+    row.fields['select.row_discount_type'].val = () => type;
+    row.fields['input.row_discount_amount'].value = discount;
+    context.pos_each_row(row);
+    assert.strictEqual(row.fields['input.pos_line_total'].value, expected);
+    assert.strictEqual(row.fields['input.item_tax'].value, 0);
+}
+reliefRows.splice(0);
+reliefChecked = false;
+context.toggleRelief.call({checked: false});
+assert.strictEqual(totalUpdates, 3, 'Initializing/resetting an empty cart must not overwrite saved cart data');
+console.log('PASS: TC-RS-015 mixed standard/exempt/zero relief toggle, restoration, quantities, sub-units, discounts and invoice VAT.');

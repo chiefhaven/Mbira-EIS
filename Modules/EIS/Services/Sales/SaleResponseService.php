@@ -138,7 +138,7 @@ class SaleResponseService
      */
     public function shouldBlockTerminal(array $response): bool
     {
-        return (bool) ($response['data']['shouldBlockTerminal'] ?? false);
+        return \Modules\EIS\Services\Terminal\TerminalBlockService::shouldBlock($response['data'] ?? []);
     }
 
     /**

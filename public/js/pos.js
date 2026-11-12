@@ -69,8 +69,15 @@ $(document).ready(function() {
     });
     $(document).on('change', '#isRelief', function() {
         $('#pos_vat5_fields').toggleClass('hide', !this.checked);
+        var tax_disabled = !APP.SALES_TAX_ENABLED || this.checked;
+        $('select#tax_rate_id, #order_tax_modal').prop('disabled', tax_disabled);
+        $('#pos-edit-tax').toggle(!tax_disabled);
+        var rows = $('table#pos_table tbody tr.product_row');
+        if (rows.length > 0) {
+            rows.each(function() { pos_each_row($(this)); });
+            pos_total_row();
+        }
     });
-    $('#isRelief').trigger('change');
     customer_set = false;
     //Prevent enter key function except texarea
     $('form').on('keyup keypress', function(e) {
@@ -92,13 +99,7 @@ $(document).ready(function() {
         $('select#tax_rate_id, #order_tax_modal').val('').prop('disabled', true);
         $('#pos-edit-tax').hide();
     }
-    var existing_product_rows = $('table#pos_table tbody tr.product_row');
-    existing_product_rows.each(function() {
-        pos_each_row($(this));
-    });
-    if (existing_product_rows.length > 0) {
-        pos_total_row();
-    }
+    $('#isRelief').trigger('change');
     if ($('form#edit_pos_sell_form').length > 0 || $('form#add_pos_sell_form').length > 0) {
         initialize_printer();
     }
@@ -2019,15 +2020,16 @@ function pos_product_row(variation_id = null, purchase_line_id = null, weighing_
 function pos_each_row(row_obj) {
     var multiplier = parseFloat(row_obj.find('input.base_unit_multiplier').val()) || 1;
     var unit_price = __read_number(row_obj.find('input.hidden_base_unit_sell_price')) * multiplier;
-    if (!APP.SALES_TAX_ENABLED) {
+    var tax_free = pos_row_uses_exclusive_price(row_obj);
+    if (tax_free) {
         unit_price = calculate_unit_price_inc_tax(row_obj);
     }
     __write_number(row_obj.find('input.pos_unit_price'), unit_price);
     var discounted_unit_price = calculate_discounted_unit_price(row_obj);
     var price_inc_tax = calculate_unit_price_inc_tax(row_obj);
-    var unit_price_inc_tax = !APP.SALES_TAX_ENABLED ? discounted_unit_price
+    var unit_price_inc_tax = tax_free ? discounted_unit_price
         : (unit_price === 0 ? price_inc_tax : price_inc_tax * discounted_unit_price / unit_price);
-    var item_tax = APP.SALES_TAX_ENABLED ? unit_price_inc_tax - discounted_unit_price : 0;
+    var item_tax = tax_free ? 0 : unit_price_inc_tax - discounted_unit_price;
     __write_number(row_obj.find('input.item_tax'), item_tax);
     __write_number(row_obj.find('input.hidden_base_unit_item_tax'), item_tax / multiplier);
     __write_number(row_obj.find('input.pos_unit_price_inc_tax'), unit_price_inc_tax);
@@ -2176,7 +2178,7 @@ function pos_discount(total_amount) {
 }
 
 function pos_order_tax(price_total, discount) {
-    if (!APP.SALES_TAX_ENABLED) {
+    if (!APP.SALES_TAX_ENABLED || $('#isRelief').is(':checked')) {
         $('#tax_rate_id').val('');
         __write_number($('#tax_calculation_amount'), 0);
         $('span#order_tax').text(__currency_trans_from_en(0, false));
@@ -2282,11 +2284,11 @@ function reset_pos_form(){
 	if(sell_form[0]){
 		sell_form[0].reset();
 	}
-    $('#isRelief').trigger('change');
 	set_default_customer();
 	set_location();
 
 	$('tr.product_row').remove();
+    $('#isRelief').trigger('change');
 	$('span.total_quantity, span.price_total, span#total_discount, span#order_tax, span#total_payable, span#shipping_charges_amount').text(0);
 	$('span.total_payable_span', 'span.total_paying', 'span.balance_due').text(0);
 
@@ -2538,8 +2540,13 @@ function calculate_line_subtotal(row, quantity) {
     return Math.max(0, price_inc_tax) * quantity;
 }
 
+function pos_row_uses_exclusive_price(row) {
+    return !APP.SALES_TAX_ENABLED || ($('#isRelief').is(':checked')
+        && parseFloat(row.find('select.tax_id :selected').data('rate')) > 0);
+}
+
 function calculate_unit_price_inc_tax(row) {
-    var price_field = APP.SALES_TAX_ENABLED ? 'input.hidden_base_unit_sell_price_inc_tax' : 'input.hidden_base_unit_sell_price';
+    var price_field = pos_row_uses_exclusive_price(row) ? 'input.hidden_base_unit_sell_price' : 'input.hidden_base_unit_sell_price_inc_tax';
     var base_price_inc_tax = __read_number(row.find(price_field));
     var multiplier = parseFloat(row.find('input.base_unit_multiplier').val()) || 1;
     var price_inc_tax = base_price_inc_tax * multiplier;

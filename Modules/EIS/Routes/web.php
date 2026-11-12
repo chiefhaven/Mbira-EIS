@@ -31,6 +31,10 @@ Route::post('eis/products/{productId}/status', [ProductStatusController::class, 
 Route::post('eis/pos/buyer-authorization-requirement', [PosBuyerController::class, 'authorizationRequirement'])
     ->middleware('auth')->name('eis.pos.buyer-authorization-requirement');
 
+Route::get('eis/terminal-block-status', [TerminalManagementController::class, 'blockingStatus'])
+    ->middleware('auth')->withoutMiddleware(\Modules\EIS\Http\Middleware\RequireEisSubscription::class)
+    ->name('eis.terminal-block-status');
+
 Route::prefix('eis/sales/operations')->middleware('auth')->name('eis.sales.operations.')->group(function () {
     Route::post('execute', [UtilitiesController::class, 'execute'])->name('execute');
     Route::get('requests/{requestId}', [UtilitiesController::class, 'show'])->whereNumber('requestId')->name('show');

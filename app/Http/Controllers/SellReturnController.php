@@ -412,7 +412,9 @@ class SellReturnController extends Controller
         } catch (\Exception $e) {
             DB::rollBack();
 
-            if (get_class($e) == \App\Exceptions\PurchaseSellMismatch::class || $e instanceof \InvalidArgumentException) {
+            if ($e instanceof \Illuminate\Validation\ValidationException) {
+                $msg = implode(' ', \Illuminate\Support\Arr::flatten($e->errors()));
+            } elseif (get_class($e) == \App\Exceptions\PurchaseSellMismatch::class || $e instanceof \InvalidArgumentException) {
                 $msg = $e->getMessage();
             } else {
                 \Log::emergency('File:' . $e->getFile() . 'Line:' . $e->getLine() . 'Message:' . $e->getMessage());

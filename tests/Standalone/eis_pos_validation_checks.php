@@ -75,6 +75,7 @@ $method = new ReflectionMethod(TransactionUtil::class, 'createSellTransaction');
 preg_match_all('/^\s*\x27([a-z_0-9]+)\x27\s*=>/m', implode('', array_slice($source, $method->getStartLine() - 1, $method->getEndLine() - $method->getStartLine() + 1)), $matches);
 $schema->create('transactions', function (Blueprint $t) use ($matches) {
     $t->increments('id');
+    $t->integer('connector_till_id')->nullable();
     foreach (array_unique(array_diff($matches[1], ['vat5_certificate_details'])) as $column) { $t->text($column)->nullable(); }
     $t->timestamps();
 });
@@ -174,11 +175,24 @@ rejectsEis(fn () => $service->validate(8, ['contact_id' => 4, 'is_relief' => 1])
 rejectsEis(fn () => $service->validate(7, ['contact_id' => 4]), 'contact_id');
 rejectsEis(fn () => $service->validate(7, ['contact_id' => 3, 'is_relief' => 1]), 'buyerTIN');
 foreach (['vat5_project_number' => 'projectNumber', 'vat5_certificate_number' => 'certificateNumber', 'vat5_quantity' => 'quantity'] as $inputField => $field) {
+    fakeEis();
     $invalid = $relief; $invalid[$inputField] = '';
     rejectsEis(fn () => $service->validate(7, $invalid), $field);
     $invalid[$inputField] = ['bad'];
     rejectsEis(fn () => $service->validate(7, $invalid), $field);
+    checkEis(count(Http::recorded()) === 0, 'Missing or malformed VAT5 fields fail locally before any API request');
 }
+fakeEis(function ($request) {
+    $data = match (basename($request->url())) {
+        'check-tin-authorization-requirement' => ['tin' => 'TIN1', 'tinExists' => true, 'requiresAuthorizationCode' => true],
+        'validate-authorization-code' => ['authorizationCode' => 'CODE1', 'isValidAuthorizationCode' => true],
+        'validate-vat5-certificate' => ['projectNumber' => 'PROJECT1', 'vat5CertificateNumber' => 'INVALID', 'quantity' => 2.5, 'isValid' => false],
+        default => throw new RuntimeException('Unexpected URL'),
+    };
+    return Http::response(['statusCode' => 1, 'errors' => [], 'data' => $data]);
+});
+rejectsEis(fn () => $service->validate(7, array_replace($relief, ['vat5_certificate_number' => 'INVALID'])), 'vat5_certificate_number');
+checkEis(count(Http::recorded()) === 3, 'Invalid VAT5 certificate fails after buyer checks and certificate validation');
 foreach ([0, -1, 'nan'] as $quantity) {
     rejectsEis(fn () => $service->validate(7, array_replace($relief, ['vat5_quantity' => $quantity])), 'quantity');
 }
@@ -256,10 +270,16 @@ $schema->create('business', function (Blueprint $t) {
     $t->increments('id'); $t->boolean('enable_inline_tax');
 });
 DB::table('business')->insert(['id' => 8, 'enable_inline_tax' => 0]);
+DB::table('business')->insert(['id' => 7, 'enable_inline_tax' => 1]);
 $schema->create('tax_rates', function (Blueprint $t) {
-    $t->increments('id'); $t->decimal('amount', 8, 3); $t->softDeletes();
+    $t->increments('id'); $t->integer('business_id')->default(8); $t->decimal('amount', 8, 3); $t->softDeletes();
 });
 DB::table('tax_rates')->insert(['id' => 1, 'amount' => 10]);
+DB::table('tax_rates')->insert([
+    ['id' => 2, 'business_id' => 7, 'amount' => 16.5],
+    ['id' => 3, 'business_id' => 7, 'amount' => 0],
+    ['id' => 4, 'business_id' => 7, 'amount' => 0],
+]);
 $taxedInput = array_replace($input, [
     'contact_id' => 4, 'invoice_no' => 'TAX-OFF', 'tax_rate_id' => 1,
     'discount_type' => 'percentage', 'discount_amount' => 10, 'shipping_charges' => 5,
@@ -276,6 +296,58 @@ $taxFreeSale = $util->updateSellTransaction($taxFreeSale, 8, $taxedInput, $taxed
 checkEis($taxFreeSale->tax_id === null && (float) $taxFreeSale->tax_amount === 0.0
     && (float) $taxFreeSale->final_total === 1625.0,
     'Sale update enforces tax-free totals without double discounts or lost shipping');
+$tillSale = $util->createSellTransaction(8, array_replace($taxedInput, ['invoice_no' => 'TILL-SALE']), $taxedTotals, 1, false, 2);
+checkEis((int) $tillSale->fresh()->connector_till_id === 2,
+    'API creation persists the trusted till before model-level terminal-block checks run');
+
+$schema->create('transaction_sell_lines', function (Blueprint $t) {
+    $t->increments('id'); $t->integer('transaction_id');
+    foreach (['product_id', 'variation_id', 'quantity', 'unit_price_before_discount', 'unit_price', 'unit_price_inc_tax',
+        'line_discount_type', 'line_discount_amount', 'item_tax', 'tax_id', 'sell_line_note', 'sub_unit_id', 'discount_id',
+        'res_service_staff_id', 'res_line_order_status', 'so_line_id', 'secondary_unit_quantity', 'parent_sell_line_id', 'children_type'] as $field) {
+        $t->text($field)->nullable();
+    }
+    $t->timestamps();
+});
+$schema->create('products', function (Blueprint $t) { $t->increments('id'); $t->softDeletes(); });
+$schema->create('warranties', function (Blueprint $t) { $t->increments('id'); $t->softDeletes(); });
+$schema->create('sell_line_warranties', function (Blueprint $t) { $t->integer('sell_line_id'); $t->integer('warranty_id'); });
+$util->shouldReceive('isModuleEnabled')->andReturn(false);
+$reliefInput = array_replace($input, [
+    'invoice_no' => 'RELIEF-PRICES', 'is_relief' => 1, 'vat5_certificate_details' => $certificate,
+    'tax_rate_id' => 2, 'discount_type' => 'percentage', 'discount_amount' => 10, 'shipping_charges' => 5,
+    'products' => [
+        ['product_id' => 1, 'variation_id' => 1, 'quantity' => 2, 'unit_price' => 100, 'unit_price_inc_tax' => 104.85,
+            'item_tax' => 14.85, 'tax_id' => 2, 'line_discount_type' => 'fixed', 'line_discount_amount' => 10],
+        ['product_id' => 2, 'variation_id' => 2, 'quantity' => 1, 'unit_price' => 50, 'unit_price_inc_tax' => 50, 'item_tax' => 0, 'tax_id' => 3],
+        ['product_id' => 3, 'variation_id' => 3, 'quantity' => 1, 'unit_price' => 30, 'unit_price_inc_tax' => 30, 'item_tax' => 0, 'tax_id' => 4],
+    ],
+]);
+$productPrices = new App\Utils\ProductUtil();
+$reliefTotals = $productPrices->calculateInvoiceTotal($reliefInput['products'], 2, $reliefInput, false);
+$reliefInput['final_total'] = $reliefTotals['final_total'] + 5;
+$pricedRelief = $util->createSellTransaction(7, $reliefInput, $reliefTotals, 1, false)->fresh();
+$util->createOrUpdateSellLines($pricedRelief, $reliefInput['products'], 2, false, 'draft', [], false);
+$savedLines = $pricedRelief->sell_lines()->orderBy('id')->get();
+checkEis(abs((float) $pricedRelief->final_total - 239) < 0.000001 && (float) $pricedRelief->tax_amount === 0.0,
+    'Real relief header persistence excludes item/order VAT and preserves invoice discount and shipping');
+checkEis($savedLines->map(fn ($line) => (float) $line->unit_price_inc_tax)->all() === [90.0, 50.0, 30.0]
+    && $savedLines->sum('item_tax') == 0 && $savedLines->map(fn ($line) => (int) $line->tax_id)->all() === [2, 3, 4],
+    'Real relief line persistence removes S VAT and retains E/B amounts and all classifications');
+$editInput = $reliefInput;
+unset($editInput['is_relief']);
+$editInput['products'][0] = array_replace($editInput['products'][0], [
+    'unit_price' => 200, 'unit_price_inc_tax' => 221.35, 'item_tax' => 31.35,
+    'transaction_sell_lines_id' => $savedLines[0]->id,
+]);
+$editTotals = $productPrices->calculateInvoiceTotal($editInput['products'], 2, $editInput, false);
+$editInput['final_total'] = $editTotals['final_total'] + 5;
+$pricedRelief = $util->updateSellTransaction($pricedRelief, 7, $editInput, $editTotals, 1, false)->fresh();
+$util->editSellLine($editInput['products'][0], 2, 'draft', 1, false);
+checkEis($pricedRelief->is_relief && abs((float) $pricedRelief->final_total - 419) < 0.000001,
+    'Omitting the relief flag on header edits preserves relief pricing');
+checkEis((float) $savedLines[0]->fresh()->unit_price_inc_tax === 190.0 && (float) $savedLines[0]->fresh()->item_tax === 0.0,
+    'Direct line edits use saved relief state instead of restoring submitted VAT');
 
 Request::macro('validate', function ($rules) use ($factory) { return $factory->make($this->all(), $rules)->validate(); });
 $user = Mockery::mock(); $user->shouldReceive('can')->andReturn(true);

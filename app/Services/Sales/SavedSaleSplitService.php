@@ -152,6 +152,7 @@ class SavedSaleSplitService
             (!$admin && !$user->can('access_all_locations') && !$user->can('location.'.$h['location_id']))) {
             $this->fail('split_forbidden', 'Sale location is not permitted.', 403);
         }
+        \Modules\EIS\Services\Terminal\TerminalBlockService::assertTransactionAllowed($this->db, $header);
         return $this->loadGraph($h);
     }
 
@@ -740,6 +741,9 @@ class SavedSaleSplitService
             'tax_amount' => '0.0000', 'exchange_rate' => '1.0000', 'is_suspend' => 0, 'is_direct_sale' => 0,
             'is_created_from_api' => 1, 'res_table_id' => $tableId, 'res_waiter_id' => $user->id,
             'created_at' => $now, 'updated_at' => $now];
+        \Modules\EIS\Services\Terminal\TerminalBlockService::assertTransactionAllowed(
+            $this->db, (object) ($header + ['connector_till_id' => $this->connectorTillId])
+        );
         $lines = [];
         foreach ($items as $variationId => $quantity) {
             $lines[] = $this->newRestaurantLine($header, (int) $variationId, $quantity, $now, $inlineTaxEnabled);

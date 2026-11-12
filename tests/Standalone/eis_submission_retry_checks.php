@@ -46,7 +46,9 @@ $schema->create('transactions', function (Blueprint $t) {
     $t->string('transaction_date')->nullable();
     $t->decimal('final_total', 22, 4)->default(84.75);
     $t->integer('location_id')->default(3);
+    $t->integer('connector_till_id')->nullable();
     $t->boolean('is_fiscalized')->default(false);
+    $t->boolean('is_relief')->default(false);
     $t->string('fiscal_invoice_number')->nullable(); $t->string('receipt_number')->nullable();
     $t->timestamps();
 });
@@ -888,4 +890,186 @@ try {
 } finally {
     Carbon\Carbon::setTestNow();
 }
-echo "PASS: {$checks} EIS submission retry checks (isolated database, no network).\n";
+$legacyRelief = submissionFixture();
+$client->beforeResponse = null;
+$client->response = ['success' => false, 'error' => 'Fixture offline'];
+failSubmission($service, $legacyRelief, $settings);
+$legacyTracking = EisSale::where('transaction_id', $legacyRelief->id)->firstOrFail();
+$legacyPayload = $legacyTracking->request_payload;
+$legacyPayload['invoiceHeader']['isReliefSupply'] = true;
+$legacyTracking->update(['request_payload' => $legacyPayload]);
+DB::table('transactions')->where('id', $legacyRelief->id)->update(['is_relief' => true]);
+DB::table('eis_failed_transactions')->where('transaction_id', $legacyRelief->id)->update([
+    'payload' => json_encode($legacyPayload, JSON_THROW_ON_ERROR),
+]);
+$beforeRequests = count($client->payloads);
+try {
+    $service->submit($legacyRelief, $settings, true);
+    throw new RuntimeException('Taxed legacy relief must not be sent as a new tax-free price');
+} catch (InvalidArgumentException $exception) {
+    checkRetry(str_contains($exception->getMessage(), 'contains saved VAT') && count($client->payloads) === $beforeRequests,
+        'Legacy relief with saved VAT fails before HTTP instead of silently changing its fiscal amounts');
+}
+checkRetry($legacyTracking->fresh()->request_payload === $legacyPayload
+    && json_decode(DB::table('eis_failed_transactions')->where('transaction_id', $legacyRelief->id)->value('payload'), true) === $legacyPayload,
+    'Relief transformation failure preserves the original invoice, amounts, signature and retry payload');
+
+$container->instance('validator', new Illuminate\Validation\Factory(
+    new Illuminate\Translation\Translator(new Illuminate\Translation\ArrayLoader(), 'en'), $container
+));
+(require dirname(__DIR__, 2).'\Modules\EIS\Database\Migrations\2026_11_12_000000_add_terminal_block_state_to_eis_settings.php')->up();
+$schema->table('eis_settings', function (Blueprint $t) {
+    $t->string('device_id')->nullable(); $t->string('jwt_token')->nullable();
+});
+DB::table('eis_settings')->where('id', 1)->update([
+    'secret_key' => 'fixture-secret', 'device_id' => 'BLOCK-TEST', 'jwt_token' => 'fixture-token',
+]);
+$settings = EisSetting::findOrFail(1);
+$blocks = new Modules\EIS\Services\Terminal\TerminalBlockService();
+$utilities = new Modules\EIS\Services\Utilities\EisUtilitiesClient();
+$http = new Illuminate\Http\Client\Factory();
+Illuminate\Support\Facades\Http::swap($http);
+$http->preventStrayRequests();
+$http->fake(['https://eis.invalid/api/v1/utilities/get-terminal-blocking-message' => $http->response([
+    'statusCode' => 1, 'data' => ['isBlocked' => true, 'blockingReason' => 'Contact MRA to resolve the terminal suspension.'],
+])]);
+$assertBlocked = static function (callable $work, string $reason): void {
+    try {
+        $work();
+        throw new RuntimeException('Blocked terminal permitted a transaction');
+    } catch (Illuminate\Validation\ValidationException $exception) {
+        checkRetry(str_contains(implode(' ', Illuminate\Support\Arr::flatten($exception->errors())), $reason),
+            'Blocked transaction exposes the taxpayer blocking reason');
+    }
+};
+foreach ([false, 0, '0', 'false'] as $flag) {
+    $blocks->handleResponse($settings, ['statusCode' => 1, 'data' => ['shouldBlockTerminal' => $flag]]);
+    checkRetry(!$settings->fresh()->is_blocked, 'False block flags, including string false, never block the terminal');
+}
+Illuminate\Support\Facades\Http::assertNothingSent();
+$acceptedBeforeBlock = submissionFixture();
+$queuedBeforeBlock = submissionFixture();
+$client->beforeResponse = null;
+$client->response = ['success' => true, 'data' => [
+    'statusCode' => 1, 'data' => ['shouldBlockTerminal' => true, 'validationURL' => 'https://eis.invalid/receipt?vc=BLOCK-RECEIPT'],
+]];
+$accepted = $service->submit($acceptedBeforeBlock, $settings);
+checkRetry($accepted->status === 'submitted' && $accepted->receipt_number === 'BLOCK-RECEIPT',
+    'A successful response that blocks the terminal still records the accepted receipt without resubmitting it');
+checkRetry($settings->fresh()->is_blocked
+    && $settings->fresh()->blocking_reason === 'Contact MRA to resolve the terminal suspension.',
+    'Nested invoice block flag persists the terminal block and extracts the official blockingReason');
+Illuminate\Support\Facades\Http::assertSent(fn ($request) => $request->url() === 'https://eis.invalid/api/v1/utilities/get-terminal-blocking-message'
+    && $request['terminalId'] === 'BLOCK-TEST' && $request->hasHeader('Authorization', 'Bearer fixture-token'));
+$beforeBlockedSend = count($client->payloads);
+$assertBlocked(fn () => $service->submit($queuedBeforeBlock, $settings, true), 'Contact MRA');
+checkRetry(count($client->payloads) === $beforeBlockedSend
+    && !EisSale::where('transaction_id', $queuedBeforeBlock->id)->exists(),
+    'An already queued offline sale is blocked before allocation, signing, tracking or HTTP');
+$assertBlocked(fn () => Transaction::create(Illuminate\Support\Arr::except($queuedBeforeBlock->getAttributes(), ['id'])), 'Contact MRA');
+$assertBlocked(fn () => $queuedBeforeBlock->update(['invoice_no' => 'BLOCKED-EDIT']), 'Contact MRA');
+checkRetry($queuedBeforeBlock->fresh()->invoice_no !== 'BLOCKED-EDIT', 'Blocked local edit leaves its saved invoice unchanged');
+foreach (['purchase', 'stock_adjustment', 'sell_return', 'sales_order'] as $type) {
+    $local = (object) ['business_id' => 7, 'location_id' => 3, 'type' => $type];
+    $assertBlocked(fn () => $blocks::assertTransactionAllowed(DB::connection(), $local), 'Contact MRA');
+}
+$blocks->handleResponse($settings, ['data' => ['shouldBlockTerminal' => false]]);
+checkRetry($settings->fresh()->is_blocked, 'A later false/missing invoice flag cannot clear a persisted terminal block');
+
+// Another terminal in the same site, and other businesses, remain independent.
+DB::table('eis_settings')->insert([
+    'id' => 2, 'business_id' => 7, 'location_id' => 3, 'tpin' => 'FIXTURE', 'branch_id' => 'SITE-7',
+    'device_id' => 'OTHER-TERMINAL', 'status' => true,
+]);
+DB::table('business_locations')->where('id', 3)->update(['default_eis_setting_id' => 2]);
+$blocks::assertTransactionAllowed(DB::connection(), (object) ['business_id' => 7, 'location_id' => 3, 'type' => 'sell']);
+checkRetry(true, 'An unblocked location default permits transactions even when another terminal at the same site is blocked');
+$assertBlocked(fn () => $blocks::assertTransactionAllowed(DB::connection(), $acceptedBeforeBlock), 'Contact MRA');
+$blocks::assertTransactionAllowed(DB::connection(), (object) ['business_id' => 8, 'location_id' => 3, 'type' => 'sell']);
+checkRetry(true, 'A blocked terminal cannot affect another business');
+DB::table('business_locations')->where('id', 3)->update(['default_eis_setting_id' => 1]);
+
+$http = new Illuminate\Http\Client\Factory();
+Illuminate\Support\Facades\Http::swap($http);
+$http->preventStrayRequests();
+$http->fake(['*' => $http->response(['statusCode' => 1, 'data' => ['isUnblocked' => false]])]);
+$utilities->send($settings, 'check-terminal-unblock-status', ['terminalId' => 'BLOCK-TEST']);
+checkRetry($settings->fresh()->is_blocked, 'Unblock-status false leaves the terminal blocked');
+$http = new Illuminate\Http\Client\Factory();
+Illuminate\Support\Facades\Http::swap($http);
+$http->preventStrayRequests();
+$http->fake(['*' => $http->response(['statusCode' => 1, 'data' => ['isUnblocked' => true]])]);
+$utilities->send($settings, 'check-terminal-unblock-status', ['terminalId' => 'BLOCK-TEST']);
+checkRetry(!$settings->fresh()->is_blocked && $settings->fresh()->blocking_reason === null,
+    'Only successful explicit EIS unblock confirmation clears the block and its message');
+$blocks::assertAllowed($settings);
+checkRetry(true, 'Stale terminal instances see confirmed unblocking without logout');
+
+$http = new Illuminate\Http\Client\Factory();
+Illuminate\Support\Facades\Http::swap($http);
+$http->preventStrayRequests();
+$http->fake(['*' => $http->response(['statusCode' => 0], 503)]);
+$blocks->handleResponse($settings, ['data' => ['shouldBlockTerminal' => 1]]);
+checkRetry($settings->fresh()->is_blocked
+    && $settings->fresh()->blocking_reason === $blocks::DEFAULT_REASON,
+    'Unavailable blocking-reason lookup fails closed with an explicit taxpayer warning');
+$assertBlocked(fn () => $blocks::assertAllowed($settings), 'blocking reason is unavailable');
+$blocks->handleUtilityResponse($settings, 'check-terminal-unblock-status', [
+    'statusCode' => 0, 'data' => ['isUnblocked' => true],
+]);
+checkRetry($settings->fresh()->is_blocked, 'An unsuccessful unblock response never restores transaction access');
+$blocks->handleUtilityResponse($settings, 'check-terminal-unblock-status', ['statusCode' => 1, 'data' => ['isUnblocked' => true]]);
+
+$http = new Illuminate\Http\Client\Factory();
+Illuminate\Support\Facades\Http::swap($http);
+$http->preventStrayRequests();
+$http->fake(['*' => $http->response([
+    'statusCode' => 1, 'data' => ['isBlocked' => true, 'blockingReason' => 'Rejected terminal: contact MRA.'],
+])]);
+$client->response = ['success' => false, 'error' => 'HTTP error', 'response' => [
+    'statusCode' => 0, 'data' => ['shouldBlockTerminal' => true],
+]];
+try {
+    $service->submit($queuedBeforeBlock->fresh(), $settings);
+    throw new RuntimeException('Rejected blocked invoice succeeded');
+} catch (EisSaleException $exception) {
+    checkRetry(str_contains($exception->getMessage(), 'Rejected terminal: contact MRA.')
+        && EisSale::where('transaction_id', $queuedBeforeBlock->id)->value('status') === 'failed',
+        'Non-2xx transaction response also blocks the terminal and preserves the official reason on the failed sale');
+}
+checkRetry((new SaleResponseService())->shouldBlockTerminal(['data' => ['data' => ['shouldBlockTerminal' => true]]])
+    && !(new SaleResponseService())->shouldBlockTerminal(['data' => ['data' => ['shouldBlockTerminal' => 'false']]]),
+    'Shared response helper reads the documented nested flag without truthy-string conversion');
+$schema->create('connector_tills', function (Blueprint $t) {
+    $t->increments('id'); $t->integer('business_id'); $t->integer('location_id');
+    $t->integer('eis_setting_id'); $t->boolean('is_active')->default(true);
+});
+DB::table('connector_tills')->insert([
+    ['id' => 1, 'business_id' => 7, 'location_id' => 3, 'eis_setting_id' => 1, 'is_active' => true],
+    ['id' => 2, 'business_id' => 7, 'location_id' => 3, 'eis_setting_id' => 2, 'is_active' => true],
+]);
+$unblockedTillSale = Transaction::create(Illuminate\Support\Arr::except($queuedBeforeBlock->getAttributes(), ['id', 'connector_till_id'])
+    + ['connector_till_id' => 2]);
+checkRetry((int) $unblockedTillSale->connector_till_id === 2,
+    'Local creation with an unblocked till does not use a blocked default terminal');
+DB::table('business_locations')->where('id', 3)->update(['default_eis_setting_id' => 2]);
+$assertBlocked(fn () => Transaction::create(Illuminate\Support\Arr::except($queuedBeforeBlock->getAttributes(), ['id', 'connector_till_id'])
+    + ['connector_till_id' => 1]), 'Rejected terminal');
+$assertBlocked(fn () => Modules\Connector\Support\TillAssignment::terminal(7, 3, 1), 'Rejected terminal');
+
+DB::table('eis_settings')->insert([
+    ['id' => 3, 'business_id' => 8, 'location_id' => 3, 'tpin' => 'FOREIGN', 'branch_id' => 'SITE-8', 'is_blocked' => true],
+    ['id' => 4, 'business_id' => 7, 'location_id' => 99, 'tpin' => 'FIXTURE', 'branch_id' => 'SITE-99', 'is_blocked' => true],
+]);
+$viewer = new class {
+    public $business_id = 7;
+    public $locations = [3];
+    public function permitted_locations() { return $this->locations; }
+};
+checkRetry($blocks::visibleTo($viewer)->pluck('id')->all() === [1],
+    'Blocking notices are limited to the authenticated business and permitted locations');
+$viewer->locations = [];
+checkRetry($blocks::visibleTo($viewer)->isEmpty(), 'No permitted locations means no terminal message disclosure');
+$viewer->locations = 'all';
+checkRetry($blocks::visibleTo($viewer)->pluck('id')->all() === [1, 4], 'All-location access still excludes other businesses');
+echo "PASS: {$checks} EIS submission retry/terminal-block checks (isolated database, no network).\n";

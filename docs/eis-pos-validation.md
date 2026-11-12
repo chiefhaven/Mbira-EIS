@@ -4,6 +4,63 @@ All Sales (`/sells`) displays EIS submission status separately from payment:
 Submitted, Pending, Failed, or Not submitted when no tracking exists.
 The column reflects saved tracking; it does not initiate fiscal submissions.
 
+## Relief supplies
+
+Selecting Relief Supply in POS or Direct Sale immediately removes positive
+configured VAT from item prices (including S 16.5% and A 17.5%). Exempt E and
+zero-rated B prices remain unchanged. Prices come from the stored exclusive/
+inclusive pair, not a browser reconstruction of the VAT rate. Tax classifications
+are retained. Quantities, sub-units, fixed/percentage discounts and added rows
+use the relief price; invoice/order VAT is cleared and disabled during relief.
+Clearing Relief Supply restores ordinary item prices; invoice tax can be
+selected again. Saved relief edits retain the catalog price ratio for restoring
+taxed prices.
+
+Shared sale persistence enforces relief pricing and preserves shipping and other
+charges. EIS relief lines and summaries carry zero VAT, including combined line
+and invoice discounts, without changing issued payloads or saved retry requests.
+Unissued legacy relief sales containing saved VAT must be edited and revalidated
+before submission; they are not silently reclassified as tax-free gross prices.
+
+TC-RS-016 requires a buyer TIN, project number, VAT5 certificate number and positive
+certificate quantity. Missing fields are rejected locally before API requests.
+Relief requires online validation: MRA must confirm the certificate as valid and
+return matching project, certificate and quantity details. Invalid certificates
+prevent checkout; validated details are saved with the relief sale.
+
+Run `node tests/Standalone/pos_percentage_discount_checks.js`,
+`php tests/Standalone/sales_tax_persistence_checks.php`,
+`php tests/Standalone/eis_discount_checks.php` and
+`php tests/Standalone/eis_pos_validation_checks.php` for isolated TC-RS-015/016
+regressions. Certificate responses are mocked, not live MRA certification.
+
+## Terminal blocking
+
+Every EIS invoice submission inspects `data.shouldBlockTerminal`, including
+unsuccessful HTTP responses. A true flag durably blocks that terminal before
+retrieving `utilities/get-terminal-blocking-message` with its own `terminalId`.
+The returned `data.blockingReason` is shown to the taxpayer. If the lookup is
+unavailable, the terminal stays blocked with an explicit reason-unavailable warning.
+A successful invoice that also blocks the terminal remains submitted.
+
+Blocked terminals cannot save local/offline fiscal transactions, restaurant
+bills/checkouts, or submit queued sales and stock/return operations. Terminal
+selection respects the original fiscal terminal, till assignment and location
+default; other terminals/businesses remain independent. Authorized locations'
+blocking messages appear in POS/business/restaurant pages and transaction errors.
+Open pages refresh the scoped local blocking messages every 15 seconds, including
+blocks received by background submission jobs; reasons are rendered as text.
+Existing invoices remain readable.
+
+False or missing invoice flags, configuration sync, and local activation do not
+clear a block. Use the existing `check-terminal-unblock-status` utility; only an
+accepted response with `data.isUnblocked: true` restores access. Run the new
+terminal-block-state migration before using this feature.
+
+`php tests/Standalone/eis_submission_retry_checks.php` verifies blocking,
+reason retrieval, terminal isolation, offline guards and explicit unblocking
+using SQLite and HTTP fakes only.
+
 ## Fiscal sales returns
 
 ERP sale returns (full or partial) are disabled for any fully paid invoice,

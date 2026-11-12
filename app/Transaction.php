@@ -21,6 +21,7 @@ class Transaction extends Model
     protected static function booted()
     {
         static::saving(function ($model) {
+            \Modules\EIS\Services\Terminal\TerminalBlockService::assertTransactionAllowed($model->getConnection(), $model);
             \App\Services\Sales\SavedSaleWriteGuard::model($model, true);
         });
         static::deleting(function ($model) {

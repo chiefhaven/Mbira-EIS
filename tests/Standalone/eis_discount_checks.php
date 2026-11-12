@@ -34,6 +34,9 @@ $capsule->table('tax_rates')->insert([
     ['id' => 1, 'business_id' => 6, 'tax_rate_id' => 'A', 'rate' => 17.5],
     ['id' => 2, 'business_id' => 6, 'tax_rate_id' => 'Z', 'rate' => 0],
     ['id' => 3, 'business_id' => 7, 'tax_rate_id' => 'A', 'rate' => 50],
+    ['id' => 4, 'business_id' => 6, 'tax_rate_id' => 'S', 'rate' => 16.5],
+    ['id' => 5, 'business_id' => 6, 'tax_rate_id' => 'E', 'rate' => 0],
+    ['id' => 6, 'business_id' => 6, 'tax_rate_id' => 'B', 'rate' => 0],
 ]);
 $transformer = new SaleTransformer(new EisTaxRate(), new OfflineSignatureService(), new InvoiceNumberGenerator());
 $settings = new EisSetting(['business_id' => 6, 'tpin' => 'FIXTURE', 'branch_id' => 'FIXTURE-SITE']);
@@ -221,6 +224,41 @@ discountCheck($nonVatPayload['invoiceLineItems'][0]['discount'] === 20.0
 $payload = discountPayload($transformer, $nonVatSettings, [$correct], 211.5);
 discountCheck($payload['invoiceSummary']['totalVAT'] === 31.5,
     'Enabled business inline tax controls discount VAT even if terminal VAT registration differs');
+try {
+    discountPayload($transformer, $settings, [$first], 900, ['is_relief' => true]);
+    throw new RuntimeException('Legacy relief VAT must not silently become part of a tax-free price');
+} catch (InvalidArgumentException $exception) {
+    discountCheck(str_contains($exception->getMessage(), 'contains saved VAT'),
+        'Unissued relief with stale saved VAT requires correction rather than silently changing fiscal treatment');
+}
+foreach ([4, 1] as $standardTaxId) {
+    foreach (['fixed', 'percentage'] as $lineDiscount) {
+        $reliefStandard = ['quantity' => 2, 'unit_price_before_discount' => 100, 'unit_price' => 90,
+            'unit_price_inc_tax' => 90, 'item_tax' => 0, 'line_discount_type' => $lineDiscount,
+            'line_discount_amount' => 10, 'tax_id' => $standardTaxId];
+        $reliefExempt = ['quantity' => 1, 'unit_price_before_discount' => 50, 'unit_price' => 50,
+            'unit_price_inc_tax' => 50, 'item_tax' => 0, 'tax_id' => 5];
+        $reliefZero = ['quantity' => 1, 'unit_price_before_discount' => 30, 'unit_price' => 30,
+            'unit_price_inc_tax' => 30, 'item_tax' => 0, 'tax_id' => 6];
+        foreach ([['fixed', 0, 260], ['percentage', 10, 234], ['fixed', 26, 234], ['percentage', 100, 0]] as [$type, $amount, $total]) {
+            $reliefPayload = discountPayload($transformer, $settings, [$reliefStandard, $reliefExempt, $reliefZero], $total,
+                ['is_relief' => true, 'discount_type' => $type, 'discount_amount' => $amount,
+                    'vat5_certificate_details' => json_encode(['projectNumber' => 'PROJECT1', 'certificateNumber' => 'CERT1', 'quantity' => 4], JSON_THROW_ON_ERROR)]);
+            discountCheck(array_column($reliefPayload['invoiceLineItems'], 'unitPrice') === [100.0, 50.0, 30.0],
+                'Relief discounts never gross up standard, exempt or zero-rated saved prices');
+            discountCheck(array_column($reliefPayload['invoiceLineItems'], 'taxRateId') === [$standardTaxId === 4 ? 'S' : 'A', 'E', 'B']
+                && array_column($reliefPayload['invoiceLineItems'], 'totalVAT') === [0.0, 0.0, 0.0]
+                && $reliefPayload['invoiceSummary']['totalVAT'] === 0.0,
+                'Mixed relief payload retains tax classifications and zero VAT after invoice discounts');
+            discountCheck($reliefPayload['invoiceSummary']['invoiceTotal'] === (float) $total
+                && array_sum(array_column($reliefPayload['invoiceLineItems'], 'total')) === (float) $total,
+                'Relief fiscal line totals reconcile with the saved net invoice total');
+            discountCheck($reliefPayload['invoiceHeader']['isReliefSupply'] === true
+                && $reliefPayload['invoiceHeader']['vat5CertificateDetails']['certificateNumber'] === 'CERT1',
+                'Relief pricing retains the relief flag and validated certificate metadata');
+        }
+    }
+}
 $capsule->table('tax_rates')->where('id', 1)->delete();
 try {
     discountPayload($transformer, $settings, [$first], 900);

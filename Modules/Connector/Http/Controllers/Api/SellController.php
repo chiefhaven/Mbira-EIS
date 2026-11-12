@@ -939,7 +939,10 @@ class SellController extends ApiController
                         $input['commission_agent'] = $user->id;
                     }
 
-                    $transaction = $this->transactionUtil->createSellTransaction($user->business_id, $input, $invoice_total, $user->id, false);
+                    $transaction = $this->transactionUtil->createSellTransaction(
+                        $user->business_id, $input, $invoice_total, $user->id, false,
+                        $request->attributes->get('connector_till_id')
+                    );
                     \Modules\Connector\Support\TillAssignment::bind($user, $transaction->id, $request->attributes->get('connector_till_id'));
 
                     $this->transactionUtil->createOrUpdateSellLines($transaction, $input['products'], $input['location_id'], false, null, [], false);

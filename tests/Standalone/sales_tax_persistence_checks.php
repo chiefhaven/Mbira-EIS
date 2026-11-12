@@ -28,8 +28,10 @@ salesTaxCheck(
 
 $start = strpos($productRow, '$tax_id = $product->tax_id;');
 $priceBlock = substr($productRow, $start, strpos($productRow, '$discount_type =', $start) - $start);
-$prepare = static function (array $prices, ?object $so_line = null, string $hide_tax = '') use ($priceBlock): array {
+$prepare = static function (array $prices, ?object $so_line = null, string $hide_tax = '', bool $relief = false, float $rate = 0) use ($priceBlock): array {
     $product = (object) ($prices + ['tax_id' => 1, 'item_tax' => 0]);
+    $transaction = (object) ['is_relief' => $relief];
+    $tax_dropdown = ['attributes' => [1 => ['data-rate' => $rate]]];
     $action = '';
     $multiplier = 1;
     eval($priceBlock);
@@ -58,6 +60,10 @@ $order = (object) ['tax_id' => 1, 'item_tax' => 15.75, 'unit_price' => 90,
     'unit_price_before_discount' => 100, 'unit_price_inc_tax' => 105.75];
 salesTaxCheck(abs($prepare(['default_sell_price' => 200, 'sell_price_inc_tax' => 235], $order)[1] - 117.5) < 0.000001,
     'Sales-order lines keep their stored price pair instead of current catalog prices');
+salesTaxCheck(abs($prepare(['default_sell_price' => 90, 'sell_price_inc_tax' => 90,
+    'unit_price_before_discount' => 100, 'catalog_price_exc_tax' => 100, 'catalog_price_inc_tax' => 116.5],
+    null, '', true, 16.5)[1] - 116.5) < 0.000001,
+    'Editing saved relief retains the catalog gross price for switching back to an ordinary sale');
 
 $app = new Illuminate\Container\Container();
 Illuminate\Container\Container::setInstance($app);
@@ -72,10 +78,13 @@ $capsule->schema()->create('business', function (Illuminate\Database\Schema\Blue
     $table->increments('id'); $table->boolean('enable_inline_tax');
 });
 $capsule->schema()->create('tax_rates', function (Illuminate\Database\Schema\Blueprint $table) {
-    $table->increments('id'); $table->decimal('amount', 8, 3); $table->softDeletes();
+    $table->increments('id'); $table->integer('business_id')->default(2); $table->decimal('amount', 8, 3); $table->softDeletes();
 });
 $capsule->table('business')->insert([['id' => 1, 'enable_inline_tax' => 0], ['id' => 2, 'enable_inline_tax' => 1]]);
 $capsule->table('tax_rates')->insert(['id' => 1, 'amount' => 10]);
+$capsule->table('tax_rates')->insert([
+    ['id' => 2, 'amount' => 16.5], ['id' => 3, 'amount' => 0], ['id' => 4, 'amount' => 0], ['id' => 5, 'amount' => 17.5],
+]);
 $util = new App\Utils\ProductUtil();
 foreach ([[false, '.'], [true, '.'], [true, ',']] as [$formatted, $decimal]) {
     $session->put('currency', ['decimal_separator' => $decimal, 'thousand_separator' => $decimal === ',' ? '.' : ',']);
@@ -99,6 +108,35 @@ foreach ([[false, '.'], [true, '.'], [true, ',']] as [$formatted, $decimal]) {
             'Removing item and invoice tax preserves invoice discounts and shipping/other charges');
         salesTaxCheck($util->applySalesTaxConfiguration(1, $normalized, $formatted) === $normalized,
             'Repeated normalization does not change totals or apply discounts twice');
+    }
+    foreach ([[2, 16.5], [5, 17.5]] as [$taxId, $rate]) {
+        foreach (['fixed', 'percentage'] as $type) {
+            $input = ['is_relief' => '1', 'tax_rate_id' => 1, 'discount_type' => 'percentage', 'discount_amount' => $number(10),
+                'products' => [
+                    ['unit_price' => $number(100), 'unit_price_inc_tax' => $number(90 * (1 + $rate / 100)),
+                        'quantity' => $number(2), 'item_tax' => $number(90 * $rate / 100), 'tax_id' => $taxId,
+                        'line_discount_type' => $type, 'line_discount_amount' => $number(10)],
+                    ['unit_price' => $number(50), 'unit_price_inc_tax' => $number(50), 'quantity' => $number(1),
+                        'item_tax' => $number(0), 'tax_id' => 3],
+                    ['unit_price' => $number(30), 'unit_price_inc_tax' => $number(30), 'quantity' => $number(1),
+                        'item_tax' => $number(0), 'tax_id' => 4],
+                ]];
+            $old = $util->calculateInvoiceTotal($input['products'], 1, $input, $formatted);
+            $input['final_total'] = $number($old['final_total'] + 5);
+            $normalized = $util->applySalesTaxConfiguration(2, $input, $formatted);
+            $read = static fn ($value) => $formatted ? $util->num_uf($value) : (float) $value;
+            salesTaxCheck($read($normalized['products'][0]['unit_price_inc_tax']) === 90.0
+                && $read($normalized['products'][0]['item_tax']) === 0.0
+                && $normalized['products'][0]['tax_id'] === $taxId,
+                'Relief removes standard VAT after fixed/percentage discounts without losing the tax classification');
+            salesTaxCheck($normalized['products'][1] === $input['products'][1]
+                && $normalized['products'][2] === $input['products'][2],
+                'Relief preserves exempt and zero-rated line prices and classifications exactly');
+            salesTaxCheck($normalized['tax_rate_id'] === null && abs($read($normalized['final_total']) - 239) < 0.000001,
+                'Mixed relief totals exclude invoice VAT and retain discounts, quantities and shipping');
+            salesTaxCheck($util->applySalesTaxConfiguration(2, $normalized, $formatted) === $normalized,
+                'Relief normalization is idempotent for localized web and raw inputs');
+        }
     }
 }
 

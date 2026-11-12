@@ -73,7 +73,7 @@ class SaleTransformer
         if (!$transaction->business) {
             throw new \InvalidArgumentException('The sale business configuration is required to calculate sales tax.');
         }
-        $salesTaxDisabled = (int) $transaction->business->enable_inline_tax !== 1;
+        $salesTaxDisabled = (int) $transaction->business->enable_inline_tax !== 1 || (bool) $transaction->is_relief;
 
         foreach ($transaction->sell_lines as $index => $line) {
             if ($line->product && (int) $line->product->business_id !== (int) $transaction->business_id) {
@@ -86,6 +86,9 @@ class SaleTransformer
                     'line_id' => $line->id ?? 'unknown'
                 ]);
                 continue;
+            }
+            if ($transaction->is_relief && abs((float) $line->item_tax) > 0.0001) {
+                throw new \InvalidArgumentException('Relief sale contains saved VAT. Edit and revalidate the sale before EIS submission.');
             }
 
             // Get tax rate ID from EIS tax rates

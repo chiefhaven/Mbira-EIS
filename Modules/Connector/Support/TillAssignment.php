@@ -53,6 +53,7 @@ final class TillAssignment
             $setting = EisSetting::where('business_id', $businessId)->where('location_id', $locationId)
                 ->find($till->eis_setting_id);
             if ($setting) {
+                \Modules\EIS\Services\Terminal\TerminalBlockService::assertAllowed($setting);
                 $configuration = \Modules\EIS\Models\EisConfiguration::where('business_id', $businessId)
                     ->where('location_id', $locationId)->where('eis_setting_id', $setting->id)->first();
                 $terminal = $configuration

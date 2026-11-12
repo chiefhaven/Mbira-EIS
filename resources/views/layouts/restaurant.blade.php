@@ -49,6 +49,7 @@
                 @if (session('status'))
                     <input type="hidden" id="status_span" data-status="{{ session('status.success') }}" data-msg="{{ session('status.msg') }}">
                 @endif
+                @include('layouts.partials.eis-terminal-block')
                 @yield('content')
                 @if(config('constants.iraqi_selling_price_adjustment'))
                     <input type="hidden" id="iraqi_selling_price_adjustment">

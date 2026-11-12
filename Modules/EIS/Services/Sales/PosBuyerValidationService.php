@@ -186,9 +186,10 @@ class PosBuyerValidationService
         }
         $hasEis = EisSetting::where('business_id', $businessId)->where('location_id', $locationId)->exists();
         try {
-            $settings = $hasEis
-                ? \Modules\EIS\Services\Terminal\TerminalContext::forLocation($businessId, (int) $locationId, true)
-                : null;
+            $tillId = $input['connector_till_id'] ?? $existing?->connector_till_id;
+            $settings = !$hasEis ? null : ($tillId
+                ? \Modules\Connector\Support\TillAssignment::terminal($businessId, (int) $locationId, (int) $tillId)
+                : \Modules\EIS\Services\Terminal\TerminalContext::forLocation($businessId, (int) $locationId, true));
         } catch (\InvalidArgumentException | \Illuminate\Database\Eloquent\ModelNotFoundException $e) {
             throw ValidationException::withMessages(['location_id' => $e->getMessage()]);
         }
