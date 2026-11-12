@@ -141,6 +141,14 @@ omitted from submission; compare it with the locally saved request payload.
 
 ## Terminal activation ownership
 
+Activation sends confirmation automatically. After successful confirmation, the
+result reports that the terminal was activated and automatically confirmed,
+replacing the initial API's pending-confirmation remark. Failed confirmation
+retains an explicit warning and does not mark the terminal confirmed.
+Successful activation also refreshes the current business session and reloads
+the whole page, so updated business details, inline tax and navigation take
+effect without logging out. Failed activation leaves the page and session intact.
+
 The first activated terminal establishes the ERP business account's EIS taxpayer
 and trading-name identity; the initial ERP business name need not match.
 Additional terminals and reactivations must match the saved taxpayer TIN,

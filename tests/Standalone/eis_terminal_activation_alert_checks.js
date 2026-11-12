@@ -12,6 +12,7 @@ function setup() {
     const elements = new Map();
     const requests = [];
     const alerts = [];
+    let reloads = 0;
     function $(selector) {
         if (typeof selector === 'function') return selector();
         if (!elements.has(selector)) {
@@ -52,9 +53,9 @@ function setup() {
         requests.push(request);
         return request;
     };
-    vm.runInNewContext(script, {$, window: {}, swal: options => alerts.push(options)});
+    vm.runInNewContext(script, {$, window: {location: {reload() { reloads++; }}}, swal: options => alerts.push(options)});
     requests[0].resolve({success: true, data: {terminals: []}});
-    return {$, requests, alerts};
+    return {$, requests, alerts, reloadCount: () => reloads};
 }
 
 let checks = 0;
@@ -65,7 +66,7 @@ for (const failure of [
     {},
     {success: false, message: '<b>Different business</b>'},
 ]) {
-    const {$, requests, alerts} = setup();
+    const {$, requests, alerts, reloadCount} = setup();
     $('#eis-activation-code').val('FOREIGN');
     $('#eis-activate-terminal').handler();
     const expected = failure.success === false ? failure.message
@@ -82,6 +83,7 @@ for (const failure of [
     assert.equal($('#eis-activation-code').val(), 'FOREIGN');
     assert.equal($('#eis-terminal-management button').properties.disabled, false);
     assert.equal(requests.length, 2, 'Rejected activation must not reload the terminal list');
+    assert.equal(reloadCount(), 0, 'Rejected activation must not reload the page');
     checks++;
 }
 
@@ -95,15 +97,15 @@ for (const failure of [
     checks++;
 }
 {
-    const {$, requests, alerts} = setup();
+    const {$, requests, alerts, reloadCount} = setup();
     $('#eis-activation-code').val('VALID');
     $('#eis-activate-terminal').handler();
     requests[1].resolve({success: true, message: 'Activated'});
     assert.equal(alerts.length, 0);
     assert.equal($('#eis-activation-code').val(), '');
-    assert.equal(requests.length, 3, 'Successful activation reloads the terminal list');
-    requests[2].resolve({success: true, data: {terminals: []}});
-    assert.equal($('#eis-terminal-management button').properties.disabled, false);
+    assert.equal(requests.length, 2, 'Successful activation does not fetch only the terminal list');
+    assert.equal(reloadCount(), 1, 'Successful activation reloads the whole page');
+    assert.equal($('#eis-terminal-management button').properties.disabled, true);
     checks++;
 }
 {

@@ -612,15 +612,56 @@ Illuminate\Support\Facades\Http::fake(fn () => Illuminate\Support\Facades\Http::
     json_decode(json_encode(activationResponse('PUBLIC-FOREIGN', 'FOREIGN-SITE', 3, 'Other Business')), true)
 ));
 $publicBefore = activationSnapshot();
+$activationSession = new Illuminate\Session\Store('activation', new Illuminate\Session\ArraySessionHandler(120));
+$app->instance('session', $activationSession);
+$activationSession->put('business', ['id' => 1, 'name' => 'Stale business name', 'enable_inline_tax' => 0]);
+$activationSession->put('user', ['id' => 1, 'business_id' => 1]);
 $publicRejected = $activation->activateTerminal(1, 'TEST', ['platform' => ['osName' => 'Windows']], 1);
 locationCheck(!$publicRejected['success'] && $publicRejected['status_code'] === 422
     && str_contains($publicRejected['message'], 'different trading name'),
     'Public activation returns an explicit ownership rejection');
 locationCheck(activationSnapshot() === $publicBefore,
     'Public activation rejection leaves local business and terminal state unchanged');
+locationCheck($activationSession->get('business.name') === 'Stale business name',
+    'Rejected activation does not overwrite the business session');
 locationCheck(count(Illuminate\Support\Facades\Http::recorded()) === 1
     && str_ends_with(Illuminate\Support\Facades\Http::recorded()->first()[0]->url(), '/onboarding/activate-terminal'),
     'Rejected public activation sends no remote activation confirmation');
+
+foreach ([200, 503] as $confirmationStatus) {
+    DB::beginTransaction();
+    $activationSession->put('business', ['id' => 1, 'name' => 'Stale business name', 'enable_inline_tax' => 0]);
+    $http = new Illuminate\Http\Client\Factory();
+    $http->preventStrayRequests();
+    Illuminate\Support\Facades\Http::swap($http);
+    $publicResponse = activationResponse('A2', 'A', 3);
+    $publicResponse->remark = 'Terminal Activated, pending for confirmation request';
+    Illuminate\Support\Facades\Http::fake([
+        '*/onboarding/activate-terminal' => Illuminate\Support\Facades\Http::response(
+            json_decode(json_encode($publicResponse), true)
+        ),
+        '*/onboarding/terminal-activated-confirmation' => Illuminate\Support\Facades\Http::response(
+            ['statusCode' => $confirmationStatus === 200 ? 1 : 0], $confirmationStatus
+        ),
+    ]);
+    $publicResult = $activation->activateTerminal(1, 'TEST', ['platform' => ['osName' => 'Windows']], 1);
+    $confirmed = $confirmationStatus === 200;
+    locationCheck($publicResult['success'] && $publicResult['confirmed'] === $confirmed
+        && $publicResult['data']['is_confirmed'] === $confirmed,
+        'Public activation reports the automatic confirmation outcome');
+    locationCheck($confirmed
+        ? $publicResult['message'] === 'Terminal activated and automatically confirmed successfully.'
+        : str_contains($publicResult['message'], 'EIS did not acknowledge the activation confirmation'),
+        'Activation replaces the stale pending remark only after confirmation succeeds');
+    locationCheck(Modules\EIS\Models\EisTerminalConfiguration::where('terminal_id', 'A2')->firstOrFail()->is_confirmed === $confirmed,
+        'Activation confirmation message matches persisted confirmation state');
+    locationCheck($activationSession->get('business.name') === 'EIS Trading Name'
+        && (int) $activationSession->get('business.enable_inline_tax') === 1
+        && $activationSession->get('business.tax_number_1') === 'TIN1'
+        && $activationSession->get('user.id') === 1,
+        'Successful activation refreshes business settings without logging the user out');
+    DB::rollBack();
+}
 
 $http = new Illuminate\Http\Client\Factory();
 $http->preventStrayRequests();

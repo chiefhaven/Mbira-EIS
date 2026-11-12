@@ -107,7 +107,9 @@ $(function() {
         }).fail(function(xhr) {
             eisError(xhr, activated);
         }).always(function() {
-            if (reload) {
+            if (reload && activated) {
+                window.location.reload();
+            } else if (reload) {
                 loadEisTerminals();
             } else {
                 eisBusy = false;

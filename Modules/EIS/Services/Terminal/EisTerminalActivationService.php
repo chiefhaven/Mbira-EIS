@@ -74,6 +74,7 @@ class EisTerminalActivationService
                     $result['confirmed'] = $confirmationSuccess;
                     if ($confirmationSuccess) {
                         $result['data']['confirmed_at'] = now();
+                        $result['message'] = 'Terminal activated and automatically confirmed successfully.';
                     }
                     
                     if (!$confirmationSuccess) {
@@ -95,6 +96,10 @@ class EisTerminalActivationService
 
             \Modules\EIS\Services\Configuration\ConfigurationSyncService::businessLocation($businessId, (int) $result['terminal_setting_id']);
             $this->dispatchSyncProductsJob($businessId, (int) $result['terminal_setting_id']);
+
+            if ($result['success'] && app()->bound('session') && (int) session('business.id') === $businessId) {
+                session(['business' => \App\Business::findOrFail($businessId)]);
+            }
 
             return $result;
 
@@ -581,13 +586,6 @@ class EisTerminalActivationService
                     $business->common_settings = $commonSettings;
                     $business->save();
                 }
-                if (app()->bound('session') && (int) session('business.id') === $businessId) {
-                    session(['business.enable_inline_tax' => 1]);
-                    if ($isFirstTerminal) {
-                        session(['business.common_settings' => $commonSettings]);
-                    }
-                }
-
                 // Save or update main configuration
                 $configuration = $this->saveConfiguration($businessId, $configurationData, $setting);
 
