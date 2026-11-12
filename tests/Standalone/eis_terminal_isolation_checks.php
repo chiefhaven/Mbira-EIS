@@ -161,6 +161,8 @@ $beforeLocations = DB::table('business_locations')->get()->toJson();
 DB::table('business_locations')->where('id', 1)->update(['default_eis_setting_id' => 1]);
 $result = $process->invoke($activation, 1, activationResponse('A2', 'A', 3), 'CODE', [], 1, 1);
 $newId = $result['terminal_setting_id'];
+locationCheck(is_array(Modules\EIS\Models\EisConfiguration::where('eis_setting_id', $newId)->firstOrFail()->raw_response),
+    'Activation saves configuration through its array cast without double-encoding the receipt VAT status');
 locationCheck((int) DB::table('business_locations')->where('id', 1)->value('default_eis_setting_id') === 1,
     'Activating another terminal keeps the location\'s existing valid default');
 DB::table('business_locations')->where('id', 1)->update(['default_eis_setting_id' => null]);

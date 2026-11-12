@@ -766,7 +766,7 @@ class EisTerminalActivationService
             'is_vat_registered' => $taxpayerConfig->isVATRegistered ?? false,
             'tax_office_code' => $taxpayerConfig->taxOfficeCode ?? null,
             'tax_office_name' => $taxpayerConfig->taxOffice->name ?? null,
-            'raw_response' => json_encode(['data' => $configurationData]),
+            'raw_response' => ['data' => $configurationData],
             'last_synced_at' => now()
         ];
 

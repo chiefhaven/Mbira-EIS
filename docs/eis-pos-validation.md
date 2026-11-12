@@ -141,6 +141,11 @@ omitted from submission; compare it with the locally saved request payload.
 
 ## Terminal activation ownership
 
+Receipt VAT registration uses the original sale terminal's saved registration
+status. Legacy double-encoded activation configuration is also decoded when
+reading receipt tax settings; new activations save configuration without double
+encoding.
+
 Activation sends confirmation automatically. After successful confirmation, the
 result reports that the terminal was activated and automatically confirmed,
 replacing the initial API's pending-confirmation remark. Failed confirmation

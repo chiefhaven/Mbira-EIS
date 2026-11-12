@@ -1057,6 +1057,7 @@ class TransactionUtil extends Util
         $eis_trading_name = null;
         $eis_address_lines = null;
         $eis_configuration = [];
+        $eis_vat_registration = null;
         if ($is_eis_receipt
             && (int) $transaction->eisSale->business_id === (int) $transaction->business_id
             && (int) $transaction->eisSale->location_id === (int) $transaction->location_id
@@ -1066,11 +1067,17 @@ class TransactionUtil extends Util
                 ->where('configuration.business_id', $transaction->business_id)
                 ->where('configuration.location_id', $transaction->location_id)
                 ->where('configuration.eis_setting_id', $transaction->eisSale->eis_setting_id)
-                ->first(['terminal.trading_name', 'terminal.address_lines', 'configuration.raw_response']);
+                ->first(['terminal.trading_name', 'terminal.address_lines', 'configuration.raw_response',
+                    'configuration.is_vat_registered']);
             $eis_trading_name = $eis_terminal->trading_name ?? null;
             if ($eis_terminal) {
                 $eis_address_lines = json_decode($eis_terminal->address_lines ?? '', true);
-                $eis_configuration = json_decode($eis_terminal->raw_response ?? '', true)['data'] ?? [];
+                $eis_response = json_decode($eis_terminal->raw_response ?? '', true);
+                if (is_string($eis_response)) {
+                    $eis_response = json_decode($eis_response, true);
+                }
+                $eis_configuration = $eis_response['data'] ?? [];
+                $eis_vat_registration = $eis_terminal->is_vat_registered;
             }
         }
         if ($is_eis_receipt && (!is_array($eis_address_lines) || !array_is_list($eis_address_lines)
@@ -1095,7 +1102,8 @@ class TransactionUtil extends Util
             'receipt_item_discount_label' => !empty($il->common_settings['item_discount_label'])
                 ? $il->common_settings['item_discount_label'] : __('sale.discount'),
         ];
-        $vat_registration = $eis_configuration['taxpayerConfiguration']['isVATRegistered'] ?? null;
+        $vat_registration = $eis_vat_registration
+            ?? $eis_configuration['taxpayerConfiguration']['isVATRegistered'] ?? null;
         if (is_string($vat_registration)) {
             $vat_registration = strtolower(trim($vat_registration));
         }

@@ -15,6 +15,9 @@ $app = new Container();
 Container::setInstance($app);
 Facade::setFacadeApplication($app);
 $app->instance('log', new Psr\Log\NullLogger());
+$app->instance('translator', new Illuminate\Translation\Translator(
+    new Illuminate\Translation\FileLoader(new Illuminate\Filesystem\Filesystem(), dirname(__DIR__, 2).'\lang'), 'en'
+));
 $capsule = new Capsule($app);
 $capsule->addConnection(['driver' => 'sqlite', 'database' => ':memory:']);
 $capsule->setAsGlobal();
@@ -22,6 +25,7 @@ $app->instance('db', $capsule->getDatabaseManager());
 $capsule->schema()->create('eis_configurations', function (Blueprint $t) {
     $t->integer('id'); $t->integer('business_id'); $t->integer('location_id'); $t->integer('eis_setting_id');
     $t->text('raw_response')->nullable();
+    $t->boolean('is_vat_registered')->nullable();
 });
 $capsule->schema()->create('eis_terminal_configurations', function (Blueprint $t) {
     $t->integer('configuration_id'); $t->string('trading_name'); $t->text('address_lines')->nullable();
@@ -36,6 +40,8 @@ foreach ([[1, 6, 48, 13], [2, 6, 48, 14], [3, 7, 48, 13], [4, 6, 49, 13]] as [$i
 $source = file_get_contents(dirname(__DIR__, 2).'\app\Utils\TransactionUtil.php');
 $start = strpos($source, '        $eis_trading_name = null;');
 $configurationBlock = substr($source, $start, strpos($source, '        $output = [', $start) - $start);
+$start = strpos($source, '        $vat_registration =', $start);
+$registrationBlock = substr($source, $start, strpos($source, "        \$output['taxable_amount_label']", $start) - $start);
 $start = strpos($source, '        //Address', $start);
 $addressBlock = substr($source, $start, strpos($source, "        \$output['website']", $start) - $start);
 $checks = 0;
@@ -46,7 +52,7 @@ function addressCheck(bool $condition, string $message): void
     ++$checks;
 }
 $render = function (bool $fiscal, string $printer = 'browser', int $terminal = 13, bool $showLegacy = true,
-    int $saleLocation = 48, ?int $fiscalLocation = null, int $fiscalBusiness = 6) use ($configurationBlock, $addressBlock): array {
+    int $saleLocation = 48, ?int $fiscalLocation = null, int $fiscalBusiness = 6) use ($configurationBlock, $addressBlock, $registrationBlock): array {
     $is_eis_receipt = $fiscal;
     $transaction = (object) ['id' => 100, 'business_id' => 6, 'location_id' => $saleLocation,
         'eisSale' => (object) ['business_id' => $fiscalBusiness, 'location_id' => $fiscalLocation ?? $saleLocation,
@@ -58,7 +64,8 @@ $render = function (bool $fiscal, string $printer = 'browser', int $terminal = 1
     $output = [];
     eval($configurationBlock);
     eval($addressBlock);
-    return [$output['address'], $eis_trading_name];
+    eval($registrationBlock);
+    return [$output['address'], $eis_trading_name, $output['vat_registered'], $output['vat_registered_label'], $eis_configuration];
 };
 [$address, $name] = $render(true);
 addressCheck($address === 'EIS Street<br>Suite &lt;2&gt; &amp; Office', 'Browser receipts escape EIS text and preserve address line order');
@@ -69,6 +76,29 @@ addressCheck($render(true, 'browser', 13, false)[0] === $address, 'EIS address d
 addressCheck($render(false)[0] === 'Legacy street, Legacy city, Legacy district, 100, Malawi', 'Non-EIS receipt keeps existing address behavior');
 addressCheck($render(false, 'browser', 13, false)[0] === '', 'Non-EIS address visibility flags remain enforced');
 addressCheck($render(true, 'browser', 14)[0] === 'Wrong terminal address', 'Recorded terminal ID selects its own configuration');
+foreach ([false, true] as $registered) {
+    $raw = ['data' => ['taxpayerConfiguration' => ['isVATRegistered' => $registered],
+        'globalConfiguration' => ['taxrates' => [['id' => 'A', 'rate' => 17.5]]]]];
+    foreach ([json_encode($raw), json_encode(json_encode($raw)), null] as $storedResponse) {
+        DB::table('eis_configurations')->where('id', 1)->update([
+            'is_vat_registered' => $registered, 'raw_response' => $storedResponse,
+        ]);
+        $result = $render(true);
+        addressCheck($result[2] === $registered
+            && $result[3] === ($registered ? 'VAT Registered' : 'Not VAT Registered'),
+            'Original sale terminal registration renders with normal, legacy double-encoded or missing raw configuration');
+        if ($storedResponse !== null) {
+            addressCheck($result[4] === $raw['data'],
+                'Normal and legacy double-encoded configuration retain fiscal tax rates');
+        }
+    }
+}
+DB::table('eis_configurations')->where('id', 1)->update([
+    'is_vat_registered' => null,
+    'raw_response' => json_encode(['data' => ['taxpayerConfiguration' => ['isVATRegistered' => false]]]),
+]);
+addressCheck($render(true)[2] === false, 'Raw registration remains available when the normalized status is unknown');
+addressCheck($render(false)[2] === null, 'Non-fiscal receipts do not inherit another terminal registration');
 DB::table('eis_terminal_configurations')->where('configuration_id', 4)
     ->update(['address_lines' => '["Location 49 address"]']);
 addressCheck($render(true, 'browser', 13, true, 49)[0] === 'Location 49 address',
