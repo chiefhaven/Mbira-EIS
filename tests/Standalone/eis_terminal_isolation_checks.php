@@ -247,6 +247,7 @@ locationReject(fn () => $process->invoke($activation, 1, $missingTin, 'CODE', []
 foreach ([false, 0, '0', 'false'] as $vatFlag) {
     foreach (['NOT-VAT', 'A2'] as $device) {
         DB::beginTransaction();
+        DB::table('business')->where('id', 1)->update(['enable_inline_tax' => 1]);
         $notVat = activationResponse($device, 'A', 3);
         $notVat->data->configuration->taxpayerConfiguration->isVATRegistered = $vatFlag;
         $notVatResult = $process->invoke($activation, 1, $notVat, 'CODE', [], 1);
@@ -255,6 +256,9 @@ foreach ([false, 0, '0', 'false'] as $vatFlag) {
         locationCheck(Modules\EIS\Models\EisConfiguration::where('eis_setting_id', $notVatResult['terminal_setting_id'])
             ->firstOrFail()->is_vat_registered === false,
             'Non-VAT activation persists a false registration flag, including string false');
+        locationCheck((int) DB::table('business')->where('id', 1)->value('enable_inline_tax') === 0
+            && (int) DB::table('business')->where('id', 2)->value('enable_inline_tax') === 0,
+            'Non-VAT activation and reactivation disable inline tax only for the owning business');
         DB::rollBack();
     }
 }
@@ -271,11 +275,14 @@ locationReject(fn () => $process->invoke($activation, 1, $missingVat, 'CODE', []
 $vatAsString = activationResponse('A1', 'A', 1);
 $vatAsString->data->configuration->taxpayerConfiguration->isVATRegistered = '1';
 DB::beginTransaction();
+DB::table('business')->where('id', 1)->update(['enable_inline_tax' => 0]);
 locationCheck($process->invoke($activation, 1, $vatAsString, 'CODE', [], 1)['success'],
     'VAT registration reported as "1" is accepted');
 locationCheck(Modules\EIS\Models\EisConfiguration::where('eis_setting_id', 1)
     ->firstOrFail()->is_vat_registered === true,
     'VAT-registered activation persists a true registration flag');
+locationCheck((int) DB::table('business')->where('id', 1)->value('enable_inline_tax') === 1,
+    'VAT-registered activation enables inline tax from a disabled setting');
 DB::rollBack();
 locationCheck(activationSnapshot() === $identityBefore,
     'Rejected identities preserve business names, sites, credentials and all terminal configuration');
@@ -630,13 +637,14 @@ locationCheck(count(Illuminate\Support\Facades\Http::recorded()) === 1
     && str_ends_with(Illuminate\Support\Facades\Http::recorded()->first()[0]->url(), '/onboarding/activate-terminal'),
     'Rejected public activation sends no remote activation confirmation');
 
-foreach ([200, 503] as $confirmationStatus) {
+foreach ([[200, true], [200, false], [503, true], [503, false]] as [$confirmationStatus, $vatRegistered]) {
     DB::beginTransaction();
-    $activationSession->put('business', ['id' => 1, 'name' => 'Stale business name', 'enable_inline_tax' => 0]);
+    $activationSession->put('business', ['id' => 1, 'name' => 'Stale business name', 'enable_inline_tax' => (int) !$vatRegistered]);
     $http = new Illuminate\Http\Client\Factory();
     $http->preventStrayRequests();
     Illuminate\Support\Facades\Http::swap($http);
     $publicResponse = activationResponse('A2', 'A', 3);
+    $publicResponse->data->configuration->taxpayerConfiguration->isVATRegistered = $vatRegistered;
     $publicResponse->remark = 'Terminal Activated, pending for confirmation request';
     Illuminate\Support\Facades\Http::fake([
         '*/onboarding/activate-terminal' => Illuminate\Support\Facades\Http::response(
@@ -658,7 +666,7 @@ foreach ([200, 503] as $confirmationStatus) {
     locationCheck(Modules\EIS\Models\EisTerminalConfiguration::where('terminal_id', 'A2')->firstOrFail()->is_confirmed === $confirmed,
         'Activation confirmation message matches persisted confirmation state');
     locationCheck($activationSession->get('business.name') === 'EIS Trading Name'
-        && (int) $activationSession->get('business.enable_inline_tax') === 1
+        && (int) $activationSession->get('business.enable_inline_tax') === (int) $vatRegistered
         && $activationSession->get('business.tax_number_1') === 'TIN1'
         && $activationSession->get('user.id') === 1,
         'Successful activation refreshes business settings without logging the user out');
@@ -703,7 +711,7 @@ DB::table('eis_configurations')->where('id', 2)->update([
     'raw_response' => json_encode(['data' => $configurationClient->data]),
 ]);
 $configurationValidator = Mockery::mock(Modules\EIS\Services\Configuration\Validators\ConfigurationValidator::class);
-$configurationValidator->shouldReceive('validate')->times(6)->andReturnNull();
+$configurationValidator->shouldReceive('validate')->times(8)->andReturnNull();
 $configService = new class($configurationClient, $configurationValidator)
     extends Modules\EIS\Services\Configuration\ConfigurationSyncService {
     public array $productSyncRequests = [];
@@ -775,6 +783,22 @@ locationCheck($configService->sync(1, 'token2', false, 2)->id === 2
     && DB::table('business')->where('id', 1)->value('name') === 'Updated trading name'
     && DB::table('business')->where('id', 1)->value('tax_number_1') !== 'stale',
     'Unchanged latest configuration still restores the EIS trading name and tax number');
+foreach ([false, true] as $vatRegistered) {
+    $configurationClient->data->taxpayerConfiguration->isVATRegistered = $vatRegistered;
+    $configService->sync(1, 'token2', false, 2);
+    locationCheck((int) DB::table('business')->where('id', 1)->value('enable_inline_tax') === (int) $vatRegistered
+        && (int) $activationSession->get('business.enable_inline_tax') === (int) $vatRegistered
+        && (int) DB::table('business')->where('id', 2)->value('enable_inline_tax') === 0,
+        'Latest configuration sets inline tax from VAT registration in the database and current business session only');
+    DB::table('business')->where('id', 1)->update(['enable_inline_tax' => (int) !$vatRegistered]);
+    $activationSession->put('business', ['id' => 1, 'enable_inline_tax' => (int) !$vatRegistered]);
+    $productSyncCount = count($configService->productSyncRequests);
+    $configService->sync(1, 'token2', false, 2);
+    locationCheck((int) DB::table('business')->where('id', 1)->value('enable_inline_tax') === (int) $vatRegistered
+        && (int) $activationSession->get('business.enable_inline_tax') === (int) $vatRegistered
+        && count($configService->productSyncRequests) === $productSyncCount,
+        'Unchanged latest configuration repairs stale inline tax without scheduling duplicate product sync');
+}
 $schema->create('tax_rates', function (Blueprint $table) {
     $table->increments('id');
     foreach (['business_id', 'configuration_id', 'tax_rate_id', 'name', 'charge_mode', 'ordinal',

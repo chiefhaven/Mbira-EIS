@@ -578,8 +578,6 @@ class EisTerminalActivationService
                 $setting = $this->updateEisSettings($response->data, $businessId, (int) $location->id);
                 TerminalContext::assertConfiguration($setting, $configurationData);
                 $this->claimLocationDefault($businessId, (int) $location->id, (int) $setting->id);
-                // EIS prices are tax-inclusive, so the business must show inline tax on purchases and sales.
-                DB::table('business')->where('id', $businessId)->update(['enable_inline_tax' => 1]);
                 if ($isFirstTerminal) {
                     $commonSettings = $business->common_settings ?? [];
                     $commonSettings['is_enabled_export'] = 1;

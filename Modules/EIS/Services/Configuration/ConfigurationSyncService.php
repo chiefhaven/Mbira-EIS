@@ -72,7 +72,7 @@ class ConfigurationSyncService
         ]);
 
         try {
-            return DB::transaction(function () use ($businessId, $token, $force, $terminalId) {
+            $configuration = DB::transaction(function () use ($businessId, $token, $force, $terminalId) {
                 $settings = \Modules\EIS\Services\Terminal\TerminalContext::settings($businessId, $token, $terminalId);
                 // Fetch configuration from EIS
                 $response = $this->client->latest($token, $businessId);
@@ -107,10 +107,11 @@ class ConfigurationSyncService
                     
                     // Update last_synced_at even if unchanged
                     $existingConfig->update(['last_synced_at' => now()]);
-                    $this->syncBusinessTradingName(
+                    $this->syncBusinessDetails(
                         $businessId,
                         $data->terminalConfiguration->tradingName ?? null,
-                        $data->taxpayerConfiguration->tin ?? null
+                        $data->taxpayerConfiguration->tin ?? null,
+                        $existingConfig->is_vat_registered
                     );
                     return $existingConfig;
                 }
@@ -170,6 +171,11 @@ class ConfigurationSyncService
 
                 return $configuration;
             });
+            if (app()->bound('session') && (int) session('business.id') === $businessId) {
+                session(['business' => \App\Business::findOrFail($businessId)]);
+            }
+
+            return $configuration;
         } catch (SyncException $e) {
             // Re-throw SyncException as-is
             throw $e;
@@ -522,10 +528,11 @@ class ConfigurationSyncService
                 ['configuration_id' => $configuration->id],
                 $terminalConfigData
             );
-            $this->syncBusinessTradingName(
+            $this->syncBusinessDetails(
                 $configuration->business_id,
                 $terminalConfig->trading_name,
-                $data->taxpayerConfiguration->tin ?? null
+                $data->taxpayerConfiguration->tin ?? null,
+                $configuration->is_vat_registered
             );
 
             // Sync terminal site if present
@@ -555,9 +562,9 @@ class ConfigurationSyncService
         }
     }
 
-    private function syncBusinessTradingName(int $businessId, mixed $tradingName, mixed $tin = null): void
+    private function syncBusinessDetails(int $businessId, mixed $tradingName, mixed $tin, bool $isVatRegistered): void
     {
-        $updates = [];
+        $updates = ['enable_inline_tax' => (int) $isVatRegistered];
         if (is_string($tradingName) && trim($tradingName) !== '') {
             $updates['name'] = trim($tradingName);
         }

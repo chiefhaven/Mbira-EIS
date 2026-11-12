@@ -181,8 +181,12 @@ before anything is saved locally. Product sync uses this status to calculate
 VAT only for registered taxpayers; otherwise inclusive and exclusive prices
 remain equal.
 
-Successful activation turns on "Enable inline tax in purchase and sell"
-(`business.enable_inline_tax`) for the owning business.
+Successful activation sets "Enable inline tax in purchase and sell"
+(`business.enable_inline_tax`) to the taxpayer's normalized `isVATRegistered`
+status for the owning business: enabled when true and disabled when false,
+including on reactivation. The refreshed business session reflects this immediately.
+Latest-configuration sync applies the same rule and refreshes the current business
+session, even when the EIS configuration has not changed.
 
 A taxpayer trading name (matched by TIN or taxpayer identifier) belongs to only
 one ERP business account. Once any account has registered it, including on
