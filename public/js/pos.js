@@ -2575,7 +2575,8 @@ function calculate_line_subtotal(row, quantity) {
 function calculate_unit_price_inc_tax(row) {
     var unit_price = __read_number(row.find('input.pos_unit_price'));
     var tax_rate = Number(row.find('select.tax_id :selected').data('rate')) || 0;
-    return unit_price + __calculate_amount('percentage', tax_rate, unit_price);
+    var price_inc_tax = unit_price + __calculate_amount('percentage', tax_rate, unit_price);
+    return __number_uf(__number_f(price_inc_tax));
 }
 
 function get_unit_price_from_discounted_unit_price(row, discounted_unit_price) {
