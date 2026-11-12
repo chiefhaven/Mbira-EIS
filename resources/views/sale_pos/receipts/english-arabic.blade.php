@@ -194,11 +194,21 @@
                                         <td class="print-red" style="text-align: center;">{{ $receipt_details->taxable_amount }}</td>
                                         <td></td>
                                     </tr>
-                                    <tr>
-                                        <td style="font-weight: bold; text-align: right;">{{ $receipt_details->vat_total_label }}</td>
-                                        <td class="print-red" style="text-align: center;">{{$receipt_details->vat_amount}}</td>
-                                        <td style="font-weight: bold; direction: rtl; text-align: right;">ضريبة القيمة المضافة:</td>
-                                    </tr>
+                                    @if(!empty($receipt_details->vat_breakdown))
+                                        @foreach($receipt_details->vat_breakdown as $vat_rate)
+                                            <tr>
+                                                <td style="font-weight: bold; text-align: right;">{{ $vat_rate['label'] }}</td>
+                                                <td class="print-red" style="text-align: center;">{{ $vat_rate['amount'] }}</td>
+                                                <td style="font-weight: bold; direction: rtl; text-align: right;">ضريبة القيمة المضافة:</td>
+                                            </tr>
+                                        @endforeach
+                                    @else
+                                        <tr>
+                                            <td style="font-weight: bold; text-align: right;">{{ $receipt_details->vat_total_label }}</td>
+                                            <td class="print-red" style="text-align: center;">{{$receipt_details->vat_amount}}</td>
+                                            <td style="font-weight: bold; direction: rtl; text-align: right;">ضريبة القيمة المضافة:</td>
+                                        </tr>
+                                    @endif
                                 @endif
                                 <tr class="bg-net-amount">
                                     <td style="font-weight: bold; text-align: right;">{!! $receipt_details->total_label !!}</td>

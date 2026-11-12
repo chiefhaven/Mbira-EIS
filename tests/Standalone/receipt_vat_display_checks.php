@@ -24,9 +24,12 @@ function vatDisplayCheck(bool $condition, string $message): void
     if (!$condition) { throw new RuntimeException($message); }
     ++$checks;
 }
-function renderVatPartial(string $name, object $receipt_details): string
+function renderVatPartial(string $name, object $receipt_details, bool $table_rows = false): string
 {
     global $compiler, $root;
+    $__env = new Illuminate\View\Factory(new Illuminate\View\Engines\EngineResolver(),
+        new Illuminate\View\FileViewFinder(new Filesystem(), [$root.'\resources\views']),
+        new Illuminate\Events\Dispatcher());
     $compiled = $compiler->compileString(file_get_contents(
         $root.'\resources\views\sale_pos\receipts\partial\\'.$name.'.blade.php'
     ));
@@ -47,24 +50,44 @@ $invoice = ['invoiceLineItems' => [['total' => 500], ['total' => 8000]],
     'invoiceSummary' => ['invoiceTotal' => 8500, 'totalVAT' => 1265.96,
     'taxBreakDown' => [['rateId' => 'A', 'taxableAmount' => 7234.04, 'taxAmount' => 1265.96]]]];
 $details = $method->invoke($util, $invoice, $config);
-vatDisplayCheck($details === ['vat' => 1265.96, 'subtotal' => 8500.0, 'taxable_amount' => 7234.04, 'standard_rate' => '17.5'],
+vatDisplayCheck($details === ['vat' => 1265.96, 'subtotal' => 8500.0, 'taxable_amount' => 7234.04,
+    'standard_rate' => '17.5', 'vat_breakdown' => [['label' => 'VAT - A 17.5%', 'amount' => 1265.96]]],
     'Receipt subtotal sums gross lines and taxable amount subtracts VAT');
+$mixedRates = $invoice;
+$mixedRates['invoiceSummary']['totalVAT'] = 17.5;
+$mixedRates['invoiceSummary']['taxBreakDown'] = [
+    ['rateId' => 'A', 'taxableAmount' => 100, 'taxAmount' => 17.5],
+    ['rateId' => 'E', 'taxableAmount' => 150, 'taxAmount' => 0],
+];
+$mixedRateDetails = $method->invoke($util, $mixedRates, $config);
+vatDisplayCheck($mixedRateDetails['vat_breakdown'] === [
+    ['label' => 'VAT - A 17.5%', 'amount' => 17.5],
+    ['label' => 'VAT - E', 'amount' => 0.0],
+], 'Receipt shows standard and exempt VAT rates separately, including zero VAT');
+$mismatchedRates = $mixedRates;
+$mismatchedRates['invoiceSummary']['taxBreakDown'][0]['taxAmount'] = 1;
+try {
+    $method->invoke($util, $mismatchedRates, $config);
+    throw new RuntimeException('Mismatched VAT breakdown must not print');
+} catch (UnexpectedValueException $e) {
+    vatDisplayCheck(str_contains($e->getMessage(), 'breakdown'), 'Mismatched VAT breakdown requires synchronization');
+}
 foreach ([
-    [100, 0, [['rateId' => 'B', 'taxableAmount' => 100]], [100.0]],
-    [100, 0, [['rateId' => 'E', 'taxableAmount' => 100]], [100.0]],
+    [100, 0, [['rateId' => 'B', 'taxableAmount' => 100, 'taxAmount' => 0]], [100.0]],
+    [100, 0, [['rateId' => 'E', 'taxableAmount' => 100, 'taxAmount' => 0]], [100.0]],
     [0, 0, [], []],
     [357.5, 17.5, [
-        ['rateId' => 'A', 'taxableAmount' => 100],
-        ['rateId' => 'B', 'taxableAmount' => 90],
-        ['rateId' => 'E', 'taxableAmount' => 150],
+        ['rateId' => 'A', 'taxableAmount' => 100, 'taxAmount' => 17.5],
+        ['rateId' => 'B', 'taxableAmount' => 90, 'taxAmount' => 0],
+        ['rateId' => 'E', 'taxableAmount' => 150, 'taxAmount' => 0],
     ], [117.5, 90, 150]],
     [428.0, 28, [
-        ['rateId' => 'A', 'taxableAmount' => 120],
-        ['rateId' => 'C', 'taxableAmount' => 140],
-        ['rateId' => 'B', 'taxableAmount' => 90],
-        ['rateId' => 'E', 'taxableAmount' => 50],
+        ['rateId' => 'A', 'taxableAmount' => 120, 'taxAmount' => 21],
+        ['rateId' => 'C', 'taxableAmount' => 140, 'taxAmount' => 7],
+        ['rateId' => 'B', 'taxableAmount' => 90, 'taxAmount' => 0],
+        ['rateId' => 'E', 'taxableAmount' => 50, 'taxAmount' => 0],
     ], [141, 147, 90, 50]],
-    [0.01, 0, [['rateId' => 'A', 'taxableAmount' => 0.01]], [0.01]],
+    [0.01, 0, [['rateId' => 'A', 'taxableAmount' => 0.01, 'taxAmount' => 0]], [0.01]],
 ] as [$gross, $vat, $breakdown, $lineTotals]) {
     $result = $method->invoke($util, ['invoiceLineItems' => array_map(fn ($total) => ['total' => $total], $lineTotals),
         'invoiceSummary' => [
@@ -116,6 +139,21 @@ vatDisplayCheck(substr_count($html, 'class="width-50 text-right"') === 4
 vatDisplayCheck(str_contains($html, 'Taxable Amount') && str_contains($html, '7,234.04')
     && str_contains($html, 'VAT (17.5%):') && str_contains($html, '1,265.96'),
     'Receipt renders taxable amount and Total VAT followed by the standard rate');
+$receipt->vat_breakdown = [
+    ['label' => 'VAT - A 17.5%:', 'amount' => '17.50'],
+    ['label' => 'VAT - E:', 'amount' => '0.00'],
+];
+$breakdownHtml = renderVatPartial('vat_summary', $receipt);
+vatDisplayCheck(substr_count($breakdownHtml, 'receipt-total-vat"') === 2,
+    'Receipt prints one VAT row per configured rate');
+vatDisplayCheck(str_contains($breakdownHtml, 'VAT - A 17.5%:') && str_contains($breakdownHtml, '17.50')
+    && str_contains($breakdownHtml, 'VAT - E:') && str_contains($breakdownHtml, '0.00')
+    && !str_contains($breakdownHtml, 'VAT (17.5%):'),
+    'Receipt VAT breakdown renders rate labels and amounts instead of the aggregate row');
+$breakdownTableHtml = renderVatPartial('vat_summary', $receipt, true);
+vatDisplayCheck(substr_count($breakdownTableHtml, '<tr class="receipt-total-vat">') === 2
+    && str_contains($breakdownTableHtml, 'VAT - A 17.5%:') && str_contains($breakdownTableHtml, 'VAT - E:'),
+    'Table-style receipt renders one VAT row per rate');
 vatDisplayCheck(str_contains(renderVatPartial('vat_registered', $receipt), '***VAT Registered***'),
     'VAT registered fiscal receipt wraps the heading marker in literal asterisks');
 $receipt->vat_registered = false;
@@ -171,6 +209,10 @@ foreach (['classic', 'columnize-taxes', 'detailed', 'elegant', 'elegant_modified
         $name.' omits the invoice-level Subtotal row');
     vatDisplayCheck(str_contains($source, "partial.vat_summary") || str_contains($source, 'taxable_amount_label'),
         $name.' includes the fiscal tax summary');
+    if ($name === 'english-arabic') {
+        vatDisplayCheck(str_contains($source, '$receipt_details->vat_breakdown'),
+            'English-Arabic receipt supports VAT breakdown rows');
+    }
     $taxPosition = strpos($source, $name === 'english-arabic' ? 'taxable_amount_label' : 'partial.vat_summary');
     vatDisplayCheck($taxPosition < strpos($source, '$receipt_details->total_label'),
         $name.' shows taxable amount and VAT before the total');

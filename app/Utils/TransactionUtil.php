@@ -1608,6 +1608,15 @@ class TransactionUtil extends Util
             $output['subtotal_exc_tax'] = $output['subtotal'];
             $output['vat_amount'] = $this->num_f($fiscalTax['vat'], $show_currency, $business_details);
             $output['taxable_amount'] = $this->num_f($fiscalTax['taxable_amount'], $show_currency, $business_details);
+            if (! empty($fiscalTax['vat_breakdown'])) {
+                $output['vat_breakdown'] = [];
+                foreach ($fiscalTax['vat_breakdown'] as $vatRate) {
+                    $output['vat_breakdown'][] = [
+                        'label' => $vatRate['label'].':',
+                        'amount' => $this->num_f($vatRate['amount'], $show_currency, $business_details),
+                    ];
+                }
+            }
             if ($fiscalTax['standard_rate'] !== null) {
                 $output['vat_total_label'] .= ' ('.$fiscalTax['standard_rate'].'%)';
             }
@@ -2986,7 +2995,12 @@ class TransactionUtil extends Util
             throw new \UnexpectedValueException('The EIS invoice tax totals are unavailable. Synchronize the invoice before printing.');
         }
         $standardRate = null;
+        $taxRates = [];
         foreach ($configuration['globalConfiguration']['taxrates'] ?? [] as $rate) {
+            $rateId = $rate['id'] ?? null;
+            if (is_string($rateId) && $rateId !== '') {
+                $taxRates[strtolower($rateId)] = $rate;
+            }
             if (strcasecmp(trim($rate['name'] ?? ''), 'Standard Rated') !== 0) {
                 continue;
             }
@@ -2995,6 +3009,44 @@ class TransactionUtil extends Util
                 throw new \UnexpectedValueException('Refresh the EIS terminal configuration before printing the VAT rate.');
             }
             $standardRate = rtrim(rtrim(number_format((float) $rate['rate'], 4, '.', ''), '0'), '.');
+        }
+        $vatBreakdown = [];
+        $breakdownTotal = 0.0;
+        $taxBreakdown = $summary['taxBreakDown'] ?? [];
+        if (!is_array($taxBreakdown)) {
+            Log::error('EIS receipt fiscal VAT breakdown is invalid');
+            throw new \UnexpectedValueException('The EIS invoice VAT breakdown is invalid. Synchronize the invoice before printing.');
+        }
+        foreach ($taxBreakdown as $tax) {
+            $rateId = is_array($tax) ? ($tax['rateId'] ?? null) : null;
+            $taxAmount = is_array($tax) ? ($tax['taxAmount'] ?? null) : null;
+            if (!is_string($rateId) || trim($rateId) === '' || !is_numeric($taxAmount)
+                || !is_finite((float) $taxAmount) || $taxAmount < 0) {
+                Log::error('EIS receipt fiscal VAT breakdown contains an invalid rate');
+                throw new \UnexpectedValueException('The EIS invoice VAT breakdown is invalid. Synchronize the invoice before printing.');
+            }
+            $rateId = trim($rateId);
+            $configuredRate = $taxRates[strtolower($rateId)] ?? null;
+            $rate = $configuredRate['rate'] ?? null;
+            if ($configuredRate !== null && (!is_numeric($rate) || !is_finite((float) $rate) || $rate < 0)) {
+                Log::error('EIS receipt VAT breakdown references an invalid configured rate', ['rate_id' => $rateId]);
+                throw new \UnexpectedValueException('Refresh the EIS terminal configuration before printing the VAT breakdown.');
+            }
+            $label = 'VAT - '.$rateId;
+            if ($rate !== null && (float) $rate > 0) {
+                $formattedRate = rtrim(rtrim(number_format((float) $rate, 4, '.', ''), '0'), '.');
+                $label .= ' '.$formattedRate.'%';
+            }
+            $key = strtolower($rateId);
+            if (!isset($vatBreakdown[$key])) {
+                $vatBreakdown[$key] = ['label' => $label, 'amount' => 0.0];
+            }
+            $vatBreakdown[$key]['amount'] = round($vatBreakdown[$key]['amount'] + (float) $taxAmount, 2);
+            $breakdownTotal += (float) $taxAmount;
+        }
+        if ($taxBreakdown !== [] && round($breakdownTotal, 2) !== round((float) $vat, 2)) {
+            Log::error('EIS receipt VAT breakdown does not match the invoice VAT total');
+            throw new \UnexpectedValueException('The EIS invoice VAT breakdown does not match its VAT total. Synchronize the invoice before printing.');
         }
         $invoiceItems = $invoice['invoiceLineItems'] ?? null;
         if (!is_array($invoiceItems) || ($invoiceItems === [] && (float) $total > 0)) {
@@ -3017,7 +3069,7 @@ class TransactionUtil extends Util
         }
         return ['vat' => (float) $vat, 'subtotal' => round($itemsSubtotal, 2),
             'taxable_amount' => $taxableAmount,
-            'standard_rate' => $standardRate];
+            'standard_rate' => $standardRate, 'vat_breakdown' => array_values($vatBreakdown)];
     }
 
     public function getTotalLedgerDiscount($business_id, $start_date = null, $end_date = null)
