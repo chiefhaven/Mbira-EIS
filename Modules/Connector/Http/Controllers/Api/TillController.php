@@ -27,11 +27,18 @@ class TillController extends Controller
             ->get(['id', 'location_id', 'device_id']);
         $vatRegistrationByTerminal = EisConfiguration::where('business_id', $user->business_id)
             ->whereIn('eis_setting_id', $terminals->pluck('id'))
+            ->orderByDesc('id')
             ->get(['eis_setting_id', 'is_vat_registered'])
+            ->unique('eis_setting_id')
             ->keyBy('eis_setting_id');
         foreach ($terminals as $terminal) {
             $configuration = $vatRegistrationByTerminal->get($terminal->id);
-            $terminal->is_vat_registered = $configuration ? $configuration->is_vat_registered : null;
+            $rawVatStatus = $configuration
+                ? data_get($configuration->raw_response, 'data.taxpayerConfiguration.isVATRegistered')
+                : null;
+            $terminal->is_vat_registered = is_bool($rawVatStatus)
+                ? $rawVatStatus
+                : ($configuration ? $configuration->is_vat_registered : null);
         }
         return response()->json(['data' => ['tills' => $tills, 'terminals' => $terminals]]);
     }
