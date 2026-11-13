@@ -39,6 +39,33 @@ class TerminalBlockService
         }
     }
 
+    public function refreshStatus(EisSetting $setting): void
+    {
+        $setting = EisSetting::where('business_id', $setting->business_id)->findOrFail($setting->id);
+        if (trim((string) $setting->device_id) === '') {
+            throw new \InvalidArgumentException('Configure the selected terminal ID before checking its block status.');
+        }
+        $utilities = app(EisUtilitiesClient::class);
+        $payload = ['terminalId' => (string) $setting->device_id];
+        $result = $utilities->send($setting, 'get-terminal-blocking-message', $payload);
+        $data = $result['response']['data'] ?? null;
+        if ($result['outcome'] !== 'accepted' || !is_array($data) || !is_bool($data['isBlocked'] ?? null)) {
+            throw new \InvalidArgumentException('MRA terminal block status could not be confirmed. The saved block state has been retained.');
+        }
+        if ($data['isBlocked'] || !$setting->fresh()->is_blocked) {
+            return;
+        }
+
+        $result = $utilities->send($setting, 'check-terminal-unblock-status', $payload);
+        $data = $result['response']['data'] ?? null;
+        if ($result['outcome'] !== 'accepted' || !is_array($data) || !is_bool($data['isUnblocked'] ?? null)) {
+            throw new \InvalidArgumentException('MRA terminal unblock status could not be confirmed. The terminal remains blocked.');
+        }
+        if (!$data['isUnblocked']) {
+            Log::warning('EIS has not confirmed terminal unblock; retaining block', ['terminal_id' => $setting->id]);
+        }
+    }
+
     public function handleResponse(EisSetting $setting, array $response): void
     {
         if (!self::shouldBlock($response)) {

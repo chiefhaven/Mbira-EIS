@@ -1657,6 +1657,12 @@ class TransactionUtil extends Util
             $output['subtotal_exc_tax'] = $output['subtotal'];
             $output['vat_amount'] = $this->num_f($fiscalTax['vat'], $show_currency, $business_details);
             $output['taxable_amount'] = $this->num_f($fiscalTax['taxable_amount'], $show_currency, $business_details);
+            $output['total'] = $this->num_f($fiscalTax['invoice_total'], $show_currency, $business_details);
+            $output['total_unformatted'] = $fiscalTax['invoice_total'];
+            if (isset($output['total_in_words'])) {
+                $word_format = $il->common_settings['num_to_word_format'] ?? 'international';
+                $output['total_in_words'] = $this->numToWord($fiscalTax['invoice_total'], null, $word_format);
+            }
             if (! empty($fiscalTax['vat_breakdown'])) {
                 $output['vat_breakdown'] = [];
                 foreach ($fiscalTax['vat_breakdown'] as $vatRate) {
@@ -1892,7 +1898,6 @@ class TransactionUtil extends Util
             }
 
             if ($transaction->status == 'final') {
-
                 $qr_code_text = $transaction->eisSale->qr_code ?? 'Null';
                 Log::info('Transaction QR code generated', [
                     'transaction_id_present' => !empty($transaction->id),
@@ -3097,6 +3102,7 @@ class TransactionUtil extends Util
         }
         $vatBreakdown = [];
         $breakdownTotal = 0.0;
+        $taxableBreakdownTotal = 0.0;
         $taxBreakdown = $summary['taxBreakDown'] ?? [];
         if (!is_array($taxBreakdown)) {
             Log::error('EIS receipt fiscal VAT breakdown is invalid');
@@ -3105,8 +3111,10 @@ class TransactionUtil extends Util
         foreach ($taxBreakdown as $tax) {
             $rateId = is_array($tax) ? ($tax['rateId'] ?? null) : null;
             $taxAmount = is_array($tax) ? ($tax['taxAmount'] ?? null) : null;
+            $taxableRateAmount = is_array($tax) ? ($tax['taxableAmount'] ?? null) : null;
             if (!is_string($rateId) || trim($rateId) === '' || !is_numeric($taxAmount)
-                || !is_finite((float) $taxAmount) || $taxAmount < 0) {
+                || !is_finite((float) $taxAmount) || $taxAmount < 0
+                || !is_numeric($taxableRateAmount) || !is_finite((float) $taxableRateAmount) || $taxableRateAmount < 0) {
                 Log::error('EIS receipt fiscal VAT breakdown contains an invalid rate');
                 throw new \UnexpectedValueException('The EIS invoice VAT breakdown is invalid. Synchronize the invoice before printing.');
             }
@@ -3128,6 +3136,7 @@ class TransactionUtil extends Util
             }
             $vatBreakdown[$key]['amount'] = round($vatBreakdown[$key]['amount'] + (float) $taxAmount, 2);
             $breakdownTotal += (float) $taxAmount;
+            $taxableBreakdownTotal += (float) $taxableRateAmount;
         }
         if ($taxBreakdown !== [] && round($breakdownTotal, 2) !== round((float) $vat, 2)) {
             Log::error('EIS receipt VAT breakdown does not match the invoice VAT total');
@@ -3147,12 +3156,18 @@ class TransactionUtil extends Util
             }
             $itemsSubtotal += (float) $amount;
         }
-        $taxableAmount = round($itemsSubtotal - (float) $vat, 2);
+        $taxableAmount = $taxBreakdown !== []
+            ? round($taxableBreakdownTotal, 2)
+            : round($itemsSubtotal - (float) $vat, 2);
+        if ($taxBreakdown !== [] && abs(round($taxableAmount + (float) $vat, 2) - round($itemsSubtotal, 2)) > 0.02) {
+            Log::error('EIS receipt fiscal taxable breakdown does not match summed line subtotals');
+            throw new \UnexpectedValueException('The EIS invoice taxable breakdown does not match its line subtotals. Synchronize the invoice before printing.');
+        }
         if ($taxableAmount < 0) {
             Log::error('EIS receipt fiscal VAT exceeds summed line subtotals');
             throw new \UnexpectedValueException('The EIS invoice tax totals do not reconcile with line subtotals. Synchronize the invoice before printing.');
         }
-        return ['vat' => (float) $vat, 'subtotal' => round($itemsSubtotal, 2),
+        return ['vat' => (float) $vat, 'invoice_total' => (float) $total, 'subtotal' => round($itemsSubtotal, 2),
             'taxable_amount' => $taxableAmount,
             'standard_rate' => $standardRate, 'vat_breakdown' => array_values($vatBreakdown)];
     }

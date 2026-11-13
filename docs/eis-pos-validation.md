@@ -47,15 +47,26 @@ Blocked terminals cannot save local/offline fiscal transactions, restaurant
 bills/checkouts, or submit queued sales and stock/return operations. Terminal
 selection respects the original fiscal terminal, till assignment and location
 default; other terminals/businesses remain independent. Authorized locations'
-blocking messages appear in POS/business/restaurant pages and transaction errors.
-Open pages refresh the scoped local blocking messages every 15 seconds, including
-blocks received by background submission jobs; reasons are rendered as text.
+blocking messages appear as error toasts on POS/business/restaurant pages and in
+transaction errors. Open pages refresh the scoped local blocking messages every
+15 seconds, including blocks received by background submission jobs; reasons are
+escaped as plain text. Toasts use the normal notification timeout and appear on
+page load or changed block messages, not repeatedly on unchanged polls. Confirmed
+unblocking resets notification state so a later block displays a new toast.
 Existing invoices remain readable.
 
-False or missing invoice flags, configuration sync, and local activation do not
-clear a block. Use the existing `check-terminal-unblock-status` utility; only an
-accepted response with `data.isUnblocked: true` restores access. Run the new
-terminal-block-state migration before using this feature.
+Getting latest configuration also retrieves the selected terminal's blocking
+status and reason, including unchanged and forced syncs. The refresh runs outside
+the configuration save transaction. A confirmed block is persisted and picked up
+by the toast polling. If MRA reports no block for a locally blocked terminal, an
+explicit `check-terminal-unblock-status` request must confirm `data.isUnblocked:
+true` before clearing the block and reason. Other terminals are unchanged.
+Unavailable, rejected or malformed status responses report a configuration-refresh
+error and retain the saved block state; configuration changes may already be saved.
+
+False or missing invoice flags and local activation do not clear a block. Only
+an accepted MRA unblock confirmation restores access. Run the new terminal-block-state
+migration before using this feature.
 
 `php tests/Standalone/eis_submission_retry_checks.php` verifies blocking,
 reason retrieval, terminal isolation, offline guards and explicit unblocking
@@ -114,6 +125,16 @@ This reports the quantity-aware, discounted fiscal VAT without changing saved
 sales, receipts, ERP transaction dates, or EIS records. Incomplete submission date
 or VAT data raises an explicit error requiring invoice synchronization.
 Run `php tests/Standalone/dashboard_fiscal_vat_checks.php` for isolated checks.
+
+## Fiscal receipt database values
+
+EIS receipt fiscal totals are rendered server-side from the saved invoice payload.
+VAT and taxable amounts use the persisted per-rate `invoiceSummary.taxBreakDown`;
+their totals must reconcile with `invoiceSummary.totalVAT` and the summed
+`invoiceLineItems[].total` before printing. The printed Total and amount-in-words
+use the saved `invoiceSummary.invoiceTotal`. Recorded transaction payments
+remain the source for payment rows. Non-EIS receipt calculations are unchanged.
+Run `php tests/Standalone/receipt_vat_display_checks.php` for isolated checks.
 
 ## Fiscal receipt address
 

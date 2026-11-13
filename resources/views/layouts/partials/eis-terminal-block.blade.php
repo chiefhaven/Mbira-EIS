@@ -3,18 +3,25 @@
     if (auth()->check() && \Illuminate\Support\Facades\Schema::hasTable('eis_settings')) {
         $blockedTerminals = \Modules\EIS\Services\Terminal\TerminalBlockService::visibleTo(auth()->user());
     }
+    $blockedTerminals = $blockedTerminals->map(fn ($terminal) => [
+        'device_id' => $terminal->device_id,
+        'message' => $terminal->blocking_reason
+            ?: \Modules\EIS\Services\Terminal\TerminalBlockService::DEFAULT_REASON,
+    ])->values();
 @endphp
-<div id="eis-terminal-block-notices">
-@foreach ($blockedTerminals as $blockedTerminal)
-    <div class="alert alert-danger no-print" role="alert">
-        <strong>EIS terminal {{ $blockedTerminal->device_id }} blocked.</strong>
-        {{ $blockedTerminal->blocking_reason ?: \Modules\EIS\Services\Terminal\TerminalBlockService::DEFAULT_REASON }}
-    </div>
-@endforeach
-</div>
 <script>
 window.addEventListener('load', function () {
-    var notices = document.getElementById('eis-terminal-block-notices');
+    var lastMessage = '';
+    function showBlockedTerminals(terminals) {
+        var message = terminals.map(function (terminal) {
+            return 'EIS terminal ' + terminal.device_id + ' blocked. ' + terminal.message;
+        }).join('\n\n');
+        if (message && message !== lastMessage) {
+            toastr.error(message, 'EIS terminal blocked', {escapeHtml: true});
+        }
+        lastMessage = message;
+    }
+    showBlockedTerminals(@json($blockedTerminals));
     var pending = false;
     var timer = window.setInterval(function () {
         if (document.hidden || pending) {
@@ -35,14 +42,7 @@ window.addEventListener('load', function () {
                 if (!Array.isArray(data.terminals)) {
                     throw new Error('Invalid EIS terminal block status.');
                 }
-                var alerts = data.terminals.map(function (terminal) {
-                    var alert = document.createElement('div');
-                    alert.className = 'alert alert-danger no-print';
-                    alert.setAttribute('role', 'alert');
-                    alert.textContent = 'EIS terminal ' + terminal.device_id + ' blocked. ' + terminal.message;
-                    return alert;
-                });
-                notices.replaceChildren.apply(notices, alerts);
+                showBlockedTerminals(data.terminals);
             })
             .catch(function (error) {
                 console.warn(error.message);

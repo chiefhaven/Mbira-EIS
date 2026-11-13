@@ -712,6 +712,29 @@ DB::table('eis_configurations')->where('id', 2)->update([
 ]);
 $configurationValidator = Mockery::mock(Modules\EIS\Services\Configuration\Validators\ConfigurationValidator::class);
 $configurationValidator->shouldReceive('validate')->times(8)->andReturnNull();
+(require dirname(__DIR__, 2).'\Modules\EIS\Database\Migrations\2026_11_12_000000_add_terminal_block_state_to_eis_settings.php')->up();
+$blockStatusReply = ['statusCode' => 1, 'data' => ['isBlocked' => false]];
+$unblockStatusReply = ['statusCode' => 1, 'data' => ['isUnblocked' => true]];
+$utilityHttpStatus = 200;
+$utilityDisconnected = false;
+$http = new Illuminate\Http\Client\Factory();
+$http->preventStrayRequests();
+Illuminate\Support\Facades\Http::swap($http);
+$http->fake(function ($request) use (&$blockStatusReply, &$unblockStatusReply, &$utilityHttpStatus, &$utilityDisconnected) {
+    locationCheck(DB::transactionLevel() === 0, 'Configuration block checks run outside the configuration save transaction');
+    locationCheck($request->method() === 'POST' && $request->data() === ['terminalId' => 'B1']
+        && $request->hasHeader('Authorization', 'Bearer token2'),
+        'Configuration block checks use only the selected terminal identity and credentials');
+    if ($utilityDisconnected) {
+        throw new Illuminate\Http\Client\ConnectionException('Fixture block status unavailable');
+    }
+    $body = match ($request->url()) {
+        'https://eis.invalid/api/v1/utilities/get-terminal-blocking-message' => $blockStatusReply,
+        'https://eis.invalid/api/v1/utilities/check-terminal-unblock-status' => $unblockStatusReply,
+        default => throw new RuntimeException('Unexpected configuration status request'),
+    };
+    return Illuminate\Support\Facades\Http::response($body, $utilityHttpStatus);
+});
 $configService = new class($configurationClient, $configurationValidator)
     extends Modules\EIS\Services\Configuration\ConfigurationSyncService {
     public array $productSyncRequests = [];
@@ -723,10 +746,34 @@ $configService = new class($configurationClient, $configurationValidator)
 };
 DB::table('eis_settings')->where('id', 7)->update(['jwt_token' => 'token2']);
 locationCheck($configService->sync(1, 'token2', false, 2)->id === 2, 'Latest configuration uses explicit terminal selection even when JWTs are shared');
+$blockStatusReply = ['statusCode' => 1, 'data' => ['isBlocked' => true, 'blockingReason' => 'Configuration fixture: contact MRA.']];
+$productSyncCount = count($configService->productSyncRequests);
+$configService->sync(1, 'token2', false, 2);
+locationCheck(TerminalContext::settings(1, null, 2)->is_blocked
+    && TerminalContext::settings(1, null, 2)->blocking_reason === 'Configuration fixture: contact MRA.'
+    && !TerminalContext::settings(1, null, 1)->is_blocked && !TerminalContext::settings(1, null, 7)->is_blocked
+    && count($configService->productSyncRequests) === $productSyncCount,
+    'Unchanged latest configuration updates the selected block and reason without affecting sibling terminals or resyncing products');
+$blockStatusReply = ['statusCode' => 1, 'data' => ['isBlocked' => false]];
+$unblockStatusReply = ['statusCode' => 1, 'data' => ['isUnblocked' => false]];
+$configService->sync(1, 'token2', false, 2);
+locationCheck(TerminalContext::settings(1, null, 2)->is_blocked
+    && TerminalContext::settings(1, null, 2)->blocking_reason === 'Configuration fixture: contact MRA.',
+    'A no-block message alone cannot clear a block without MRA unblock confirmation');
+$unblockStatusReply = ['statusCode' => 1, 'data' => ['isUnblocked' => true]];
+$configService->sync(1, 'token2', false, 2);
+locationCheck(!TerminalContext::settings(1, null, 2)->is_blocked
+    && TerminalContext::settings(1, null, 2)->blocking_reason === null,
+    'Unchanged configuration clears block and reason only after an explicit MRA unblock confirmation');
 $otherLocations = DB::table('business_locations')->where('id', '!=', 2)->orderBy('id')->get()->toJson();
 $configurationClient->data->terminalConfiguration->terminalSite->siteName = 'Renamed EIS site';
 $productSyncCount = count($configService->productSyncRequests);
+$blockStatusReply = ['statusCode' => 1, 'data' => ['isBlocked' => true, 'blockingReason' => 'Changed configuration blocked.']];
 $renamed = $configService->sync(1, 'token2', false, 2);
+locationCheck(TerminalContext::settings(1, null, 2)->is_blocked
+    && TerminalContext::settings(1, null, 2)->blocking_reason === 'Changed configuration blocked.',
+    'Changed configuration also refreshes terminal block state');
+$blockStatusReply = ['statusCode' => 1, 'data' => ['isBlocked' => false]];
 locationCheck(count($configService->productSyncRequests) === $productSyncCount + 1
     && end($configService->productSyncRequests) === [1, 2],
     'Unversioned configuration changes schedule product resync for the selected terminal');
@@ -858,6 +905,57 @@ try {
         'Foreign latest-configuration site is rejected before any ownership changes');
 }
 DB::table('eis_settings')->where('id', 7)->update(['jwt_token' => 'token7']);
+$configurationClient->data->terminalConfiguration->terminalSite->siteId = 'B';
+$blockStatusReply = ['statusCode' => 1, 'data' => ['isBlocked' => true, 'blockingReason' => 'Latest lookup blocked.']];
+$latest = $configService->getLatestConfig(['business_id' => 1, 'jwt_token' => 'token2']);
+locationCheck($latest['success'] && TerminalContext::settings(1, null, 2)->is_blocked
+    && TerminalContext::settings(1, null, 2)->blocking_reason === 'Latest lookup blocked.',
+    'Read-only latest configuration retrieval also refreshes persisted block status');
+$otherTerminals = DB::table('eis_settings')->where('id', '!=', 2)->orderBy('id')->get()->toJson();
+foreach ([
+    [200, ['statusCode' => 1, 'data' => ['isBlocked' => 'false']]],
+    [200, ['statusCode' => 0, 'errors' => ['Rejected'], 'data' => ['isBlocked' => false]]],
+    [503, ['statusCode' => 1, 'data' => ['isBlocked' => false]]],
+] as [$utilityHttpStatus, $blockStatusReply]) {
+    try {
+        $configService->sync(1, 'token2', false, 2);
+        throw new RuntimeException('Unavailable block status must not be reported as successful refresh');
+    } catch (Modules\EIS\Exceptions\SyncException $exception) {
+        locationCheck(str_contains($exception->getMessage(), 'block status could not be confirmed')
+            && TerminalContext::settings(1, null, 2)->is_blocked
+            && TerminalContext::settings(1, null, 2)->blocking_reason === 'Latest lookup blocked.',
+            'Rejected, malformed or unavailable block lookup fails explicitly and retains the saved block and reason');
+    }
+}
+$utilityHttpStatus = 200;
+$blockStatusReply = ['statusCode' => 1, 'data' => ['isBlocked' => 'false']];
+$latest = $configService->getLatestConfig(['business_id' => 1, 'jwt_token' => 'token2']);
+locationCheck(!$latest['success'] && str_contains($latest['message'], 'block status could not be confirmed')
+    && TerminalContext::settings(1, null, 2)->is_blocked,
+    'Read-only retrieval reports failed status refresh instead of silently accepting stale block state');
+$blockStatusReply = ['statusCode' => 1, 'data' => ['isBlocked' => false]];
+$unblockStatusReply = ['statusCode' => 1, 'data' => ['isUnblocked' => 'true']];
+try {
+    $configService->sync(1, 'token2', false, 2);
+    throw new RuntimeException('Malformed unblock confirmation accepted');
+} catch (Modules\EIS\Exceptions\SyncException $exception) {
+    locationCheck(str_contains($exception->getMessage(), 'unblock status could not be confirmed')
+        && TerminalContext::settings(1, null, 2)->is_blocked,
+        'Malformed explicit unblock confirmation cannot restore transaction access');
+}
+$utilityDisconnected = true;
+try {
+    $configService->sync(1, 'token2', false, 2);
+    throw new RuntimeException('Disconnected block status accepted');
+} catch (Modules\EIS\Exceptions\SyncException $exception) {
+    locationCheck(TerminalContext::settings(1, null, 2)->is_blocked,
+        'Connection failure during block refresh retains the existing block');
+}
+$utilityDisconnected = false;
+locationCheck(DB::table('eis_settings')->where('id', '!=', 2)->orderBy('id')->get()->toJson() === $otherTerminals,
+    'Block refresh failures cannot change other terminals or tenants');
+$unblockStatusReply = ['statusCode' => 1, 'data' => ['isUnblocked' => true]];
+$configService->sync(1, 'token2', false, 2);
 
 // Every account, including an administrator, is constrained by permitted locations.
 $user = new class extends App\User {

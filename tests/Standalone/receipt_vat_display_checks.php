@@ -50,10 +50,22 @@ $invoice = ['invoiceLineItems' => [['total' => 500], ['total' => 8000]],
     'invoiceSummary' => ['invoiceTotal' => 8500, 'totalVAT' => 1265.96,
     'taxBreakDown' => [['rateId' => 'A', 'taxableAmount' => 7234.04, 'taxAmount' => 1265.96]]]];
 $details = $method->invoke($util, $invoice, $config);
-vatDisplayCheck($details === ['vat' => 1265.96, 'subtotal' => 8500.0, 'taxable_amount' => 7234.04,
-    'standard_rate' => '17.5', 'vat_breakdown' => [['label' => 'VAT - A 17.5%', 'amount' => 1265.96]]],
-    'Receipt subtotal sums gross lines and taxable amount subtracts VAT');
+vatDisplayCheck($details === ['vat' => 1265.96, 'invoice_total' => 8500.0, 'subtotal' => 8500.0,
+    'taxable_amount' => 7234.04, 'standard_rate' => '17.5',
+    'vat_breakdown' => [['label' => 'VAT - A 17.5%', 'amount' => 1265.96]]],
+    'Receipt reads invoice total, VAT and taxable amount from saved fiscal totals and breakdown');
+$inclusive20k = $method->invoke($util, [
+    'invoiceLineItems' => [['total' => 20000]],
+    'invoiceSummary' => ['invoiceTotal' => 20000, 'totalVAT' => 2978.72,
+        'taxBreakDown' => [['rateId' => 'A', 'taxableAmount' => 17021.28, 'taxAmount' => 2978.72]]],
+], $config);
+vatDisplayCheck($inclusive20k['invoice_total'] === 20000.0
+    && $inclusive20k['subtotal'] === 20000.0
+    && $inclusive20k['taxable_amount'] === 17021.28
+    && $inclusive20k['vat'] === 2978.72,
+    'A 20,000 VAT-inclusive receipt prints the saved 17.5% fiscal total and database breakdown amounts');
 $mixedRates = $invoice;
+$mixedRates['invoiceLineItems'] = [['total' => 117.5], ['total' => 150]];
 $mixedRates['invoiceSummary']['totalVAT'] = 17.5;
 $mixedRates['invoiceSummary']['taxBreakDown'] = [
     ['rateId' => 'A', 'taxableAmount' => 100, 'taxAmount' => 17.5],
@@ -71,6 +83,20 @@ try {
     throw new RuntimeException('Mismatched VAT breakdown must not print');
 } catch (UnexpectedValueException $e) {
     vatDisplayCheck(str_contains($e->getMessage(), 'breakdown'), 'Mismatched VAT breakdown requires synchronization');
+}
+foreach ([
+    ['rateId' => 'A', 'taxableAmount' => 100, 'taxAmount' => 17.5],
+    ['rateId' => 'A', 'taxableAmount' => 'invalid', 'taxAmount' => 17.5],
+] as $breakdown) {
+    $invalidBreakdown = $invoice;
+    $invalidBreakdown['invoiceSummary']['taxBreakDown'] = [$breakdown];
+    try {
+        $method->invoke($util, $invalidBreakdown, $config);
+        throw new RuntimeException('Invalid or non-reconciling saved taxable breakdown must not print');
+    } catch (UnexpectedValueException $e) {
+        vatDisplayCheck(str_contains($e->getMessage(), 'breakdown') || str_contains($e->getMessage(), 'Synchronize'),
+            'Invalid fiscal taxable amounts require synchronization');
+    }
 }
 foreach ([
     [100, 0, [['rateId' => 'B', 'taxableAmount' => 100, 'taxAmount' => 0]], [100.0]],
@@ -125,9 +151,10 @@ vatDisplayCheck($unknownDetails['taxable_amount'] === 7234.04,
     'Taxable Amount subtracts VAT without filtering tax rates');
 $invoice0043 = ['invoiceLineItems' => [['total' => 500], ['total' => 45000]],
     'invoiceSummary' => ['invoiceTotal' => 45500, 'totalVAT' => 74.47]];
+$invoice0043['invoiceSummary']['taxBreakDown'] = [['rateId' => 'A', 'taxableAmount' => 45425.53, 'taxAmount' => 74.47]];
 $details0043 = $method->invoke($util, $invoice0043, []);
 vatDisplayCheck($details0043['subtotal'] === 45500.0 && $details0043['taxable_amount'] === 45425.53,
-    'Invoice 0043 subtotal is 500 plus 45,000 and taxable amount subtracts K74.47 VAT');
+    'Invoice 0043 reads the persisted taxable amount alongside its saved subtotal and VAT');
 $receipt = (object) ['eis_invoice_number' => 'TEST', 'vat_registered' => true,
     'vat_registered_label' => 'VAT Registered', 'taxable_amount_label' => 'Taxable Amount:',
     'taxable_amount' => '7,234.04', 'vat_total_label' => 'VAT (17.5%):', 'vat_amount' => '1,265.96'];

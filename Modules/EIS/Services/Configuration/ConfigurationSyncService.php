@@ -16,6 +16,7 @@ use Modules\EIS\Models\EisTerminalSite;
 use Modules\EIS\Services\Configuration\EISConfigurationResponse;
 use Modules\EIS\Services\Configuration\Validators\ConfigurationValidator;
 use Modules\EIS\Services\EisSubscriptionAccess;
+use Modules\EIS\Services\Terminal\TerminalBlockService;
 
 class ConfigurationSyncService
 {
@@ -174,6 +175,9 @@ class ConfigurationSyncService
             if (app()->bound('session') && (int) session('business.id') === $businessId) {
                 session(['business' => \App\Business::findOrFail($businessId)]);
             }
+            app(TerminalBlockService::class)->refreshStatus(
+                \Modules\EIS\Services\Terminal\TerminalContext::settings($businessId, null, (int) $configuration->eis_setting_id)
+            );
 
             return $configuration;
         } catch (SyncException $e) {
@@ -242,6 +246,7 @@ class ConfigurationSyncService
             }
 
             \Modules\EIS\Services\Terminal\TerminalContext::assertConfiguration($terminalSettings, $response->getData());
+            app(TerminalBlockService::class)->refreshStatus($terminalSettings);
             return [
                 'success' => true,
                 'message' => 'Latest configuration retrieved successfully',
