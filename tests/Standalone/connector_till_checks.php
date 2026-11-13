@@ -65,6 +65,28 @@ tillReject(fn () => $controller->store(tillRequest(['name' => 'Cashier', 'locati
     'Cashiers cannot create or reassign named tills');
 locationCheck(count($controller->index(tillRequest())->getData(true)['data']['tills']) === 1,
     'Cashier can resolve permitted existing tills without settings permission');
+$originalConfiguration = DB::table('eis_configurations')->where('eis_setting_id', 1)->first();
+DB::table('eis_configurations')->where('eis_setting_id', 1)->update([
+    'is_vat_registered' => false,
+    'tax_office_code' => 'OFFICE-1',
+    'raw_response' => json_encode(['data' => ['taxpayerConfiguration' => [
+        'isVATRegistered' => true, 'taxOffice' => ['name' => ' Central office '],
+    ]]]),
+]);
+$terminal = collect($controller->index(tillRequest())->getData(true)['data']['terminals'])->firstWhere('id', 1);
+locationCheck($terminal['tax_office'] === 'Central office' && $terminal['is_vat_registered'] === true,
+    'Terminal response uses taxpayer tax office and VAT status from its configuration');
+DB::table('eis_configurations')->where('eis_setting_id', 1)->update([
+    'raw_response' => json_encode(['data' => ['taxpayerConfiguration' => ['taxOffice' => ['name' => ' ']]]]),
+]);
+$terminal = collect($controller->index(tillRequest())->getData(true)['data']['terminals'])->firstWhere('id', 1);
+locationCheck($terminal['tax_office'] === 'OFFICE-1' && $terminal['is_vat_registered'] === false,
+    'Terminal response falls back to stored tax office code and VAT status');
+DB::table('eis_configurations')->where('eis_setting_id', 1)->update([
+    'is_vat_registered' => $originalConfiguration->is_vat_registered,
+    'tax_office_code' => $originalConfiguration->tax_office_code,
+    'raw_response' => $originalConfiguration->raw_response,
+]);
 $middleware = new ConnectorTill();
 $request = tillRequest(['sells' => [['location_id' => 1]]], (string) $tillId);
 locationCheck($middleware->handle($request, fn ($r) => $r->attributes->get('connector_till_id')) === $tillId,

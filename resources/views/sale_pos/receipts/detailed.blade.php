@@ -256,6 +256,9 @@
 
                                 @if (!empty($receipt_details->tax_info1))
                                     <br />{{ $receipt_details->tax_label1 }} {{ $receipt_details->tax_info1 }}
+                                    @if (!empty($receipt_details->tax_office_name))
+                                        <br />{{ $receipt_details->tax_office_name }}
+                                    @endif
                                 @endif
 
                                 @if (!empty($receipt_details->tax_info2))
@@ -583,9 +586,14 @@
                                     src="data:image/png;base64,{{ DNS1D::getBarcodePNG($receipt_details->invoice_no, 'C128', 2, 30, [39, 48, 54], true) }}">
                             @endif
 
-                            @if ($receipt_details->show_qr_code && !empty($receipt_details->qr_code_text))
-                                <img class="center-block mt-5"
-                                    src="data:image/png;base64,{{ DNS2D::getBarcodePNG($receipt_details->qr_code_text, 'QRCODE', 3, 3, [39, 48, 54]) }}">
+                            @if ($receipt_details->show_qr_code && (!empty($receipt_details->qr_code_text) || !empty($receipt_details->qr_code_is_offline)))
+                                @if (!empty($receipt_details->qr_code_text))
+                                    <img class="center-block mt-5"
+                                        src="data:image/png;base64,{{ DNS2D::getBarcodePNG($receipt_details->qr_code_text, 'QRCODE', 3, 3, [39, 48, 54]) }}">
+                                @endif
+                                @if (!empty($receipt_details->qr_code_is_offline))
+                                    <div class="center-block mt-2">***Offline***</div>
+                                @endif
                             @endif
                         </div>
                     @endif

@@ -1086,6 +1086,7 @@ class TransactionUtil extends Util
         $is_eis_receipt = $transaction->payment_status === 'paid' && $transaction->eisSale
             && ! empty($transaction->eisSale->eis_invoice_number);
         $eis_trading_name = null;
+        $eis_tax_office = null;
         $eis_address_lines = null;
         $eis_configuration = [];
         $eis_vat_registration = null;
@@ -1108,6 +1109,9 @@ class TransactionUtil extends Util
                     $eis_response = json_decode($eis_response, true);
                 }
                 $eis_configuration = $eis_response['data'] ?? [];
+                $tax_office_name = $eis_configuration['taxpayerConfiguration']['taxOffice']['name'] ?? null;
+                $eis_tax_office = is_string($tax_office_name) && trim($tax_office_name) !== ''
+                    ? trim($tax_office_name) : null;
                 $eis_vat_registration = $eis_terminal->is_vat_registered;
             }
         }
@@ -1143,6 +1147,7 @@ class TransactionUtil extends Util
             : (in_array($vat_registration, [false, 0, '0', 'false'], true) ? false : null);
         $output['vat_registered_label'] = $output['vat_registered'] === false
             ? __('sale.not_vat_registered') : __('sale.vat_registered');
+        $output['tax_office_name'] = $is_eis_receipt ? $eis_tax_office : null;
         $output['taxable_amount_label'] = __('sale.taxable_amount').':';
         $output['vat_total_label'] = __('sale.vat');
 
@@ -1841,6 +1846,8 @@ class TransactionUtil extends Util
         if (in_array($transaction_type, ['sell', 'sales_order'])) {
             //Qr code related information.
             $output['show_qr_code'] = ! empty($il->show_qr_code) ? true : false;
+            $output['qr_code_is_offline'] = $transaction->eisSale
+                && $transaction->eisSale->status === 'failed';
 
             $zatca_qr = ! empty($il->common_settings['zatca_qr']) ? true : false;
 
@@ -1898,10 +1905,11 @@ class TransactionUtil extends Util
             }
 
             if ($transaction->status == 'final') {
-                $qr_code_text = $transaction->eisSale->qr_code ?? 'Null';
+                $qr_code_text = $transaction->eisSale->qr_code
+                    ?? ($output['qr_code_is_offline'] ? null : 'Null');
                 Log::info('Transaction QR code generated', [
                     'transaction_id_present' => !empty($transaction->id),
-                    'qr_code_present' => $qr_code_text !== 'Null',
+                    'qr_code_present' => ! empty($qr_code_text),
                 ]);
                 $output['qr_code_text'] = $qr_code_text;
             }

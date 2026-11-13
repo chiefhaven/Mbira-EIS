@@ -99,6 +99,9 @@
                     <td class="print-red" style="padding: 5px;">
                         @if(!empty($receipt_details->tax_info1))
                             {{$receipt_details->tax_info1}}
+                            @if(!empty($receipt_details->tax_office_name))
+                                <br>{{$receipt_details->tax_office_name}}
+                            @endif
                         @endif
                     </td>
                     <td style="padding: 5px; font-weight: bold;  direction: rtl; text-align: left !important;">الرقم الضريبي:</td>
@@ -257,8 +260,13 @@
         </div>
     </div>
     <div class="col-xs-3 text-center">
-        @if($receipt_details->show_qr_code && !empty($receipt_details->qr_code_text))
-            <img class="center-block" style="margin: 0 auto; width: 180px; height: 180px;" src="data:image/png;base64,{{DNS2D::getBarcodePNG($receipt_details->qr_code_text, 'QRCODE', 4, 4)}}" alt="QR Code">
+        @if($receipt_details->show_qr_code && (!empty($receipt_details->qr_code_text) || !empty($receipt_details->qr_code_is_offline)))
+            @if(!empty($receipt_details->qr_code_text))
+                <img class="center-block" style="margin: 0 auto; width: 180px; height: 180px;" src="data:image/png;base64,{{DNS2D::getBarcodePNG($receipt_details->qr_code_text, 'QRCODE', 4, 4)}}" alt="QR Code">
+            @endif
+            @if(!empty($receipt_details->qr_code_is_offline))
+                <div class="center-block mt-2">***Offline***</div>
+            @endif
         @endif
     </div>
 </div>

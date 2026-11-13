@@ -44,6 +44,9 @@
 
 				@if(!empty($receipt_details->tax_info1))
 					<br/>{{ $receipt_details->tax_label1 }} {{ $receipt_details->tax_info1 }}
+					@if(!empty($receipt_details->tax_office_name))
+						<br/>{{ $receipt_details->tax_office_name }}
+					@endif
 				@endif
 
 				@if(!empty($receipt_details->tax_info2))

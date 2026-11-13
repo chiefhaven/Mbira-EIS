@@ -288,7 +288,7 @@ class SellController extends ApiController
 
         $filters = request()->only(['location_id', 'contact_id', 'payment_status', 'start_date', 'end_date', 'user_id', 'service_staff_id', 'only_subscriptions', 'per_page', 'shipping_status', 'order_by_date', 'source', 'status']);
 
-        $with = ['sell_lines', 'payment_lines', 'contact', 'eisSale:id,transaction_id,receipt_number,qr_code,request_payload'];
+        $with = ['sell_lines', 'payment_lines', 'contact', 'eisSale:id,transaction_id,receipt_number,qr_code,request_payload,status,eis_setting_id'];
         $query = Transaction::where('business_id', $business_id)
                             ->where('type', 'sell');
 
@@ -640,7 +640,7 @@ class SellController extends ApiController
         $query = Transaction::where('business_id', $business_id)
                         ->whereIn('id', $sell_ids);
 
-        $with = ['sell_lines', 'payment_lines', 'contact', 'eisSale:id,transaction_id,receipt_number,qr_code,request_payload'];
+        $with = ['sell_lines', 'payment_lines', 'contact', 'eisSale:id,transaction_id,receipt_number,qr_code,request_payload,status,eis_setting_id'];
 
         if (! empty(request()->input('send_purchase_details')) && request()->input('send_purchase_details') == 1) {
             $with[] = 'sell_lines.sell_line_purchase_lines';

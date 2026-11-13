@@ -135,6 +135,11 @@ their totals must reconcile with `invoiceSummary.totalVAT` and the summed
 use the saved `invoiceSummary.invoiceTotal`. Recorded transaction payments
 remain the source for payment rows. Non-EIS receipt calculations are unchanged.
 Run `php tests/Standalone/receipt_vat_display_checks.php` for isolated checks.
+EIS receipt Tax Office is read from the original sale configuration's saved
+`taxpayerConfiguration.taxOffice.name` and shown below the seller TIN.
+If the saved EIS sale status is `failed`, supported sale receipt layouts retain
+any saved QR code and print `***Offline***` immediately below it. A missing QR
+is omitted rather than replaced with a placeholder QR.
 
 ## Fiscal receipt address
 

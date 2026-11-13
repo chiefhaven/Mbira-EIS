@@ -31,6 +31,8 @@ foreach (['paid', 'partial', 'due'] as $paymentStatus) {
         $tracking = new EisSale([
             'receipt_number' => $receiptNumber,
             'qr_code' => 'https://example.invalid/verify',
+            'status' => 'failed',
+            'eis_setting_id' => 17,
             'request_payload' => ['invoiceHeader' => ['invoiceNumber' => 'EIS-INVOICE-DIFFERENT']],
         ]);
         $transaction = new Transaction();
@@ -45,11 +47,13 @@ foreach (['paid', 'partial', 'due'] as $paymentStatus) {
         checkConnectorReceipt($data['eis_sale']['eis_invoice_number'] === 'EIS-INVOICE-DIFFERENT', 'Receipt and submitted invoice identities remain distinct');
         checkConnectorReceipt(! array_key_exists('request_payload', $data['eis_sale']), 'Fiscal payload remains private');
         checkConnectorReceipt($data['eis_sale']['qr_code'] === 'https://example.invalid/verify', 'QR preserved');
+        checkConnectorReceipt($data['eis_sale']['status'] === 'failed' && $data['eis_sale']['eis_setting_id'] === 17,
+            'Fiscal status and recorded terminal are included');
         checkConnectorReceipt($data['invoice_no'] === 'POS-100', 'POS invoice number preserved');
     }
 }
 $controllerSource = file_get_contents(dirname(__DIR__, 2).'/Modules/Connector/Http/Controllers/Api/SellController.php');
-checkConnectorReceipt(substr_count($controllerSource, 'eisSale:id,transaction_id,receipt_number,qr_code,request_payload') === 2,
-    'Sale list and detail eager-loading both include receipt_number');
+checkConnectorReceipt(substr_count($controllerSource, 'eisSale:id,transaction_id,receipt_number,qr_code,request_payload,status,eis_setting_id') === 2,
+    'Sale list and detail eager-loading both include status and terminal');
 Mockery::close();
 echo "PASS: {$checks} Connector EIS receipt checks (no database or printer).\n";

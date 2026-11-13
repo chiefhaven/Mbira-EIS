@@ -244,9 +244,77 @@ foreach (['classic', 'columnize-taxes', 'detailed', 'elegant', 'elegant_modified
         vatDisplayCheck(str_contains($source, '$receipt_details->vat_breakdown'),
             'English-Arabic receipt supports VAT breakdown rows');
     }
+    if ($name !== 'elegant_modified') {
+        $qrPosition = strpos($source, 'DNS2D::getBarcodePNG');
+        $offlinePosition = strpos($source, '***Offline***');
+        vatDisplayCheck(str_contains($source, '$receipt_details->qr_code_is_offline')
+            && $qrPosition !== false && $offlinePosition > $qrPosition,
+            $name.' prints the offline marker below the QR code');
+    }
     $taxPosition = strpos($source, $name === 'english-arabic' ? 'taxable_amount_label' : 'partial.vat_summary');
     vatDisplayCheck($taxPosition < strpos($source, '$receipt_details->total_label'),
         $name.' shows taxable amount and VAT before the total');
+}
+$transactionUtilSource = file_get_contents($root.'\app\Utils\TransactionUtil.php');
+$offlineFlagStart = strpos($transactionUtilSource, "\$output['qr_code_is_offline'] =");
+$offlineFlagEnd = strpos($transactionUtilSource, ';', $offlineFlagStart);
+$offlineFlagBlock = substr($transactionUtilSource, $offlineFlagStart, $offlineFlagEnd - $offlineFlagStart + 1);
+foreach (['failed' => true, 'submitted' => false, 'pending' => false] as $status => $expectedOffline) {
+    $transaction = (object) ['eisSale' => (object) ['status' => $status]];
+    $output = [];
+    eval($offlineFlagBlock);
+    vatDisplayCheck($output['qr_code_is_offline'] === $expectedOffline,
+        'Offline marker follows saved EIS status: '.$status);
+}
+$qrAssignmentStart = strpos($transactionUtilSource, '$qr_code_text = $transaction->eisSale->qr_code');
+$qrAssignmentEnd = strpos($transactionUtilSource, ';', $qrAssignmentStart);
+$qrAssignment = substr($transactionUtilSource, $qrAssignmentStart, $qrAssignmentEnd - $qrAssignmentStart + 1);
+foreach ([
+    ['status' => 'failed', 'qr_code' => 'https://eis.invalid/receipt', 'expected' => 'https://eis.invalid/receipt'],
+    ['status' => 'failed', 'qr_code' => null, 'expected' => null],
+    ['status' => 'submitted', 'qr_code' => null, 'expected' => 'Null'],
+] as $case) {
+    $transaction = (object) ['eisSale' => (object) ['status' => $case['status'], 'qr_code' => $case['qr_code']]];
+    $output = ['qr_code_is_offline' => $case['status'] === 'failed'];
+    eval($qrAssignment);
+    vatDisplayCheck($qr_code_text === $case['expected'],
+        'Saved QR is preserved and failed submissions without one omit placeholder QR content');
+}
+$taxOfficeStart = strpos($transactionUtilSource, '$tax_office_name = $eis_configuration');
+$taxOfficeOutputStart = strpos($transactionUtilSource, '$eis_tax_office =', $taxOfficeStart);
+$taxOfficeEnd = strpos($transactionUtilSource, ';', $taxOfficeOutputStart);
+$taxOfficeBlock = substr($transactionUtilSource, $taxOfficeStart, $taxOfficeEnd - $taxOfficeStart + 1);
+foreach ([
+    ['name' => 'Lilongwe Tax Office', 'expected' => 'Lilongwe Tax Office'],
+    ['name' => '  Blantyre Tax Office  ', 'expected' => 'Blantyre Tax Office'],
+    ['name' => '', 'expected' => null],
+    ['name' => null, 'expected' => null],
+    ['name' => ['invalid'], 'expected' => null],
+] as $office) {
+    $eis_configuration = ['taxpayerConfiguration' => ['taxOffice' => ['name' => $office['name']]]];
+    eval($taxOfficeBlock);
+    vatDisplayCheck($eis_tax_office === $office['expected'], 'Saved EIS tax office is normalized and validated');
+}
+$taxOfficeOutputStart = strpos($transactionUtilSource, "\$output['tax_office_name'] =");
+$taxOfficeOutputEnd = strpos($transactionUtilSource, ';', $taxOfficeOutputStart);
+$taxOfficeOutputBlock = substr($transactionUtilSource, $taxOfficeOutputStart,
+    $taxOfficeOutputEnd - $taxOfficeOutputStart + 1);
+foreach ([true, false] as $is_eis_receipt) {
+    $eis_tax_office = 'Lilongwe Tax Office';
+    $output = [];
+    eval($taxOfficeOutputBlock);
+    vatDisplayCheck($output['tax_office_name'] === ($is_eis_receipt ? 'Lilongwe Tax Office' : null),
+        'Tax office is only included for EIS receipts');
+}
+foreach (['classic', 'columnize-taxes', 'detailed', 'elegant', 'elegant_modified',
+    'english-arabic', 'slim', 'slim2', 'packing_slip', 'delivery_note'] as $name) {
+    $source = file_get_contents($root.'\resources\views\sale_pos\receipts\\'.$name.'.blade.php');
+    $taxInfoPosition = strpos($source, '$receipt_details->tax_info1');
+    $taxOfficePosition = strpos($source, '$receipt_details->tax_office_name');
+    vatDisplayCheck($compiler->compileString($source) !== '', $name.' compiles with tax office');
+    vatDisplayCheck($taxInfoPosition !== false && $taxOfficePosition > $taxInfoPosition
+        && !str_contains($source, 'Tax Office:'),
+        $name.' shows the unlabeled business tax office below the TIN');
 }
 $productTable = file_get_contents($root.'\resources\views\sale_pos\receipts\partial\product_table.blade.php');
 vatDisplayCheck(str_contains($productTable, 'table_subtotal_label'),

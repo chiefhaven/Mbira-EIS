@@ -25,20 +25,26 @@ class TillController extends Controller
             ->whereIn('location_id', $locationIds)->where('is_active', true)->orderBy('name')->get();
         $terminals = EisSetting::where('business_id', $user->business_id)->whereIn('location_id', $locationIds)
             ->get(['id', 'location_id', 'device_id']);
-        $vatRegistrationByTerminal = EisConfiguration::where('business_id', $user->business_id)
+        $configurationsByTerminal = EisConfiguration::where('business_id', $user->business_id)
             ->whereIn('eis_setting_id', $terminals->pluck('id'))
             ->orderByDesc('id')
-            ->get(['eis_setting_id', 'is_vat_registered'])
+            ->get(['eis_setting_id', 'is_vat_registered', 'tax_office_code', 'raw_response'])
             ->unique('eis_setting_id')
             ->keyBy('eis_setting_id');
         foreach ($terminals as $terminal) {
-            $configuration = $vatRegistrationByTerminal->get($terminal->id);
+            $configuration = $configurationsByTerminal->get($terminal->id);
             $rawVatStatus = $configuration
                 ? data_get($configuration->raw_response, 'data.taxpayerConfiguration.isVATRegistered')
                 : null;
             $terminal->is_vat_registered = is_bool($rawVatStatus)
                 ? $rawVatStatus
                 : ($configuration ? $configuration->is_vat_registered : null);
+            $taxOfficeName = $configuration
+                ? data_get($configuration->raw_response, 'data.taxpayerConfiguration.taxOffice.name')
+                : null;
+            $terminal->tax_office = is_string($taxOfficeName) && trim($taxOfficeName) !== ''
+                ? trim($taxOfficeName)
+                : ($configuration ? $configuration->tax_office_code : null);
         }
         return response()->json(['data' => ['tills' => $tills, 'terminals' => $terminals]]);
     }
