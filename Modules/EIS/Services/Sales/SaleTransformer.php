@@ -129,7 +129,7 @@ class SaleTransformer
                 'total' => round($lineTotal, 2),
                 'totalVAT' => round($vat, 2),
                 'taxRateId' => (string) $taxRateId,
-                'isProduct' => true,
+                'isProduct' => $this->isProductType($line->product->type ?? null),
             ];
 
             // Build tax breakdown
@@ -335,6 +335,11 @@ class SaleTransformer
                 'description' => 'Product description unavailable'
             ];
         }
+    }
+
+    private function isProductType(?string $type): bool
+    {
+        return strtolower(trim((string) $type)) !== 'service';
     }
 
     /**
@@ -675,7 +680,7 @@ class SaleTransformer
                 'total' => round((float) ($item['total'] ?? 0), 2),
                 'totalVAT' => round((float) ($item['tax_amount'] ?? 0), 2),
                 'taxRateId' => (string) ($item['tax_rate_id'] ?? self::DEFAULT_TAX_RATE_ID),
-                'isProduct' => true,
+                'isProduct' => $this->isProductType($item['type'] ?? $item['productType'] ?? null),
             ];
         }
         

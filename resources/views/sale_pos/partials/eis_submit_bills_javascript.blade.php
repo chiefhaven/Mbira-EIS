@@ -101,7 +101,7 @@ $(document).ready(function() {
                                     if (xhr.responseJSON && xhr.responseJSON.error) {
                                         errorMsg = xhr.responseJSON.error;
                                     }
-                                    toastr.error(errorMsg);
+                                    swal({ text: errorMsg, icon: 'error' });
                                 }
                             });
                         }
@@ -118,7 +118,7 @@ $(document).ready(function() {
                 if (xhr.responseJSON && xhr.responseJSON.error) {
                     errorMsg = xhr.responseJSON.error;
                 }
-                toastr.error(errorMsg);
+                swal({ text: errorMsg, icon: 'error' });
             }
         });
 

@@ -294,7 +294,9 @@ class RestaurantBillService
             $now = date('Y-m-d H:i:s');
             $this->db->table('restaurant_bills')->insert(['transaction_id' => $id, 'business_id' => $user->business_id,
                 'location_id' => $locationId, 'table_id' => $tableId, 'waiter_id' => $user->id,
-                'state' => 'open', 'version' => 1, 'created_at' => $now, 'updated_at' => $now]);
+                // Kitchen orders dispatch every item below, so they are born ready for cashier payment.
+                'state' => empty($input['is_kitchen_order']) ? 'open' : 'ready',
+                'version' => 1, 'created_at' => $now, 'updated_at' => $now]);
             $this->db->table('saved_sale_split_operations')->insert(['business_id' => $user->business_id, 'user_id' => $user->id,
                 'operation_id' => (string) Str::uuid(), 'source_id' => $id, 'result_id' => $id,
                 'payload_hash' => hash('sha256', json_encode($input, JSON_THROW_ON_ERROR)),
@@ -396,6 +398,11 @@ class RestaurantBillService
                     'operation_id' => (string) Str::uuid(), 'expected_version' => $current['version'],
                     'station' => 'kitchen', 'variations' => array_keys($items)]);
                 $this->db->table('transactions')->where('id', $id)->update(['is_kitchen_order' => 1]);
+                // Every item is now dispatched, so hand the kitchen order to the cashier immediately.
+                $this->touch($id, 'ready');
+                $tickets = $dispatch['dispatch_tickets'];
+                $dispatch = json_decode(json_encode($this->view($this->bill($user, $id)), JSON_THROW_ON_ERROR), true, 512, JSON_THROW_ON_ERROR);
+                $dispatch['dispatch_tickets'] = $tickets;
                 return $dispatch;
             }
             return $result;

@@ -1470,8 +1470,7 @@ class SellController extends Controller
             ], 400);
         }
 
-        $count = Transaction::with('eisSale')
-            ->where('business_id', $business_id)
+        $pending = Transaction::where('business_id', $business_id)
             ->whereIn('location_id', $this->eisPermittedLocationIds((int) $business_id))
             ->where('type', 'sell')
             ->where('status', 'final')
@@ -1479,7 +1478,12 @@ class SellController extends Controller
             ->whereDoesntHave('eisSale', function($query) {
                 $query->where('status', 'submitted');
             })
-            ->count();
+            ->get(['id', 'location_id']);
+        $count = $pending->count();
+
+        if ($count > 0 && ($offline = $this->eisOfflineMessage((int) $business_id, $pending->pluck('location_id')->unique()))) {
+            return response()->json(['success' => false, 'error' => $offline], 503);
+        }
 
         return response()->json([
             'count' => $count,
@@ -1502,14 +1506,20 @@ class SellController extends Controller
                 ], 400);
             }
 
-            $transactionIds = Transaction::where('business_id', $business_id)
+            $pending = Transaction::where('business_id', $business_id)
                 ->whereIn('location_id', $this->eisPermittedLocationIds((int) $business_id))
                 ->where('type', 'sell')
                 ->where('status', 'final')
                 ->where('payment_status', 'paid')
                 ->whereDoesntHave('eisSale', fn ($query) => $query->where('status', 'submitted'))
                 ->orderBy('transaction_date')
-                ->pluck('id');
+                ->get(['id', 'location_id']);
+            $transactionIds = $pending->pluck('id');
+
+            if ($transactionIds->isNotEmpty()
+                && ($offline = $this->eisOfflineMessage((int) $business_id, $pending->pluck('location_id')->unique()))) {
+                return response()->json(['success' => false, 'error' => $offline], 503);
+            }
 
             $submitted = 0;
             $failed = [];
@@ -1559,6 +1569,25 @@ class SellController extends Controller
                 'error' => 'Failed to submit bills: ' . $e->getMessage()
             ], 500);
         }
+    }
+
+    private function eisOfflineMessage(int $businessId, $locationIds): ?string
+    {
+        $health = app(\Modules\EIS\Services\Http\EisHealthService::class);
+        foreach ($locationIds as $locationId) {
+            try {
+                $settings = \Modules\EIS\Services\Terminal\TerminalContext::forLocation($businessId, (int) $locationId);
+                if (! empty($settings->status) && $health->isOnline($businessId, (string) $settings->jwt_token)) {
+                    continue;
+                }
+            } catch (\Throwable $e) {
+                // Any failure resolving or probing the terminal counts as offline.
+            }
+
+            return __('lang_v1.eis_offline_error');
+        }
+
+        return null;
     }
 
     private function eisPermittedLocationIds(int $businessId): array

@@ -48,7 +48,7 @@
             </tbody>
         </table>
     </div>
-    <p class="text-muted eis-management-note">Only permitted terminals are shown. Renewed credentials are stored securely.</p>
+    <p class="text-muted eis-management-note">Only permitted terminals are shown. Deactivate a terminal before deleting it; EIS sales history is retained.</p>
     <div class="box box-default" id="eis-configuration-panel" hidden>
         <div class="box-header with-border"><h3 class="box-title">EIS configuration</h3></div>
         <div class="box-body table-responsive">

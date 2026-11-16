@@ -400,6 +400,9 @@ foreach ([false, true] as $kitchen) {
     $result = $service->create($waiter, $create);
     $id = $result['id'];
     check($db->table('restaurant_tickets')->count() === ($kitchen ? 1 : 0), 'checkbox dispatches the initial round only when checked');
+    check($db->table('restaurant_bills')->where('transaction_id', $id)->value('state') === ($kitchen ? 'ready' : 'open') &&
+        $result['state'] === ($kitchen ? 'ready' : 'open'),
+        'placing a kitchen order hands the bill to the cashier immediately; plain bills stay open');
     check($db->table('transaction_payments')->count() === 0 && $service->scheduled === 0, 'kitchen dispatch does not collect payment or fiscalize unpaid bills');
     if ($kitchen) {
         check((int) $db->table('transactions')->where('id', $id)->value('is_kitchen_order') === 1 &&
@@ -421,6 +424,12 @@ foreach ([false, true] as $kitchen) {
         check($service->kitchenOrders($cook) === [], 'marking the exact round cooked removes it from received Kitchen feed');
         $service->ticket($cook, $id, $ticket);
         check($db->table('restaurant_tickets')->count() === 1, 'cook retry is idempotent');
+        $waiter->permissions[] = 'sell.payments';
+        $total = $db->table('transactions')->where('id', $id)->value('final_total');
+        $service->pay($waiter, $id, restaurantInput($service, $waiter, ['payments' => [['method' => 'cash', 'amount' => $total]]], $id));
+        check($db->table('transactions')->where('id', $id)->value('payment_status') === 'paid' &&
+            $db->table('restaurant_bills')->where('transaction_id', $id)->value('state') === 'closed',
+            'cashier collects payment right after the kitchen order is placed, without a manual handover');
     }
 }
 [$db, $service, $waiter] = restaurantFixture();
@@ -589,6 +598,8 @@ $response = $service->edit($waiter, 1, $edit, true);
 check(count($response['dispatch_tickets']) === 1 && $response['dispatch_tickets'][0]['quantity'] === '7.0000' &&
     (int) $db->table('transactions')->where('id', 1)->value('is_kitchen_order') === 1,
     'checked desktop edit atomically saves quantities and dispatches exact kitchen tickets');
+check($response['state'] === 'ready' && $db->table('restaurant_bills')->where('transaction_id', 1)->value('state') === 'ready',
+    'checked desktop edit hands the kitchen bill to the cashier immediately');
 $after = snapshot($db);
 check($service->edit($waiter, 1, $edit, true) === $response && snapshot($db) === $after,
     'checked desktop edit replay never duplicates kitchen tickets or stock');

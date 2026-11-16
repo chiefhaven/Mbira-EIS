@@ -193,13 +193,13 @@ $db->table('eis_settings')->where('id', 102)->update(['status' => 0]);
 $db->table('business_locations')->where('id', 10)->update(['default_eis_setting_id' => 101]);
 $app['config']->set('eis.environment', 'production');
 
-foreach (['index', 'activate', 'latestConfig', 'configuration', 'deactivate', 'renewTokens', 'setDefault'] as $action) {
+foreach (['index', 'activate', 'latestConfig', 'configuration', 'deactivate', 'destroy', 'renewTokens', 'setDefault'] as $action) {
     managementReject(fn () => $controller->$action(managementRequest([], null), 101), 401, $action.' rejects anonymous users');
     $user->allowed = false;
     managementReject(fn () => $controller->$action(managementRequest(), 101), 403, $action.' requires business settings permission');
     $user->allowed = true;
 }
-foreach (['latestConfig', 'configuration', 'deactivate', 'renewTokens', 'setDefault'] as $action) {
+foreach (['latestConfig', 'configuration', 'deactivate', 'destroy', 'renewTokens', 'setDefault'] as $action) {
     foreach ([103, 104, 201, 999] as $id) {
         managementReject(fn () => $controller->$action(managementRequest(), $id), 404, $action.' rejects inaccessible terminal '.$id);
     }
@@ -269,6 +269,22 @@ managementCheck((int) $db->table('business_locations')->where('id', 10)->value('
 managementCheck((int) $db->table('business_locations')->where('id', 11)->value('default_eis_setting_id') === 103
     && (int) $db->table('business_locations')->where('id', 20)->value('default_eis_setting_id') === 201,
     'Setting default never modifies other locations or businesses');
+$activeDelete = $controller->destroy(managementRequest(), 102);
+managementCheck($activeDelete->getStatusCode() === 422
+    && $activeDelete->getData(true)['message'] === 'Deactivate the terminal before deleting it.',
+    'Active terminals cannot be deleted');
+$db->table('eis_settings')->where('id', 102)->update(['status' => 0]);
+$db->table('eis_terminal_configurations')->where('configuration_id', 1102)->update(['is_active' => 0]);
+$deleted = $controller->destroy(managementRequest(), 102);
+managementCheck($deleted->getData(true)['success']
+    && $db->table('eis_settings')->where('id', 102)->whereNotNull('deleted_at')->exists()
+    && $db->table('eis_configurations')->where('id', 1102)->whereNotNull('deleted_at')->exists()
+    && $db->table('eis_terminal_configurations')->where('id', 2102)->whereNotNull('deleted_at')->exists(),
+    'Deleting an inactive terminal soft-deletes its settings and configuration records');
+managementCheck($db->table('business_locations')->where('id', 10)->value('default_eis_setting_id') === null,
+    'Deleting a location default clears the location reference');
+managementReject(fn () => $controller->destroy(managementRequest(), 102), 404,
+    'Deleted terminals are no longer available for management');
 $user->locations = 'all';
 $service->shouldReceive('getLatestConfig')->once()->with(1, 103)->andReturn(['success' => true]);
 managementCheck($controller->latestConfig(managementRequest(), 103)->getData(true)['success'], 'All sentinel authorizes actions within tenant');
@@ -292,6 +308,7 @@ foreach ([
     'configuration' => ['GET', 'eis/terminals/{terminalId}/configuration'],
     'request-new-token' => ['POST', 'eis/terminals/{terminalId}/request-new-token'],
     'deactivate' => ['POST', 'eis/terminals/{terminalId}/deactivate'],
+    'delete' => ['POST', 'eis/terminals/{terminalId}/delete'],
     'renew-tokens' => ['POST', 'eis/terminals/{terminalId}/renew-tokens'],
     'default' => ['POST', 'eis/terminals/{terminalId}/default'],
 ] as $name => [$method, $uri]) {
@@ -342,6 +359,9 @@ managementCheck(!str_contains($source, "route('eis.terminal.") && !str_contains(
     && !str_contains($source, 'getTerminalStatus'), 'Obsolete API/singleton JS and credentials removed');
 managementCheck(str_contains($terminalScript, "(action === 'deactivate' || action === 'default') && !terminal.is_active"),
     'UI hides default action when combined terminal status is inactive');
+managementCheck(str_contains($terminalScript, "action === 'delete' && terminal.is_active")
+    && str_contains($terminalScript, "route('eis.terminals.delete'"),
+    'UI offers deletion only for inactive terminals through the dedicated endpoint');
 managementCheck(str_contains($terminalScript, "@json(route('eis.terminals.index'))")
     && str_contains(file_get_contents(dirname(__DIR__, 2).'\Modules\EIS\Routes\web.php'), "Route::get('data', [TerminalManagementController::class, 'index'])->name('index')"),
     'Terminal UI uses the dedicated JSON listing route');

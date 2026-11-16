@@ -6,7 +6,9 @@ use App\BusinessLocation;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Controller;
 use Illuminate\Support\Facades\DB;
+use Modules\EIS\Models\EisConfiguration;
 use Modules\EIS\Models\EisSetting;
+use Modules\EIS\Models\EisTerminalConfiguration;
 use Modules\EIS\Services\Configuration\TerminalTokenService;
 use Modules\EIS\Services\Terminal\EisTerminalActivationService;
 use Modules\EIS\Services\Terminal\TerminalContext;
@@ -170,6 +172,47 @@ class TerminalManagementController extends Controller
             (int) $request->user()->id,
             $terminalId
         ));
+    }
+
+    public function destroy(Request $request, int $terminalId)
+    {
+        $terminal = $this->terminal($request, $terminalId);
+        $deleted = DB::transaction(function () use ($request, $terminal) {
+            $businessId = (int) $terminal->business_id;
+            $lockedTerminal = EisSetting::where('business_id', $businessId)
+                ->whereIn('location_id', $this->locations($request, $businessId)->select('id'))
+                ->lockForUpdate()->findOrFail($terminal->id);
+            $configurationIds = EisConfiguration::where('business_id', $businessId)
+                ->where('eis_setting_id', $lockedTerminal->id)
+                ->lockForUpdate()->pluck('id');
+            $terminalConfigurations = EisTerminalConfiguration::whereIn('configuration_id', $configurationIds)
+                ->lockForUpdate()->get(['id', 'is_active']);
+
+            if ((bool) $lockedTerminal->status || $terminalConfigurations->contains(
+                fn ($configuration) => (bool) $configuration->is_active
+            )) {
+                return false;
+            }
+
+            $location = $this->locations($request, $businessId)
+                ->lockForUpdate()->findOrFail($lockedTerminal->location_id);
+            if ((int) $location->default_eis_setting_id === (int) $lockedTerminal->id) {
+                $location->default_eis_setting_id = null;
+                $location->save();
+            }
+
+            EisTerminalConfiguration::whereIn('configuration_id', $configurationIds)->delete();
+            EisConfiguration::whereIn('id', $configurationIds)->delete();
+            $lockedTerminal->delete();
+
+            return true;
+        });
+
+        if (!$deleted) {
+            return $this->result(['success' => false, 'message' => 'Deactivate the terminal before deleting it.']);
+        }
+
+        return $this->result(['success' => true, 'message' => 'Terminal deleted. EIS sales history is retained.']);
     }
 
     public function renewTokens(Request $request, int $terminalId)

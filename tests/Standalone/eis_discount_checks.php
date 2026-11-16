@@ -50,14 +50,19 @@ function discountCheck(bool $condition, string $message): void
     }
     ++$checks;
 }
-function discountPayload(SaleTransformer $transformer, EisSetting $settings, array $attributes, float $total, array $invoiceDiscount = [], bool $inlineTaxEnabled = true): array
+function discountPayload(SaleTransformer $transformer, EisSetting $settings, array $attributes, float $total, array $invoiceDiscount = [], bool $inlineTaxEnabled = true, array $productTypes = []): array
 {
     $lines = [];
     foreach ($attributes as $index => $values) {
         $line = new TransactionSellLine();
         $line->setRawAttributes(['id' => $index + 1, 'product_id' => $index + 1] + $values);
         $line->exists = true;
-        $line->setRelation('product', null)->setRelation('variations', null)->setRelation('modifiers', collect());
+        $product = null;
+        if (isset($productTypes[$index])) {
+            $product = new App\Product();
+            $product->setRawAttributes(['id' => $index + 1, 'business_id' => 6, 'type' => $productTypes[$index]]);
+        }
+        $line->setRelation('product', $product)->setRelation('variations', null)->setRelation('modifiers', collect());
         $lines[] = $line;
     }
     $transaction = new Transaction();
@@ -152,6 +157,9 @@ $payload = discountPayload($transformer, $settings, [$tiny, $tiny, $tiny], 0.02,
 discountCheck(round(array_sum(array_column($payload['invoiceLineItems'], 'discount')), 2) === 0.01
     && round(array_sum(array_column($payload['invoiceLineItems'], 'total')), 2) === 0.02,
     'Proportional allocation distributes residual cents without losing the invoice discount');
+$typedLines = discountPayload($transformer, $settings, [$tiny, $tiny], 0.02, [], true, ['service', 'single']);
+discountCheck(array_column($typedLines['invoiceLineItems'], 'isProduct') === [false, true],
+    'EIS sale lines identify services as non-products and retain products as products');
 $payload = discountPayload($transformer, $settings, [$correct, $zero], 1000.35,
     ['discount_type' => 'percentage', 'discount_amount' => 10]);
 discountCheck(round(array_sum(array_column($payload['invoiceLineItems'], 'total')), 2) === 1000.35
