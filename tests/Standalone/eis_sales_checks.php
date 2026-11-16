@@ -150,6 +150,30 @@ $factory->fake(function ($request) use ($factory, &$requests, &$disconnect, &$re
     if ($disconnect) { throw new Illuminate\Http\Client\ConnectionException('Synthetic lost response'); }
     return $factory->response($responseBody, $responseStatus);
 });
+$syncGuard = Mockery::mock(\Modules\EIS\Services\Sales\SaleOutcomeRecoveryService::class);
+$syncGuard->shouldNotReceive('sync');
+$salesController = new SalesController();
+$db->table('eis_settings')->where('id', 101)->update(['status' => 0]);
+$db->table('eis_terminal_configurations')->where('configuration_id', 1101)->update(['is_active' => 0]);
+$unavailable = $salesController->syncSale(managementRequest(), 1, $syncGuard);
+salesCheck($unavailable->getStatusCode() === 422
+    && $unavailable->getData(true)['message'] === 'Terminal Not available for sync'
+    && count($requests) === 0, 'Inactive terminals block Print & Sync before any EIS request');
+$db->table('eis_settings')->where('id', 101)->update(['status' => 1, 'jwt_token' => null]);
+$db->table('eis_terminal_configurations')->where('configuration_id', 1101)->update(['is_active' => 1]);
+$unavailable = $salesController->syncSale(managementRequest(), 1, $syncGuard);
+salesCheck($unavailable->getStatusCode() === 422
+    && $unavailable->getData(true)['message'] === 'Terminal Not available for sync'
+    && count($requests) === 0, 'Terminals without credentials block Print & Sync before any EIS request');
+$db->table('eis_settings')->where('id', 101)->update(['jwt_token' => 'fixture-token-101']);
+$db->table('eis_settings')->where('id', 101)->update(['status' => 1]);
+$db->table('eis_terminal_configurations')->where('configuration_id', 1101)->update(['is_active' => 1]);
+$db->table('eis_settings')->where('id', 101)->update(['deleted_at' => '2026-11-16 00:00:00']);
+$unavailable = $salesController->syncSale(managementRequest(), 1, $syncGuard);
+salesCheck($unavailable->getStatusCode() === 422
+    && $unavailable->getData(true)['message'] === 'Terminal Not available for sync'
+    && count($requests) === 0, 'Deleted terminals block Print & Sync with a useful message');
+$db->table('eis_settings')->where('id', 101)->update(['deleted_at' => null]);
 $client = new SalesApiClient();
 $transformer = new ReturnAdjustmentPayload();
 $service = new SaleAdjustmentService($client, $transformer);

@@ -93,8 +93,18 @@ class SalesController extends Controller
         abort_unless($permitted === 'all'
             || in_array((int) $sale->location_id, array_map('intval', (array) $permitted), true), 403);
 
-        $setting = EisSetting::where('business_id', $request->user()->business_id)
-            ->where('location_id', $sale->location_id)->findOrFail($sale->eis_setting_id);
+        $setting = $sale->eis_setting_id
+            ? EisSetting::where('business_id', $request->user()->business_id)
+                ->where('location_id', $sale->location_id)->find($sale->eis_setting_id)
+            : null;
+        if (!$setting || trim((string) $setting->jwt_token) === '') {
+            return $this->terminalUnavailable($id, $sale->eis_setting_id ? (int) $sale->eis_setting_id : null);
+        }
+        try {
+            TerminalContext::assertActive($setting);
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException|\Illuminate\Validation\ValidationException|\InvalidArgumentException $exception) {
+            return $this->terminalUnavailable($id, (int) $setting->id);
+        }
         $trackedSale = \Modules\EIS\Models\EisSale::where('business_id', $sale->business_id)->findOrFail($sale->id);
         try {
             $result = $service->sync($trackedSale, $setting);
@@ -112,6 +122,15 @@ class SalesController extends Controller
                 : ($result['offline_receipt_preserved']
                     ? 'Invoice synchronized from EIS. EIS returned no validation URL; the original offline QR code and receipt details were kept.'
                     : 'Invoice synchronized from EIS. No official receipt number was returned; receipt fields now reflect the EIS response.')]);
+    }
+
+    private function terminalUnavailable(int $saleId, ?int $terminalId)
+    {
+        Log::warning('EIS sale sync blocked because terminal is unavailable', [
+            'eis_sale_id' => $saleId,
+            'terminal_id' => $terminalId,
+        ]);
+        return response()->json(['success' => false, 'message' => 'Terminal Not available for sync'], 422);
     }
 
     public function submit(Request $request, int $id, SaleAdjustmentService $service)
