@@ -381,9 +381,13 @@ managementCheck(!str_contains($salesView, 'Normal sales use the existing POS fis
     && !str_contains($salesView, 'eis-sales-terminal')
     && str_contains($salesView, 'Sync &amp; Print')
     && str_contains($salesScript, "window.open('', '_blank')")
-    && str_contains($salesScript, 'printReceiptInWindow(printWindow, printResult.receipt)')
+    && str_contains($salesScript, 'printReceiptInWindow(printWindow, printResult.receipt, statusMessage)')
     && str_contains($salesScript, 'printWindow.print()'),
     'EIS sales syncs each sale and prints only its POS receipt in a new window');
+managementCheck(str_contains($salesScript, "result.message === 'Terminal Not available for sync'")
+    && str_contains($salesScript, 'fetchAndPrintReceipt(button, printWindow,')
+    && str_contains($salesScript, 'Opening the saved POS receipt without EIS sync.'),
+    'Unavailable terminals print the saved POS receipt without attempting EIS sync again');
 $routeProviderSource = file_get_contents(dirname(__DIR__, 2).'\Modules\EIS\Providers\RouteServiceProvider.php');
 managementCheck(str_contains($routeProviderSource, "'SetSessionData'")
     && str_contains($routeProviderSource, "'AdminSidebarMenu'"),
