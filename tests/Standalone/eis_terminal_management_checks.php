@@ -434,6 +434,12 @@ managementCheck(str_contains($terminalView, "business.partials.settings_mra_eis"
     'Standalone terminal page renders the MRA EIS settings interface');
 $terminalScript = file_get_contents(dirname(__DIR__, 2).'\Modules\EIS\Resources\views\terminals\script.blade.php');
 $source = file_get_contents(dirname(__DIR__, 2).'\resources\views\business\settings.blade.php');
+$taxSettingsView = file_get_contents(dirname(__DIR__, 2).'\resources\views\business\partials\settings_tax.blade.php');
+token_get_all($blade->compileString($taxSettingsView), TOKEN_PARSE);
+managementCheck(str_contains($taxSettingsView, "Form::checkbox('is_vat_registered', 1, (bool) \$business->is_vat_registered")
+    && str_contains($taxSettingsView, "'disabled' => true")
+    && str_contains($taxSettingsView, "__('business.is_vat_registered')"),
+    'Tax settings show EIS VAT registration as a read-only checkbox');
 managementCheck(!str_contains($source, "route('eis.terminal.") && !str_contains($source, 'eis_token')
     && !str_contains($source, 'getTerminalStatus'), 'Obsolete API/singleton JS and credentials removed');
 managementCheck(str_contains($terminalScript, "(action === 'deactivate' || action === 'default') && !terminal.is_active"),

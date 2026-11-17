@@ -585,6 +585,7 @@ class EisTerminalActivationService
                     $commonSettings = $business->common_settings ?? [];
                     $commonSettings['is_enabled_export'] = 1;
                     $business->common_settings = $commonSettings;
+                    $business->is_vat_registered = $configurationData->taxpayerConfiguration->isVATRegistered;
                     $business->save();
                 }
                 // Save or update main configuration

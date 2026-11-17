@@ -40,6 +40,7 @@ class Business extends Model
         'sms_settings' => 'array',
         'common_settings' => 'array',
         'weighing_scale_setting' => 'array',
+        'is_vat_registered' => 'boolean',
     ];
 
     /**

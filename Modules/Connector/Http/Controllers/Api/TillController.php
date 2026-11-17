@@ -25,12 +25,14 @@ class TillController extends Controller
             ->whereIn('location_id', $locationIds)->where('is_active', true)->orderBy('name')->get();
         $terminals = EisSetting::where('business_id', $user->business_id)->whereIn('location_id', $locationIds)
             ->get(['id', 'location_id', 'device_id']);
+        $businessVatRegistration = DB::table('business')
+            ->where('id', $user->business_id)
+            ->value('is_vat_registered');
         $configurationsByTerminal = EisConfiguration::where('business_id', $user->business_id)
             ->whereIn('eis_setting_id', $terminals->pluck('id'))
             ->orderByDesc('id')
             ->get([
                 'eis_setting_id',
-                'is_VAT_Registered as vat_registered',
                 'tax_office_code',
                 'raw_response',
             ])
@@ -38,10 +40,9 @@ class TillController extends Controller
             ->keyBy('eis_setting_id');
         foreach ($terminals as $terminal) {
             $configuration = $configurationsByTerminal->get($terminal->id);
-            $storedVatRegistration = $configuration?->vat_registered;
-            $terminal->is_vat_registered = $storedVatRegistration === null
+            $terminal->is_vat_registered = $businessVatRegistration === null
                 ? null
-                : (bool) $storedVatRegistration;
+                : (bool) $businessVatRegistration;
             $taxOfficeName = $configuration
                 ? data_get($configuration->raw_response, 'data.taxpayerConfiguration.taxOffice.name')
                 : null;

@@ -569,7 +569,10 @@ class ConfigurationSyncService
 
     private function syncBusinessDetails(int $businessId, mixed $tradingName, mixed $tin, bool $isVatRegistered): void
     {
-        $updates = ['enable_inline_tax' => (int) $isVatRegistered];
+        $updates = [
+            'enable_inline_tax' => (int) $isVatRegistered,
+            'is_vat_registered' => (int) $isVatRegistered,
+        ];
         if (is_string($tradingName) && trim($tradingName) !== '') {
             $updates['name'] = trim($tradingName);
         }

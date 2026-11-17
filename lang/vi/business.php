@@ -26,6 +26,7 @@ return [
     'tax_1_no' => 'Thuế 1 No.',
     'tax_2_name' => 'Tên thuế 2',
     'tax_2_no' => 'Thuế 2 No.',
+    'is_vat_registered' => 'Đã đăng ký VAT',
     'tax_1_placeholder' => 'GST/VAT/khác',
     'prefix' => 'Prefix',
     'prefix_placeholder' => 'Anh / Chị',

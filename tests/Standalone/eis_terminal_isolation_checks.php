@@ -36,6 +36,8 @@ $schema->create('business', function (Blueprint $table) {
     }
     $table->timestamps();
 });
+$businessVatMigration = require dirname(__DIR__, 2).'\database\migrations\2026_11_18_000000_add_is_vat_registered_to_business_table.php';
+$businessVatMigration->up();
 DB::beginTransaction();
 $registered = (new App\Utils\BusinessUtil())->createNewBusiness([
     'name' => 'Registration fixture', 'common_settings' => ['is_enabled_export' => 0, 'fixture_option' => 'keep'],
@@ -412,6 +414,16 @@ locationReject(fn () => $process->invoke($activation, 1, activationResponse('FOR
 locationCheck(DB::table('business_locations')->count() === $beforePermissionCheck,
     'Forbidden API site activation creates no partial location');
 $allLocations = true;
+DB::beginTransaction();
+DB::table('business')->insert(['id' => 5, 'name' => 'Business five']);
+$firstBusinessTerminal = activationResponse('FIRST5', 'SITE5', 1);
+$firstBusinessTerminal->data->configuration->taxpayerConfiguration->tin = 'TIN5';
+$firstBusinessTerminal->data->configuration->terminalConfiguration->tradingName = 'Business Five';
+$firstBusinessActivation = $process->invoke($activation, 5, $firstBusinessTerminal, 'CODE', [], null);
+locationCheck($firstBusinessActivation['success']
+    && DB::table('business')->where('id', 5)->value('is_vat_registered') === 1,
+    'First terminal activation copies the EIS VAT registration status to its business');
+DB::rollBack();
 DB::beginTransaction();
 $freshLocation = $sync->locationForActivation(2, activationResponse('FRESH', 'FIRST', 1)->data->configuration);
 locationCheck($freshLocation->business_id === 2 && $freshLocation->invoice_scheme_id && $freshLocation->invoice_layout_id,
@@ -859,17 +871,26 @@ foreach ([false, true] as $vatRegistered) {
     $configurationClient->data->taxpayerConfiguration->isVATRegistered = $vatRegistered;
     $configService->sync(1, 'token2', false, 2);
     locationCheck((int) DB::table('business')->where('id', 1)->value('enable_inline_tax') === (int) $vatRegistered
+        && (int) DB::table('business')->where('id', 1)->value('is_vat_registered') === (int) $vatRegistered
         && (int) $activationSession->get('business.enable_inline_tax') === (int) $vatRegistered
         && (int) DB::table('business')->where('id', 2)->value('enable_inline_tax') === 0,
-        'Latest configuration sets inline tax from VAT registration in the database and current business session only');
-    DB::table('business')->where('id', 1)->update(['enable_inline_tax' => (int) !$vatRegistered]);
-    $activationSession->put('business', ['id' => 1, 'enable_inline_tax' => (int) !$vatRegistered]);
+        'Latest configuration sets business VAT registration and inline tax for the owning business');
+    DB::table('business')->where('id', 1)->update([
+        'enable_inline_tax' => (int) !$vatRegistered,
+        'is_vat_registered' => (int) !$vatRegistered,
+    ]);
+    $activationSession->put('business', [
+        'id' => 1,
+        'enable_inline_tax' => (int) !$vatRegistered,
+        'is_vat_registered' => (int) !$vatRegistered,
+    ]);
     $productSyncCount = count($configService->productSyncRequests);
     $configService->sync(1, 'token2', false, 2);
     locationCheck((int) DB::table('business')->where('id', 1)->value('enable_inline_tax') === (int) $vatRegistered
+        && (int) DB::table('business')->where('id', 1)->value('is_vat_registered') === (int) $vatRegistered
         && (int) $activationSession->get('business.enable_inline_tax') === (int) $vatRegistered
         && count($configService->productSyncRequests) === $productSyncCount,
-        'Unchanged latest configuration repairs stale inline tax without scheduling duplicate product sync');
+        'Unchanged latest configuration repairs business VAT status without duplicate product sync');
 }
 $schema->create('tax_rates', function (Blueprint $table) {
     $table->increments('id');

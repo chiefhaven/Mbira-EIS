@@ -56,5 +56,17 @@
                 </div>
             </div>
         </div>
+        <div class="col-sm-4">
+            <div class="form-group">
+                <div class="checkbox">
+                <br>
+                  <label>
+                    {!! Form::checkbox('is_vat_registered', 1, (bool) $business->is_vat_registered,
+                    ['class' => 'input-icheck', 'disabled' => true, 'aria-readonly' => 'true']); !!}
+                    {{ __('business.is_vat_registered') }}
+                  </label>
+                </div>
+            </div>
+        </div>
     </div>
 </div>
