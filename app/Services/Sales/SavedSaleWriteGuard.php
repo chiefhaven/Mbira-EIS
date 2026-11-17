@@ -588,7 +588,7 @@ class SavedSaleWriteGuard
      */
     public static function fiscal(Connection $db, $id)
     {
-        return $db->transaction(function () use ($db, $id) {
+        $validate = function () use ($db, $id) {
             $h = $db->table('transactions')->where('id', $id)->lockForUpdate()->first();
             if (!$h || $h->type !== 'sell') { return $h; }
             if ($db->getSchemaBuilder()->hasTable('saved_sale_split_operations')) {
@@ -620,7 +620,9 @@ class SavedSaleWriteGuard
                 throw new SavedSplitException('unpaid_fiscal_state_blocked', 'Unpaid/partial sales must not create fiscal tracking.');
             }
             return $h;
-        });
+        };
+
+        return $db->transactionLevel() > 0 ? $validate() : $db->transaction($validate);
     }
 
     /** Only copy the verified fiscal receipt projection, never stale Eloquent

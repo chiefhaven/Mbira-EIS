@@ -107,18 +107,44 @@ class ProductController extends Controller
             && DB::getSchemaBuilder()->hasTable('eis_product_maps');
         $is_woocommerce = $this->moduleUtil->isModuleInstalled('Woocommerce');
 
-        try {
-            $can_reconcile_stock = auth()->user()->can('stock_adjustment.create');
-            dispatch(new \Modules\EIS\Jobs\SyncProductsJob(
-                $business_id,
-                null,
-                $can_reconcile_stock,
-                $can_reconcile_stock ? (int) auth()->id() : null,
-                true
-            ))
-                ->onQueue('eis-products');
-        } catch (\Exception $e) {
-            Log::error('EIS SyncProductsJob failed: ' . $e->getMessage());
+        $can_reconcile_stock = auth()->user()->can('stock_adjustment.create');
+        $pending_sales_location = $eis_managed && $can_reconcile_stock
+            ? \Modules\EIS\Services\Stock\StockReconciliationService::locationWithUnsubmittedFinalSales(
+                DB::connection(), (int) $business_id
+            )
+            : null;
+
+        if ($pending_sales_location !== null && !request()->ajax()) {
+            return redirect()->route('sells.index')->with('status', [
+                'success' => 0,
+                'msg' => 'Submit all final sales at this location to EIS before syncing products and stock.',
+            ]);
+        }
+
+        if ($pending_sales_location !== null) {
+            Log::notice('Automatic EIS stock sync skipped until final sales are submitted', [
+                'business_id' => $business_id,
+                'location_id' => $pending_sales_location,
+            ]);
+        } else {
+            try {
+                dispatch(new \Modules\EIS\Jobs\SyncProductsJob(
+                    $business_id,
+                    null,
+                    $can_reconcile_stock,
+                    $can_reconcile_stock ? (int) auth()->id() : null,
+                    true
+                ))
+                    ->onQueue('eis-products');
+            } catch (\Exception $e) {
+                Log::error('EIS SyncProductsJob failed: ' . $e->getMessage());
+                if (str_contains($e->getMessage(), 'Submit or reconcile all final sales at this location')) {
+                    return redirect()->route('sells.index')->with('status', [
+                        'success' => 0,
+                        'msg' => 'Submit all final sales at this location to EIS before syncing products and stock.',
+                    ]);
+                }
+            }
         }
 
 

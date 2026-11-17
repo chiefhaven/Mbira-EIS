@@ -12,6 +12,40 @@ class StockReconciliationService
 {
     public function __construct(private Connection $db, private StockInventoryClient $client) {}
 
+    public static function locationWithUnsubmittedFinalSales(Connection $db, int $businessId): ?int
+    {
+        $locationId = self::unsubmittedFinalSalesQuery($db, $businessId)
+            ->whereExists(function ($query) {
+                $query->selectRaw('1')->from('eis_settings as s')
+                    ->join('eis_configurations as c', function ($join) {
+                        $join->on('c.eis_setting_id', '=', 's.id')
+                            ->on('c.business_id', '=', 's.business_id');
+                    })
+                    ->join('eis_terminal_configurations as tc', 'tc.configuration_id', '=', 'c.id')
+                    ->whereColumn('s.business_id', 't.business_id')
+                    ->whereColumn('s.location_id', 't.location_id')
+                    ->where('s.status', true)
+                    ->where('tc.is_active', true)
+                    ->whereNull('s.deleted_at')
+                    ->whereNull('c.deleted_at')
+                    ->whereNull('tc.deleted_at');
+            })
+            ->orderBy('t.location_id')
+            ->value('t.location_id');
+
+        return $locationId === null ? null : (int) $locationId;
+    }
+
+    public static function hasUnsubmittedFinalSalesAtLocation(
+        Connection $db,
+        int $businessId,
+        int $locationId
+    ): bool
+    {
+        return self::unsubmittedFinalSalesQuery($db, $businessId)
+            ->where('t.location_id', $locationId)->exists();
+    }
+
     public function preview(int $businessId, int $terminalId, int $actorId): object
     {
         app(EisSubscriptionAccess::class)->assertAllowed($businessId);
@@ -158,15 +192,21 @@ class StockReconciliationService
         if ($outbound) {
             throw new \InvalidArgumentException('Resolve outstanding EIS stock operation #'.$outbound->id.' before reconciling this location. Check both transfer sites and any pending approvals; never blindly resubmit an unknown outcome.');
         }
-        $pending = $this->db->table('transactions as t')->where('t.business_id', $businessId)
-            ->where('t.location_id', $locationId)->where('t.type', 'sell')->where('t.status', 'final')
-            ->whereNotExists(function ($query) {
-                $query->selectRaw('1')->from('eis_sales as e')->whereColumn('e.transaction_id', 't.id')
-                    ->whereColumn('e.business_id', 't.business_id')->where('e.status', 'submitted');
-            })->select('t.id')->lockForUpdate()->first();
+        $pending = self::unsubmittedFinalSalesQuery($this->db, $businessId)
+            ->where('t.location_id', $locationId)->select('t.id')->lockForUpdate()->first();
         if ($pending) {
             throw new \InvalidArgumentException('Submit or reconcile all final sales at this location before pulling authoritative EIS stock (including credit/part-paid bills).');
         }
+    }
+
+    private static function unsubmittedFinalSalesQuery(Connection $db, int $businessId)
+    {
+        return $db->table('transactions as t')->where('t.business_id', $businessId)
+            ->where('t.type', 'sell')->where('t.status', 'final')
+            ->whereNotExists(function ($query) {
+                $query->selectRaw('1')->from('eis_sales as e')->whereColumn('e.transaction_id', 't.id')
+                    ->whereColumn('e.business_id', 't.business_id')->where('e.status', 'submitted');
+            });
     }
 
     private function lines(EisSetting $setting, array $inventory): array

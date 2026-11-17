@@ -33,12 +33,7 @@ class TillController extends Controller
             ->keyBy('eis_setting_id');
         foreach ($terminals as $terminal) {
             $configuration = $configurationsByTerminal->get($terminal->id);
-            $rawVatStatus = $configuration
-                ? data_get($configuration->raw_response, 'data.taxpayerConfiguration.isVATRegistered')
-                : null;
-            $terminal->is_vat_registered = is_bool($rawVatStatus)
-                ? $rawVatStatus
-                : ($configuration ? $configuration->is_vat_registered : null);
+            $terminal->is_vat_registered = $configuration?->is_vat_registered;
             $taxOfficeName = $configuration
                 ? data_get($configuration->raw_response, 'data.taxpayerConfiguration.taxOffice.name')
                 : null;

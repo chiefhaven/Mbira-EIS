@@ -1381,8 +1381,6 @@ class SellController extends Controller
                 }
             }
             
-            DB::commit();
-
             // Check if any invoices were actually cleared
             if ($total_cleared == 0) {
                 $msg = __('lang_v1.no_unpaid_bills_found');
@@ -1394,6 +1392,7 @@ class SellController extends Controller
                 ]);
                 $success = true;
             }
+            DB::commit();
             
             if (request()->ajax()) {
                 return response()->json([

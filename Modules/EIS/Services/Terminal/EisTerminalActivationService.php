@@ -14,6 +14,9 @@ use Modules\EIS\Services\EisSubscriptionAccess;
 
 class EisTerminalActivationService
 {
+    public const UNSUBMITTED_SALES_MESSAGE =
+        'Submit or reconcile all final sales at this location (including credit/part-paid bills) before deactivating or deleting this terminal.';
+
     protected string $apiBaseUrl;
 
     public function __construct(
@@ -1025,30 +1028,43 @@ class EisTerminalActivationService
                 ];
             }
 
-            if (!$terminal->is_active && !$setting->status) {
-                app(InactiveTerminalStock::class)->clear($businessId, (int) $setting->location_id);
-                app(InactiveTerminalStock::class)->unlinkProducts($businessId, (int) $setting->location_id);
+            $alreadyInactive = !$terminal->is_active && !$setting->status;
+            $blockedByUnsubmittedSales = false;
+            DB::transaction(function () use (
+                $terminal, $setting, $deactivatedBy, $reason, $alreadyInactive, &$blockedByUnsubmittedSales
+            ) {
+                \App\Business::whereKey($setting->business_id)->lockForUpdate()->firstOrFail();
+                if (\Modules\EIS\Services\Stock\StockReconciliationService::hasUnsubmittedFinalSalesAtLocation(
+                    DB::connection(), (int) $setting->business_id, (int) $setting->location_id
+                )) {
+                    $blockedByUnsubmittedSales = true;
+                    return;
+                }
+                if (!$alreadyInactive) {
+                    $setting->update(['status' => false]);
+                    $terminal->update([
+                        'is_active' => false,
+                        'deactivated_at' => now(),
+                        'deactivated_by' => $deactivatedBy,
+                        'deactivation_reason' => $reason,
+                        'toggled_at' => now(),
+                        'toggled_by' => $deactivatedBy,
+                    ]);
+                }
+                app(InactiveTerminalStock::class)->clear((int) $setting->business_id, (int) $setting->location_id);
+                app(InactiveTerminalStock::class)->unlinkProducts((int) $setting->business_id, (int) $setting->location_id);
+            });
+
+            if ($blockedByUnsubmittedSales) {
+                return ['success' => false, 'message' => self::UNSUBMITTED_SALES_MESSAGE];
+            }
+            if ($alreadyInactive) {
                 return [
                     'success' => true,
                     'message' => 'Terminal is already inactive',
                     'data' => $this->getTerminalDetails($terminal, null, $businessId)
                 ];
             }
-
-            DB::transaction(function () use ($terminal, $setting, $deactivatedBy, $reason) {
-                \App\Business::whereKey($setting->business_id)->lockForUpdate()->firstOrFail();
-                $setting->update(['status' => false]);
-                $terminal->update([
-                    'is_active' => false,
-                    'deactivated_at' => now(),
-                    'deactivated_by' => $deactivatedBy,
-                    'deactivation_reason' => $reason,
-                    'toggled_at' => now(),
-                    'toggled_by' => $deactivatedBy,
-                ]);
-                app(InactiveTerminalStock::class)->clear((int) $setting->business_id, (int) $setting->location_id);
-                app(InactiveTerminalStock::class)->unlinkProducts((int) $setting->business_id, (int) $setting->location_id);
-            });
 
             Log::info('Terminal deactivated successfully', [
                 'business_id' => $businessId,
@@ -1129,8 +1145,15 @@ class EisTerminalActivationService
                 $updateData['deactivated_by'] = $toggledBy;
             }
 
-            DB::transaction(function () use ($terminal, $setting, $updateData, $newStatus) {
+            $blockedByUnsubmittedSales = false;
+            DB::transaction(function () use ($terminal, $setting, $updateData, $newStatus, &$blockedByUnsubmittedSales) {
                 \App\Business::whereKey($setting->business_id)->lockForUpdate()->firstOrFail();
+                if (!$newStatus && \Modules\EIS\Services\Stock\StockReconciliationService::hasUnsubmittedFinalSalesAtLocation(
+                    DB::connection(), (int) $setting->business_id, (int) $setting->location_id
+                )) {
+                    $blockedByUnsubmittedSales = true;
+                    return;
+                }
                 $setting->update(['status' => $newStatus]);
                 $terminal->update($updateData);
                 if (!$newStatus) {
@@ -1138,6 +1161,10 @@ class EisTerminalActivationService
                     app(InactiveTerminalStock::class)->unlinkProducts((int) $setting->business_id, (int) $setting->location_id);
                 }
             });
+
+            if ($blockedByUnsubmittedSales) {
+                return ['success' => false, 'message' => self::UNSUBMITTED_SALES_MESSAGE];
+            }
 
             Log::info('Terminal status toggled', [
                 'business_id' => $businessId,

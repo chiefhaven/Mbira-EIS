@@ -466,8 +466,25 @@ locationCheck(TerminalContext::forLocation(1, 1, true)->id === $newId, 'New sale
 $sale = new App\Transaction();
 $sale->setRawAttributes(['id' => 1, 'business_id' => 1, 'location_id' => 1]);
 locationCheck(TerminalContext::forSale($sale)->id === 1, 'Historical retry does not follow a default-terminal change');
+DB::table('transactions')->insert(['id' => 99, 'business_id' => 1, 'location_id' => 1,
+    'type' => 'sell', 'status' => 'final']);
+DB::table('eis_sales')->insert(['business_id' => 1, 'transaction_id' => 99, 'status' => 'pending']);
+$blockedDeactivate = $activation->deactivate(1, 'Test', 1, $newId);
+locationCheck(!$blockedDeactivate['success']
+    && $blockedDeactivate['message'] === Modules\EIS\Services\Terminal\EisTerminalActivationService::UNSUBMITTED_SALES_MESSAGE
+    && TerminalContext::settings(1, null, $newId)->status,
+    'Deactivation retains an active terminal while a final sale is unsubmitted');
+DB::table('eis_sales')->where('transaction_id', 99)->update(['status' => 'submitted']);
 $deactivated = $activation->deactivate(1, 'Test', 1, $newId);
 locationCheck($deactivated['success'], 'Deactivation targets the selected terminal');
+DB::table('transactions')->insert(['id' => 101, 'business_id' => 1, 'location_id' => 1,
+    'type' => 'sell', 'status' => 'final']);
+DB::table('eis_sales')->insert(['business_id' => 1, 'transaction_id' => 101, 'status' => 'pending']);
+$blockedRepeatedDeactivate = $activation->deactivate(1, 'Test', 1, $newId);
+locationCheck(!$blockedRepeatedDeactivate['success']
+    && $blockedRepeatedDeactivate['message'] === Modules\EIS\Services\Terminal\EisTerminalActivationService::UNSUBMITTED_SALES_MESSAGE,
+    'Repeated deactivation cannot clean up a terminal location with an unsubmitted final sale');
+DB::table('eis_sales')->where('transaction_id', 101)->update(['status' => 'submitted']);
 locationCheck((float) DB::table('variation_location_details')->where('location_id', 1)->value('qty_available') === 12.0,
     'Deactivation preserves shared location stock while another terminal remains locally enabled');
 DB::beginTransaction();
@@ -502,6 +519,14 @@ locationCheck($activation->toggle(1, 'token2', 1, 2)['success']
     && App\VariationLocationDetails::where('location_id', 2)->count() === 0,
     'Reactivation does not automatically restore soft-deleted stock');
 DB::table('variation_location_details')->where('location_id', 2)->update(['qty_available' => 0, 'deleted_at' => null]);
+$db = DB::connection();
+$db->table('transactions')->insert(['id' => 100, 'business_id' => 1, 'location_id' => 2,
+    'type' => 'sell', 'status' => 'final']);
+$db->table('eis_sales')->insert(['business_id' => 1, 'transaction_id' => 100, 'status' => 'pending']);
+$blockedToggle = $activation->toggle(1, 'token2', 1, 2);
+locationCheck(!$blockedToggle['success'] && TerminalContext::settings(1, null, 2)->status,
+    'Toggle cannot deactivate a terminal while its location has an unsubmitted final sale');
+$db->table('eis_sales')->where('transaction_id', 100)->update(['status' => 'submitted']);
 locationCheck($activation->toggle(1, 'token2', 1, 2)['success']
     && App\VariationLocationDetails::onlyTrashed()->where('location_id', 2)->count() === 1,
     'Toggle deactivation also soft-deletes zero-quantity stock records');
@@ -1022,7 +1047,7 @@ locationCheck(count(Illuminate\Support\Facades\Http::recorded()) === $requestCou
 $app['config']['eis.base_url'] = 'https://eis.invalid';
 
 $schema->table('transactions', function (Blueprint $table) {
-    foreach (['type', 'status', 'payment_status', 'invoice_no', 'transaction_date'] as $column) { $table->text($column)->nullable(); }
+    foreach (['payment_status', 'invoice_no', 'transaction_date'] as $column) { $table->text($column)->nullable(); }
 });
 DB::table('transactions')->insert([
     ['id' => 3, 'business_id' => 1, 'location_id' => 1, 'type' => 'sell', 'status' => 'final', 'payment_status' => 'paid', 'invoice_no' => 'SALE3'],

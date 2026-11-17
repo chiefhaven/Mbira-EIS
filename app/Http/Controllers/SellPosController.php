@@ -693,14 +693,10 @@ class SellPosController extends Controller
 
                 $this->transactionUtil->activityLog($transaction, 'added');
 
+                SaleSubmissionRule::initiate($transaction, true);
                 DB::commit();
 
-                /**
-                 * A final sell paid in full initiates the EIS submission (see SaleSubmissionRule).
-                 */
-                SaleSubmissionRule::initiate($transaction, true);
-
-                Log::info('Sale committed and EIS event queued', [
+                Log::info('Sale committed after EIS submission handling', [
                     'transaction_id' => $transaction->id
                 ]);
 
@@ -1489,9 +1485,8 @@ class SellPosController extends Controller
                             $this->onlyUpdatePayment($transaction_before, $input);
                         }
                     );
-                    DB::commit();
-
                     SaleSubmissionRule::initiate($transaction_before);
+                    DB::commit();
 
                     $can_print_invoice = auth()->user()->can('print_invoice');
                     $invoice_layout_id = $request->input('invoice_layout_id');
@@ -1646,11 +1641,9 @@ class SellPosController extends Controller
 
                 $this->transactionUtil->activityLog($transaction, 'edited', $transaction_before);
 
-                SellCreatedOrModified::dispatch($transaction);
-
-                DB::commit();
-
                 SaleSubmissionRule::initiate($transaction);
+                SellCreatedOrModified::dispatch($transaction);
+                DB::commit();
 
                 if ($request->input('is_save_and_print') == 1) {
                     $url = $this->transactionUtil->getInvoiceUrl($id, $business_id);
@@ -2291,9 +2284,8 @@ class SellPosController extends Controller
                 $transaction->payment_status = $payment_status;
 
                 $this->transactionUtil->activityLog($transaction, 'payment_edited', $transaction_before);
-                DB::commit();
-
                 SaleSubmissionRule::initiate($transaction);
+                DB::commit();
 
                 $output = [
                     'success' => 1,
@@ -2876,9 +2868,8 @@ class SellPosController extends Controller
 
             $this->transactionUtil->activityLog($transaction, 'edited', $transaction_before);
 
-            DB::commit();
-
             SaleSubmissionRule::initiate($transaction);
+            DB::commit();
 
             $output = ['success' => 1, 'msg' => __('lang_v1.converted_to_invoice_successfully', ['invoice_no' => $transaction->invoice_no])];
         } catch (Exception $e) {

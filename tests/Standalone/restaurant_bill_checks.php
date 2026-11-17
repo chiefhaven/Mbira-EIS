@@ -13,6 +13,10 @@ class IsolatedRestaurantService extends RestaurantBillService
     {
         Illuminate\Database\Capsule\Manager::connection()->afterCommit(function () { ++$this->scheduled; });
     }
+    protected function initiateFiscal(int $id): void
+    {
+        $this->scheduleFiscal($id);
+    }
 }
 
 function restaurantFixture(): array

@@ -784,7 +784,7 @@ class RestaurantBillService
                 $this->fail('Payment ledger did not preserve exact amounts and bill items; no payment was saved.');
             }
             $this->touch($id, $paid ? 'closed' : 'partial');
-            if ($paid) { $this->scheduleFiscal($id); }
+            if ($paid) { $this->initiateFiscal($id); }
             return ['id' => $id, 'payment_id' => $paymentId, 'payment_status' => $status,
                 'balance' => bcsub($bill['balance'], $total, 4), 'fiscal_status' => $paid ? 'pending_submission' : 'not_submitted'];
         });
@@ -835,6 +835,13 @@ class RestaurantBillService
             catch (\Throwable $e) { \Log::error('Restaurant paid bill fiscal submission failed; retry required.', [
                 'transaction_id' => $id, 'message' => $e->getMessage()]); }
         });
+    }
+
+    protected function initiateFiscal(int $id): void
+    {
+        \Modules\EIS\Services\Sales\SaleSubmissionRule::initiate(
+            \App\Transaction::on($this->db->getName())->findOrFail($id)
+        );
     }
 
     public function retryFiscal($user, int $id): array

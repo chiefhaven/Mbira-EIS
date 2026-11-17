@@ -1027,12 +1027,8 @@ class SellController extends ApiController
                     $transaction->invoice_url = $this->transactionUtil->getInvoiceUrl($transaction->id, $business_id);
                     $transaction->payment_link = $this->transactionUtil->getInvoicePaymentLink($transaction->id, $business_id);
 
-                    DB::commit();
-
-                    // A final sell paid in full initiates the EIS submission (see SaleSubmissionRule).
-                    // The sale is already committed: an EIS failure must not turn it into an error response.
-                    // Failed submissions are stored by EIS (eis_sales / eis_failed_transactions) and retried by the scheduler.
                     SaleSubmissionRule::initiate($transaction, true);
+                    DB::commit();
 
                     $output[] = $transaction;
                 } catch (ModelNotFoundException $e) {
@@ -1360,9 +1356,8 @@ class SellController extends ApiController
             $client = $this->getClient();
 
             $this->transactionUtil->activityLog($updated_transaction, 'edited', $transaction_before, ['from_api' => $client->name]);
-            DB::commit();
-
             SaleSubmissionRule::initiate($updated_transaction);
+            DB::commit();
         } catch (ModelNotFoundException $e) {
             DB::rollback();
             $output = $this->modelNotFoundExceptionResult($e);

@@ -256,7 +256,14 @@ class ProductUpsertService {
                 $product->type = $item['type'] ?? 'single';
                 $product->created_by = config('eis.system_user_id', 1);
             }
-            if ($isNew) {
+            if (is_bool($item['is_product'] ?? null)) {
+                if (!$item['is_product']) {
+                    $product->type = 'service';
+                } elseif ($product->type === 'service') {
+                    $product->type = 'single';
+                }
+                $product->enable_stock = $item['is_product'];
+            } elseif ($isNew) {
                 $product->enable_stock = $item['manage_stock'] ?? false;
             }
 
@@ -379,7 +386,8 @@ class ProductUpsertService {
         bool $isVatRegistered
     ): Product {
 
-        if ($product->type !== 'single' || $product->variations()->withTrashed()->count() > 1
+        if (!in_array($product->type, ['single', 'service'], true)
+            || $product->variations()->withTrashed()->count() > 1
             || $product->product_variations()->count() > 1) {
             Log::warning('EIS stock cannot be assigned to an ambiguous product variation.', [
                 'product_id' => $product->id,
@@ -526,7 +534,9 @@ class ProductUpsertService {
         | STOCK LOCATION
         |--------------------------------------------------------------------------
         */
-        if ($restoredDeletedVariation) {
+        if ($product->type === 'service') {
+            $openingStatus = 'service_without_inventory';
+        } elseif ($restoredDeletedVariation) {
             $openingStatus = 'deleted_variation_restored_without_stock';
         } else {
             $openingStock = $item['opening_stock_source'] ?? OpeningStockInitializer::stockSource($item);
@@ -817,8 +827,15 @@ class ProductUpsertService {
         }
         if ($existingTaxId && (int) $existingTaxId !== (int) $selected->id) {
             $existing = EisTaxRate::whereKey($existingTaxId)
-                ->whereHas('configuration', fn ($query) => $query->where('business_id', $businessId))
+                ->where('business_id', $businessId)
                 ->first();
+            $existingConfiguration = $existing
+                ? EisConfiguration::withTrashed()->where('business_id', $businessId)->find($existing->configuration_id)
+                : null;
+            if (!$existing || !$existingConfiguration || $existingConfiguration->trashed()) {
+                return (int) $selected->id;
+            }
+
             $sameRate = $existing && number_format((float) $existing->rate, 3, '.', '')
                 === number_format((float) $selected->rate, 3, '.', '');
             $sameMode = $existing && (string) ($existing->charge_mode ?? 'Item')

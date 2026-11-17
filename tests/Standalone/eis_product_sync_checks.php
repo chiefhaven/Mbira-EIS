@@ -237,6 +237,17 @@ try {
         'A different terminal rate cannot overwrite the shared product tax or its catalog state');
 }
 $db->table('tax_rates')->where('id', 2)->update(['rate' => '0']);
+$db->table('eis_settings')->insert(['id' => 3, 'business_id' => 1, 'location_id' => 3,
+    'status' => 0, 'branch_id' => 'SITE-A', 'deleted_at' => now()]);
+$db->table('eis_configurations')->insert(['id' => 3, 'business_id' => 1, 'eis_setting_id' => 3,
+    'location_id' => 3, 'deleted_at' => now()]);
+$db->table('tax_rates')->insert(['id' => 3, 'business_id' => 1, 'configuration_id' => 3,
+    'tax_rate_id' => 'A', 'name' => 'Retired terminal rate', 'is_activated' => 1, 'rate' => '15']);
+$db->table('products')->where('id', $one->product_id)->update(['tax' => 3]);
+$client->pages = [['data' => [catalogItem('ONE'), catalogItem('TWO', '0')]]];
+$sync->sync((object) ['id' => 2, 'business_id' => 1, 'location_id' => 3, 'site_id' => 'SITE-A'], 1);
+catalogCheck((int) $db->table('products')->where('id', $one->product_id)->value('tax') === 2,
+    'Product sync replaces a shared-product tax mapping owned by a deleted terminal');
 $db->table('business_locations')->insert(['id' => 4, 'business_id' => 1, 'eis_site_id' => 'SITE-B']);
 $stockRow = (array) $db->table('variation_location_details')->where('product_id', $one->product_id)->first();
 unset($stockRow['id']);
@@ -247,8 +258,8 @@ pullCatalog($sync);
 catalogCheck($db->table('variation_location_details')->where('product_id', $one->product_id)
     ->where('location_id', 1)->value('qty_available') === '12.3456',
     'Repull retains the immutable opening quantity rather than replacing local stock');
-catalogCheck(!(bool) Product::findOrFail($one->product_id)->enable_stock,
-    'Repull does not silently enable stock tracking on an existing nonstock product');
+catalogCheck((bool) Product::findOrFail($one->product_id)->enable_stock,
+    'EIS isProduct=true enables ERP stock management on an existing product');
 catalogCheck($db->table('variation_location_details')->where('location_id', 4)->value('qty_available') === '42.0000',
     'Sync overwrites only the exact EIS site location quantity');
 catalogCheck(!Product::withTrashed()->find($two->product_id)->trashed()
@@ -864,5 +875,27 @@ $db->table('eis_settings')->insert(['business_id' => 1, 'location_id' => 1, 'sta
 catalogCheck((new \Modules\EIS\Services\Terminal\InactiveTerminalStock())->unlinkProducts(1, 1) === 0
     && $db->table('product_locations')->where('location_id', 1)->where('product_id', '!=', 100)->exists(),
     'Listings stay while another active terminal serves the location');
+
+[$db, $client, $sync] = catalogFixture();
+$client->pages = [['data' => [[
+    'productCode' => 'SERVICE', 'productName' => 'Consultation', 'siteId' => 'SITE-A',
+    'isProduct' => false, 'type' => 'single', 'price' => '25',
+]]]];
+pullCatalog($sync);
+$service = Product::where('business_id', 1)->firstOrFail();
+catalogCheck($service->type === 'service' && !(bool) $service->enable_stock
+    && $db->table('variations')->where('product_id', $service->id)->exists()
+    && !$db->table('variation_location_details')->where('product_id', $service->id)->exists(),
+    'EIS isProduct=false imports a priced ERP service without managed inventory or a stock quantity');
+
+$client->pages = [['data' => [[
+    'productCode' => 'SERVICE', 'productName' => 'Consultation', 'siteId' => 'SITE-A',
+    'isProduct' => true, 'type' => 'service', 'quantity' => '0', 'price' => '25',
+]]]];
+pullCatalog($sync);
+$service->refresh();
+catalogCheck($service->type === 'single' && (bool) $service->enable_stock
+    && $db->table('variation_location_details')->where('product_id', $service->id)->exists(),
+    'EIS isProduct=true changes the ERP item to a stock-managed product');
 Mockery::close();
 echo "PASS: {$checks} isolated EIS catalog sync, ownership and editor checks; no live sync or network.\n";

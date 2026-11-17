@@ -6,6 +6,7 @@ use App\Transaction;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Modules\EIS\Exceptions\EisSaleException;
 use Modules\EIS\Events\SaleCompleted;
 
 /**
@@ -22,14 +23,16 @@ class SaleSubmissionRule
     /**
      * Ask EIS to submit a sale that was just saved.
      *
-     * Safe to call inside or after the sale's database transaction: SaleCompleted is fired once the
-     * outermost transaction has committed, and never if it rolls back. The SaleCompleted listener
-     * queues the EIS submission after that commit so checkout can return immediately.
-     *
-     * A failure is retained in EIS sale tracking. It does not undo the already-saved sale.
+     * When called inside a transaction, submit immediately if EIS is online. A non-200 EIS response
+     * is thrown to the caller so the enclosing sale/payment transaction can roll back. Offline or
+     * indeterminate submissions remain queued after commit.
      */
     public static function initiate(Transaction $transaction, bool $originalCheckout = false): void
     {
+        if (DB::transactionLevel() > 0 && static::submitOnline($transaction)) {
+            return;
+        }
+
         DB::afterCommit(function () use ($transaction, $originalCheckout) {
             try {
                 // Payment utilities save a separate model; the caller may still hold an unpaid snapshot.
@@ -53,6 +56,45 @@ class SaleSubmissionRule
                 ]);
             }
         });
+    }
+
+    private static function submitOnline(Transaction $transaction): bool
+    {
+        try {
+            $transaction = $transaction->newQuery()
+                ->where('business_id', $transaction->business_id)
+                ->findOrFail($transaction->id);
+            if (!static::qualifies($transaction)
+                || !app(\Modules\EIS\Services\EisSubscriptionAccess::class)
+                    ->allows((int) $transaction->business_id)) {
+                return false;
+            }
+
+            $settings = \Modules\EIS\Services\Terminal\TerminalContext::forSale($transaction);
+            if (!app(\Modules\EIS\Services\Http\EisHealthService::class)
+                ->isOnline((int) $transaction->business_id, (string) $settings->jwt_token)) {
+                return false;
+            }
+
+            $sale = app(SaleSubmissionService::class)->submit($transaction, $settings);
+            return $sale->status === 'submitted';
+        } catch (EisSaleException $exception) {
+            if ($exception->httpStatus !== null && $exception->httpStatus !== 200) {
+                throw $exception;
+            }
+
+            Log::warning('Online EIS submission did not complete; retaining sale for retry', [
+                'transaction_id' => $transaction->id,
+                'http_status' => $exception->httpStatus,
+            ]);
+            return false;
+        } catch (\Throwable $exception) {
+            Log::warning('Online EIS submission could not be completed; retaining sale for retry', [
+                'transaction_id' => $transaction->id,
+                'exception' => get_class($exception),
+            ]);
+            return false;
+        }
     }
 
     /**

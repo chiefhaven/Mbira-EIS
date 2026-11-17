@@ -179,6 +179,7 @@ class TerminalManagementController extends Controller
         $terminal = $this->terminal($request, $terminalId);
         $deleted = DB::transaction(function () use ($request, $terminal) {
             $businessId = (int) $terminal->business_id;
+            \App\Business::whereKey($businessId)->lockForUpdate()->firstOrFail();
             $lockedTerminal = EisSetting::where('business_id', $businessId)
                 ->whereIn('location_id', $this->locations($request, $businessId)->select('id'))
                 ->lockForUpdate()->findOrFail($terminal->id);
@@ -188,31 +189,87 @@ class TerminalManagementController extends Controller
             $terminalConfigurations = EisTerminalConfiguration::whereIn('configuration_id', $configurationIds)
                 ->lockForUpdate()->get(['id', 'is_active']);
 
+            $location = $this->locations($request, $businessId)
+                ->lockForUpdate()->findOrFail($lockedTerminal->location_id);
+            if (\Modules\EIS\Services\Stock\StockReconciliationService::hasUnsubmittedFinalSalesAtLocation(
+                DB::connection(), $businessId, (int) $lockedTerminal->location_id
+            )) {
+                return 'unsubmitted_sales';
+            }
             if ((bool) $lockedTerminal->status || $terminalConfigurations->contains(
                 fn ($configuration) => (bool) $configuration->is_active
             )) {
                 return false;
             }
 
-            $location = $this->locations($request, $businessId)
-                ->lockForUpdate()->findOrFail($lockedTerminal->location_id);
             if ((int) $location->default_eis_setting_id === (int) $lockedTerminal->id) {
                 $location->default_eis_setting_id = null;
                 $location->save();
             }
 
             EisTerminalConfiguration::whereIn('configuration_id', $configurationIds)->delete();
+            $this->deleteTerminalTaxRates($businessId, $configurationIds);
             EisConfiguration::whereIn('id', $configurationIds)->delete();
             $lockedTerminal->delete();
 
             return true;
         });
 
+        if ($deleted === 'unsubmitted_sales') {
+            return $this->result([
+                'success' => false,
+                'message' => EisTerminalActivationService::UNSUBMITTED_SALES_MESSAGE,
+            ]);
+        }
         if (!$deleted) {
             return $this->result(['success' => false, 'message' => 'Deactivate the terminal before deleting it.']);
         }
 
         return $this->result(['success' => true, 'message' => 'Terminal deleted. EIS sales history is retained.']);
+    }
+
+    private function deleteTerminalTaxRates(int $businessId, $configurationIds): void
+    {
+        $rates = DB::table('tax_rates')->whereIn('configuration_id', $configurationIds)
+            ->lockForUpdate()->get(['id']);
+        if ($rates->isEmpty()) {
+            return;
+        }
+
+        $rateIds = $rates->pluck('id');
+        $schema = DB::connection()->getSchemaBuilder();
+        if ($schema->hasTable('products') && $schema->hasColumn('products', 'tax')) {
+            DB::table('products')->where('business_id', $businessId)
+                ->whereIn('tax', $rateIds)->update(['tax' => null]);
+        }
+        if ($schema->hasTable('business') && $schema->hasColumn('business', 'default_sales_tax')) {
+            DB::table('business')->where('id', $businessId)
+                ->whereIn('default_sales_tax', $rateIds)->update(['default_sales_tax' => null]);
+        }
+
+        $references = [
+            ['transactions', 'tax_id'],
+            ['transaction_sell_lines', 'tax_id'],
+            ['purchase_lines', 'tax_id'],
+            ['group_sub_taxes', 'tax_id'],
+            ['group_sub_taxes', 'group_tax_id'],
+        ];
+        foreach ($rateIds as $rateId) {
+            $inUse = false;
+            foreach ($references as [$table, $column]) {
+                if ($schema->hasTable($table) && $schema->hasColumn($table, $column)
+                    && DB::table($table)->where($column, $rateId)->exists()) {
+                    $inUse = true;
+                    break;
+                }
+            }
+
+            if ($inUse && $schema->hasColumn('tax_rates', 'deleted_at')) {
+                DB::table('tax_rates')->where('id', $rateId)->update(['deleted_at' => now()]);
+            } elseif (!$inUse) {
+                DB::table('tax_rates')->where('id', $rateId)->delete();
+            }
+        }
     }
 
     public function renewTokens(Request $request, int $terminalId)

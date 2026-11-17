@@ -1209,9 +1209,8 @@ class SavedSaleSplitService
 
     protected function scheduleFiscal($id)
     {
-        $this->db->afterCommit(function () use ($id) {
-            try { \Modules\EIS\Services\Sales\SaleSubmissionRule::initiate(\App\Transaction::findOrFail($id)); }
-            catch (\Throwable $e) { \Illuminate\Support\Facades\Log::error('Saved checkout fiscal dispatch failed after commit', ['transaction_id' => $id, 'message' => $e->getMessage()]); }
-        });
+        \Modules\EIS\Services\Sales\SaleSubmissionRule::initiate(
+            \App\Transaction::on($this->db->getName())->findOrFail($id)
+        );
     }
 }

@@ -33,7 +33,7 @@ foreach ([
     'eis_terminal_configurations' => ['configuration_id', 'terminal_id', 'terminal_position', 'taxpayer_id', 'is_active'],
     'eis_sales' => ['business_id', 'transaction_id', 'fiscal_invoice_number', 'request_payload', 'status'],
     'eis_failed_transactions' => ['business_id', 'transaction_id'],
-    'transactions' => ['business_id', 'location_id'],
+    'transactions' => ['business_id', 'location_id', 'type', 'status'],
 ] as $name => $columns) {
     $schema->create($name, function (Blueprint $table) use ($name, $columns) {
         $table->increments('id');

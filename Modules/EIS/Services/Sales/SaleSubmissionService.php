@@ -179,9 +179,21 @@ class SaleSubmissionService
 
             // The client returns failures instead of throwing. Persist these so
             // queue/manual retries are recognized and include the signature.
-            if (! ($response['success'] ?? false) || ($response['data']['statusCode'] ?? null) !== 1) {
+            $httpStatus = isset($response['status']) && is_numeric($response['status'])
+                ? (int) $response['status'] : null;
+            if (($httpStatus !== null && $httpStatus !== 200) || ! ($response['success'] ?? false)
+                || ($response['data']['statusCode'] ?? null) !== 1) {
                 $eisSale->update(['response_payload' => $response]);
                 $payload = $this->prepareOfflineValidationData($transaction, $settings, $eisSale, $payload);
+                if ($httpStatus !== null && $httpStatus !== 200) {
+                    $duplicateInvoice = ($response['error_code'] ?? null) === 'DUPLICATE_INVOICE';
+                    throw new EisSaleException(
+                        $response['error'] ?? $response['data']['remark'] ?? sprintf('EIS returned HTTP %s', $httpStatus),
+                        $duplicateInvoice ? EisSaleException::DUPLICATE_INVOICE : 0,
+                        null,
+                        $httpStatus
+                    );
+                }
                 if (($response['error_code'] ?? null) === 'DUPLICATE_INVOICE') {
                     $duplicateInvoice = true;
                     $resolution = $this->outcomeRecovery()->resolve($eisSale, $eisSetting, $payload, $response, 'duplicate');
@@ -190,7 +202,9 @@ class SaleSubmissionService
                     }
                     throw new EisSaleException(
                         'EIS reports this invoice number already exists. Automatic lookup could not verify an exact match; no further submission will be attempted.',
-                        EisSaleException::DUPLICATE_INVOICE
+                        EisSaleException::DUPLICATE_INVOICE,
+                        null,
+                        $httpStatus
                     );
                 }
                 if ($this->isAmbiguousSubmissionResponse($response)) {
@@ -204,7 +218,8 @@ class SaleSubmissionService
                         );
                     }
                 }
-                throw new EisSaleException($response['error'] ?? $response['data']['remark'] ?? 'EIS rejected the invoice');
+                throw new EisSaleException($response['error'] ?? $response['data']['remark'] ?? 'EIS rejected the invoice',
+                    0, null, $httpStatus);
             }
 
             // ----------------------------

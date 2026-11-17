@@ -86,10 +86,14 @@ class ProductSyncService
                     throw new \UnexpectedValueException('EIS product pull contains duplicate product identifiers.');
                 }
                 $data = $this->transformer->fromEis($item, $eisId, $requestSite);
-                if ($data['site_id'] !== $requestSite || $data['opening_stock_source']['quantity'] === null) {
+                $stockSource = $data['opening_stock_source'];
+                $serviceWithoutStock = $data['is_product'] === false
+                    && $stockSource['reason'] === 'missing_stock';
+                if ($data['site_id'] !== $requestSite
+                    || ($stockSource['quantity'] === null && !$serviceWithoutStock)) {
                     $reason = $data['site_id'] !== $requestSite
                         ? 'invalid_or_mismatched_site'
-                        : $data['opening_stock_source']['reason'];
+                        : $stockSource['reason'];
                     $values = [];
                     foreach (['quantity', 'stock', 'stockQuantity', 'siteId', 'site_id', 'locationId'] as $field) {
                         if (array_key_exists($field, $item)) {

@@ -56,6 +56,39 @@ foreach ([
         }
     });
 }
+$schema->create('tax_rates', function (Blueprint $table) {
+    $table->increments('id');
+    $table->integer('configuration_id');
+    $table->string('tax_rate_id');
+    $table->decimal('rate', 10, 3)->default(0);
+    $table->string('charge_mode')->default('Item');
+    $table->softDeletes();
+});
+$schema->create('business', function (Blueprint $table) {
+    $table->increments('id');
+    $table->integer('default_sales_tax')->nullable();
+});
+$schema->create('products', function (Blueprint $table) {
+    $table->increments('id');
+    $table->integer('business_id');
+    $table->integer('tax')->nullable();
+    $table->foreign('tax')->references('id')->on('tax_rates');
+});
+$schema->create('transactions', function (Blueprint $table) {
+    $table->increments('id');
+    $table->integer('business_id')->nullable();
+    $table->integer('location_id')->nullable();
+    $table->string('type')->nullable();
+    $table->string('status')->nullable();
+    $table->integer('tax_id')->nullable();
+    $table->foreign('tax_id')->references('id')->on('tax_rates');
+});
+$schema->create('eis_sales', function (Blueprint $table) {
+    $table->increments('id');
+    $table->integer('business_id');
+    $table->integer('transaction_id');
+    $table->string('status');
+});
 $db = $capsule->getConnection();
 $db->table('business_locations')->insert([
     ['id' => 10, 'business_id' => 1, 'name' => 'Allowed', 'default_eis_setting_id' => 101],
@@ -81,6 +114,20 @@ foreach ([[101, 1, 10, 1], [102, 1, 10, 0], [103, 1, 11, 1], [104, 1, null, 1], 
         'terminal_label' => 'Label '.$id, 'is_active' => $active,
     ]);
 }
+$db->table('tax_rates')->insert([
+    ['id' => 1, 'configuration_id' => 1101, 'tax_rate_id' => 'A'],
+    ['id' => 2, 'configuration_id' => 1102, 'tax_rate_id' => 'A'],
+    ['id' => 3, 'configuration_id' => 1103, 'tax_rate_id' => 'A'],
+    ['id' => 4, 'configuration_id' => 1201, 'tax_rate_id' => 'A'],
+    ['id' => 5, 'configuration_id' => 1102, 'tax_rate_id' => 'B'],
+]);
+$db->table('business')->insert(['id' => 1, 'default_sales_tax' => 2]);
+$db->table('products')->insert([
+    ['id' => 1, 'business_id' => 1, 'tax' => 2],
+    ['id' => 2, 'business_id' => 1, 'tax' => 5],
+    ['id' => 3, 'business_id' => 1, 'tax' => 1],
+]);
+$db->table('transactions')->insert(['id' => 1, 'tax_id' => 2]);
 $user = new class {
     public int $id = 7;
     public int $business_id = 1;
@@ -269,18 +316,50 @@ managementCheck((int) $db->table('business_locations')->where('id', 10)->value('
 managementCheck((int) $db->table('business_locations')->where('id', 11)->value('default_eis_setting_id') === 103
     && (int) $db->table('business_locations')->where('id', 20)->value('default_eis_setting_id') === 201,
     'Setting default never modifies other locations or businesses');
+$db->table('transactions')->insert(['id' => 99, 'business_id' => 1, 'location_id' => 10,
+    'type' => 'sell', 'status' => 'final']);
+$db->table('eis_sales')->insert(['business_id' => 1, 'transaction_id' => 99, 'status' => 'pending']);
+$pendingDelete = $controller->destroy(managementRequest(), 102);
+managementCheck($pendingDelete->getStatusCode() === 422
+    && $pendingDelete->getData(true)['message'] === EisTerminalActivationService::UNSUBMITTED_SALES_MESSAGE
+    && $db->table('eis_settings')->where('id', 102)->whereNull('deleted_at')->exists(),
+    'Terminals with unsubmitted final sales cannot be deleted');
+$db->table('eis_sales')->where('transaction_id', 99)->update(['status' => 'submitted']);
 $activeDelete = $controller->destroy(managementRequest(), 102);
 managementCheck($activeDelete->getStatusCode() === 422
-    && $activeDelete->getData(true)['message'] === 'Deactivate the terminal before deleting it.',
-    'Active terminals cannot be deleted');
+    && $activeDelete->getData(true)['message'] === 'Deactivate the terminal before deleting it.'
+    && $db->table('tax_rates')->where('configuration_id', 1102)->exists(),
+    'Active terminals cannot be deleted and their tax rates are preserved');
 $db->table('eis_settings')->where('id', 102)->update(['status' => 0]);
 $db->table('eis_terminal_configurations')->where('configuration_id', 1102)->update(['is_active' => 0]);
+$db->table('transactions')->insert(['id' => 100, 'business_id' => 1, 'location_id' => 10,
+    'type' => 'sell', 'status' => 'final']);
+$db->table('eis_sales')->insert(['business_id' => 1, 'transaction_id' => 100, 'status' => 'pending']);
+$pendingInactiveDelete = $controller->destroy(managementRequest(), 102);
+managementCheck($pendingInactiveDelete->getStatusCode() === 422
+    && $pendingInactiveDelete->getData(true)['message'] === EisTerminalActivationService::UNSUBMITTED_SALES_MESSAGE
+    && $db->table('eis_settings')->where('id', 102)->whereNull('deleted_at')->exists(),
+    'An inactive terminal with unsubmitted final sales cannot be deleted');
+$db->table('eis_sales')->where('transaction_id', 100)->update(['status' => 'submitted']);
 $deleted = $controller->destroy(managementRequest(), 102);
 managementCheck($deleted->getData(true)['success']
     && $db->table('eis_settings')->where('id', 102)->whereNotNull('deleted_at')->exists()
     && $db->table('eis_configurations')->where('id', 1102)->whereNotNull('deleted_at')->exists()
     && $db->table('eis_terminal_configurations')->where('id', 2102)->whereNotNull('deleted_at')->exists(),
     'Deleting an inactive terminal soft-deletes its settings and configuration records');
+managementCheck(!$db->table('tax_rates')->where('configuration_id', 1102)->whereNull('deleted_at')->exists()
+    && $db->table('tax_rates')->where('configuration_id', 1101)->exists()
+    && $db->table('tax_rates')->where('configuration_id', 1103)->exists()
+    && $db->table('tax_rates')->where('configuration_id', 1201)->exists(),
+    'Deleting a terminal removes only its rates from active tax lookups');
+managementCheck($db->table('tax_rates')->where('id', 2)->whereNotNull('deleted_at')->exists()
+    && !$db->table('tax_rates')->where('id', 5)->exists(),
+    'Referenced tax history is retained while an unused terminal tax rate is physically deleted');
+managementCheck($db->table('products')->where('id', 1)->whereNull('tax')->exists()
+    && $db->table('products')->where('id', 2)->whereNull('tax')->exists()
+    && (int) $db->table('products')->where('id', 3)->value('tax') === 1
+    && $db->table('business')->where('id', 1)->whereNull('default_sales_tax')->exists(),
+    'Deleting a terminal clears its current product/default-tax references without altering other products');
 managementCheck($db->table('business_locations')->where('id', 10)->value('default_eis_setting_id') === null,
     'Deleting a location default clears the location reference');
 managementReject(fn () => $controller->destroy(managementRequest(), 102), 404,

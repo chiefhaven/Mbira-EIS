@@ -28,6 +28,7 @@ class ProductTransformer
             'name' => $this->extractName($item, $eisId),
             'sku' => $this->extractSku($item, $eisId),
             'type' => $this->extractType($item),
+            'is_product' => $this->extractIsProduct($item),
             'price' => $this->extractPrice($item),
             'cost' => $this->extractCost($item),
             'stock' => $stockSource['quantity'],
@@ -170,8 +171,16 @@ class ProductTransformer
      */
     private function extractType(array $item): string
     {
+        $isProduct = $this->extractIsProduct($item);
+        if ($isProduct === false) {
+            return 'service';
+        }
+
         // Primary: Check multiple type fields
         $type = $item['type'] ?? $item['productType'] ?? null;
+        if ($isProduct === true && strtolower(trim((string) $type)) === 'service') {
+            return 'single';
+        }
         
         // Secondary: Validate allowed types
         $allowedTypes = ['single', 'variable', 'combo', 'service'];
@@ -193,6 +202,15 @@ class ProductTransformer
             'type' => $type
         ]);
         return 'single';
+    }
+
+    private function extractIsProduct(array $item): ?bool
+    {
+        if (!array_key_exists('isProduct', $item)) {
+            return null;
+        }
+
+        return filter_var($item['isProduct'], FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
     }
 
     /**

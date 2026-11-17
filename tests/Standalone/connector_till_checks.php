@@ -74,14 +74,17 @@ DB::table('eis_configurations')->where('eis_setting_id', 1)->update([
     ]]]),
 ]);
 $terminal = collect($controller->index(tillRequest())->getData(true)['data']['terminals'])->firstWhere('id', 1);
-locationCheck($terminal['tax_office'] === 'Central office' && $terminal['is_vat_registered'] === true,
-    'Terminal response uses taxpayer tax office and VAT status from its configuration');
+locationCheck($terminal['tax_office'] === 'Central office' && $terminal['is_vat_registered'] === false,
+    'Terminal response uses the stored VAT registration status');
 DB::table('eis_configurations')->where('eis_setting_id', 1)->update([
-    'raw_response' => json_encode(['data' => ['taxpayerConfiguration' => ['taxOffice' => ['name' => ' ']]]]),
+    'is_vat_registered' => true,
+    'raw_response' => json_encode(['data' => ['taxpayerConfiguration' => [
+        'isVATRegistered' => false, 'taxOffice' => ['name' => ' '],
+    ]]]),
 ]);
 $terminal = collect($controller->index(tillRequest())->getData(true)['data']['terminals'])->firstWhere('id', 1);
-locationCheck($terminal['tax_office'] === 'OFFICE-1' && $terminal['is_vat_registered'] === false,
-    'Terminal response falls back to stored tax office code and VAT status');
+locationCheck($terminal['tax_office'] === 'OFFICE-1' && $terminal['is_vat_registered'] === true,
+    'Terminal response uses stored VAT status when raw taxpayer data conflicts');
 DB::table('eis_configurations')->where('eis_setting_id', 1)->update([
     'is_vat_registered' => $originalConfiguration->is_vat_registered,
     'tax_office_code' => $originalConfiguration->tax_office_code,

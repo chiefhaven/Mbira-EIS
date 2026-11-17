@@ -313,7 +313,7 @@ $service->upsert(1, $data, 'EIS-ONE', (object) ['id' => 1, 'business_id' => 1,
     'location_id' => 2, 'site_id' => 'SITE-A'], 2);
 verify($db->table('purchase_lines')->count() === 0, 'missing source not initialized');
 
-foreach ([['isProduct' => false], ['type' => 'variable'], ['variations' => [['quantity' => '1'], ['quantity' => '2']]],
+foreach ([['type' => 'variable'], ['variations' => [['quantity' => '1'], ['quantity' => '2']]],
     ['siteId' => null], ['siteId' => 'UNKNOWN'], ['siteId' => 'SITE-A', 'site_id' => 'SITE-B']] as $override) {
     [$db, $service] = openingFixture();
     $invalidSite = array_key_exists('siteId', $override);
@@ -527,7 +527,12 @@ verify($db->table('variations')->count() === 1 && $db->table('purchase_lines')->
 
 [$db, $service] = openingFixture();
 importItem($service, ['isProduct' => false]);
+verify($db->table('products')->value('type') === 'service'
+    && $db->table('products')->value('enable_stock') === '0'
+    && $db->table('purchase_lines')->count() === 0, 'isProduct=false imports a non-stock service');
 importItem($service, ['isProduct' => true]);
-verify($db->table('products')->value('enable_stock') === '0' && $db->table('purchase_lines')->count() === 0, 'import cannot silently enable tracking on existing nonstock product');
+verify($db->table('products')->value('type') === 'single'
+    && $db->table('products')->value('enable_stock') === '1'
+    && $db->table('purchase_lines')->count() === 1, 'isProduct=true enables tracking on the existing ERP product');
 
 echo "PASS: $checks isolated EIS opening-stock checks; no application boot, persistent database or network.\n";

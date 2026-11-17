@@ -16,6 +16,8 @@ use Modules\EIS\Models\EisSale;
 use Modules\EIS\Models\EisSetting;
 use Modules\EIS\Models\EisTaxRate;
 use Modules\EIS\Services\Http\EisSaleClient;
+use Modules\EIS\Services\Http\EisHealthService;
+use Modules\EIS\Services\EisSubscriptionAccess;
 use Modules\EIS\Services\Sales\InvoiceNumberGenerator;
 use Modules\EIS\Services\Sales\OfflineSignatureService;
 use Modules\EIS\Services\Sales\SaleResponseService;
@@ -23,6 +25,7 @@ use Modules\EIS\Services\Sales\SaleOutcomeRecoveryService;
 use Modules\EIS\Services\Sales\SaleSubmissionService;
 use Modules\EIS\Services\Sales\SalesApiClient;
 use Modules\EIS\Services\Sales\SaleTransformer;
+use Modules\EIS\Services\Sales\SaleSubmissionRule;
 
 $container = new Container();
 $capsule = new Capsule($container);
@@ -923,8 +926,35 @@ $schema->table('eis_settings', function (Blueprint $t) {
 });
 DB::table('eis_settings')->where('id', 1)->update([
     'secret_key' => 'fixture-secret', 'device_id' => 'BLOCK-TEST', 'jwt_token' => 'fixture-token',
+    'status' => true, 'is_blocked' => false, 'blocking_reason' => null,
 ]);
 $settings = EisSetting::findOrFail(1);
+$container->instance(EisSubscriptionAccess::class, new class extends EisSubscriptionAccess {
+    public function allows(int $businessId): bool { return true; }
+    public function assertAllowed(int $businessId): void {}
+});
+$container->instance(EisHealthService::class, new class extends EisHealthService {
+    public function isOnline(int $businessId, string $token): bool { return true; }
+});
+$container->instance(SaleSubmissionService::class, $service);
+$client->response = ['success' => false, 'error' => 'EIS denied the request.', 'error_code' => 'HTTP_ERROR_403', 'status' => 403];
+DB::beginTransaction();
+$rollbackSale = splitSubmissionFixture('INV-ROLLBACK');
+$rollbackSaleId = $rollbackSale->id;
+$rollbackSale->payment_status = 'due';
+DB::table('transactions')->where('id', $rollbackSaleId)->update(['payment_status' => 'paid']);
+try {
+    SaleSubmissionRule::initiate($rollbackSale);
+    throw new RuntimeException('Expected non-200 EIS response to abort the sale');
+} catch (EisSaleException $exception) {
+    checkRetry($exception->httpStatus === 403, 'The HTTP status is preserved for checkout rollback decisions');
+    DB::rollBack();
+}
+checkRetry(!Transaction::whereKey($rollbackSaleId)->exists()
+    && !EisSale::where('transaction_id', $rollbackSaleId)->exists()
+    && !DB::table('eis_failed_transactions')->where('transaction_id', $rollbackSaleId)->exists(),
+    'A non-200 response rolls back the sale and its EIS/retry tracking, including paid split checkout');
+$client->response = ['success' => false, 'error' => 'Fixture offline'];
 $blocks = new Modules\EIS\Services\Terminal\TerminalBlockService();
 $utilities = new Modules\EIS\Services\Utilities\EisUtilitiesClient();
 $http = new Illuminate\Http\Client\Factory();

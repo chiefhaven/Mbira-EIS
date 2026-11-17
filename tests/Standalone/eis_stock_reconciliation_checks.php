@@ -111,8 +111,12 @@ $client->inventory = [];
 stockReject(fn () => $service->preview(1, 1, 7), 'Missing remote product is never interpreted as zero');
 $client->inventory = ['EIS-ONE' => '12.0000'];
 $db->table('transactions')->insert(['id' => 99, 'business_id' => 1, 'location_id' => 2, 'type' => 'sell', 'status' => 'final']);
+verify(StockReconciliationService::locationWithUnsubmittedFinalSales($db, 1) === 2,
+    'Automatic product sync preflight identifies the location with an unsubmitted final sale');
 stockReject(fn () => $service->preview(1, 1, 7), 'Outstanding fiscal sale blocks authoritative overwrite');
 $db->table('eis_sales')->insert(['transaction_id' => 99, 'business_id' => 1, 'status' => 'submitted']);
+verify(StockReconciliationService::locationWithUnsubmittedFinalSales($db, 1) === null,
+    'Submitting the final sale clears the automatic product sync preflight blocker');
 $preview = $service->preview(1, 1, 7);
 verify($preview->status === 'preview', 'Submitted final sale clears fiscal-stock blocker');
 stockReject(fn () => $service->apply(2, $preview->id, 7), 'Tenant cannot apply another tenant snapshot');
