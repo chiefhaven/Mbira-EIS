@@ -28,12 +28,20 @@ class TillController extends Controller
         $configurationsByTerminal = EisConfiguration::where('business_id', $user->business_id)
             ->whereIn('eis_setting_id', $terminals->pluck('id'))
             ->orderByDesc('id')
-            ->get(['eis_setting_id', 'is_vat_registered', 'tax_office_code', 'raw_response'])
+            ->get([
+                'eis_setting_id',
+                'is_VAT_Registered as vat_registered',
+                'tax_office_code',
+                'raw_response',
+            ])
             ->unique('eis_setting_id')
             ->keyBy('eis_setting_id');
         foreach ($terminals as $terminal) {
             $configuration = $configurationsByTerminal->get($terminal->id);
-            $terminal->is_vat_registered = $configuration?->is_vat_registered;
+            $storedVatRegistration = $configuration?->vat_registered;
+            $terminal->is_vat_registered = $storedVatRegistration === null
+                ? null
+                : (bool) $storedVatRegistration;
             $taxOfficeName = $configuration
                 ? data_get($configuration->raw_response, 'data.taxpayerConfiguration.taxOffice.name')
                 : null;
