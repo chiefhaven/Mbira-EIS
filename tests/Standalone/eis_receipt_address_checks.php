@@ -22,6 +22,13 @@ $capsule = new Capsule($app);
 $capsule->addConnection(['driver' => 'sqlite', 'database' => ':memory:']);
 $capsule->setAsGlobal();
 $app->instance('db', $capsule->getDatabaseManager());
+$capsule->schema()->create('business', function (Blueprint $t) {
+    $t->integer('id'); $t->boolean('is_vat_registered')->nullable();
+});
+$capsule->table('business')->insert([
+    ['id' => 6, 'is_vat_registered' => true],
+    ['id' => 7, 'is_vat_registered' => false],
+]);
 $capsule->schema()->create('eis_configurations', function (Blueprint $t) {
     $t->integer('id'); $t->integer('business_id'); $t->integer('location_id'); $t->integer('eis_setting_id');
     $t->text('raw_response')->nullable();
@@ -60,6 +67,8 @@ $render = function (bool $fiscal, string $printer = 'browser', int $terminal = 1
     $il = (object) array_fill_keys(['show_landmark', 'show_city', 'show_state', 'show_zip_code', 'show_country'], $showLegacy ? 1 : 0);
     $location_details = (object) ['landmark' => 'Legacy street', 'city' => 'Legacy city',
         'state' => 'Legacy district', 'zip_code' => '100', 'country' => 'Malawi'];
+    $business_details = (object) ['is_vat_registered' => DB::table('business')
+        ->where('id', $transaction->business_id)->value('is_vat_registered')];
     $receipt_printer_type = $printer;
     $output = [];
     eval($configurationBlock);
@@ -80,13 +89,14 @@ foreach ([false, true] as $registered) {
     $raw = ['data' => ['taxpayerConfiguration' => ['isVATRegistered' => $registered],
         'globalConfiguration' => ['taxrates' => [['id' => 'A', 'rate' => 17.5]]]]];
     foreach ([json_encode($raw), json_encode(json_encode($raw)), null] as $storedResponse) {
+        DB::table('business')->where('id', 6)->update(['is_vat_registered' => $registered]);
         DB::table('eis_configurations')->where('id', 1)->update([
-            'is_vat_registered' => $registered, 'raw_response' => $storedResponse,
+            'is_vat_registered' => !$registered, 'raw_response' => $storedResponse,
         ]);
         $result = $render(true);
         addressCheck($result[2] === $registered
             && $result[3] === ($registered ? 'VAT Registered' : 'Not VAT Registered'),
-            'Original sale terminal registration renders with normal, legacy double-encoded or missing raw configuration');
+            'Receipt VAT marker uses business registration despite conflicting terminal configuration');
         if ($storedResponse !== null) {
             addressCheck($result[4] === $raw['data'],
                 'Normal and legacy double-encoded configuration retain fiscal tax rates');
@@ -97,8 +107,10 @@ DB::table('eis_configurations')->where('id', 1)->update([
     'is_vat_registered' => null,
     'raw_response' => json_encode(['data' => ['taxpayerConfiguration' => ['isVATRegistered' => false]]]),
 ]);
-addressCheck($render(true)[2] === false, 'Raw registration remains available when the normalized status is unknown');
-addressCheck($render(false)[2] === null, 'Non-fiscal receipts do not inherit another terminal registration');
+DB::table('business')->where('id', 6)->update(['is_vat_registered' => true]);
+addressCheck($render(true)[2] === true, 'Fiscal receipt ignores terminal and raw registration when business status is available');
+DB::table('business')->where('id', 6)->update(['is_vat_registered' => false]);
+addressCheck($render(false)[2] === false, 'Non-fiscal receipt uses its business VAT registration status');
 DB::table('eis_terminal_configurations')->where('configuration_id', 4)
     ->update(['address_lines' => '["Location 49 address"]']);
 addressCheck($render(true, 'browser', 13, true, 49)[0] === 'Location 49 address',
