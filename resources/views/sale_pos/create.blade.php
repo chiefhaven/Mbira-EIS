@@ -20,6 +20,7 @@
             'method' => 'post',
             'id' => 'add_pos_sell_form',
         ]) !!}
+        {!! Form::hidden('pos_checkout_operation_id', (string) \Illuminate\Support\Str::uuid(), ['id' => 'pos_checkout_operation_id']) !!}
         <div class="row mb-12">
             <div class="col-md-12 tw-pt-0 tw-mb-14">
                 <div class="row tw-flex lg:tw-flex-row md:tw-flex-col sm:tw-flex-col tw-flex-col tw-items-start md:tw-gap-4">

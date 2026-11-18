@@ -369,11 +369,48 @@ class SellPosController extends Controller
             'is_export' => 'sometimes|boolean',
             'is_relief' => 'sometimes|boolean',
             'buyerAuthorizationCode' => 'nullable|string|max:1000',
+            'pos_checkout_operation_id' => 'nullable|uuid',
         ]);
 
         $is_direct_sale = false;
         if (!empty($request->input('is_direct_sale'))) {
             $is_direct_sale = true;
+        }
+        $is_pos_checkout = !$is_direct_sale && $request->input('status') === 'final';
+        $pos_checkout_operation_id = $is_pos_checkout ? $request->input('pos_checkout_operation_id') : null;
+        $pos_checkout_payload = $request->request->all();
+        unset($pos_checkout_payload['_token'], $pos_checkout_payload['pos_checkout_operation_id']);
+        $pos_checkout_idempotency = app(\App\Services\Sales\PosCheckoutIdempotency::class);
+
+        if ($is_pos_checkout) {
+            if (empty($pos_checkout_operation_id)) {
+                return response()->json([
+                    'success' => 0,
+                    'msg' => trans('lang_v1.pos_checkout_operation_required'),
+                ], 422);
+            }
+
+            $existing_checkout = $pos_checkout_idempotency->lookup(
+                DB::connection(),
+                (int) $request->session()->get('user.business_id'),
+                (int) $request->session()->get('user.id'),
+                $pos_checkout_operation_id,
+                $pos_checkout_payload
+            );
+            if ($existing_checkout && !empty($existing_checkout['conflict'])) {
+                return response()->json([
+                    'success' => 0,
+                    'msg' => trans('lang_v1.pos_checkout_operation_conflict'),
+                ], 409);
+            }
+            if ($existing_checkout && !empty($existing_checkout['replay'])) {
+                return [
+                    'success' => 1,
+                    'msg' => trans('lang_v1.pos_checkout_already_processed'),
+                    'receipt' => '',
+                    'next_pos_checkout_operation_id' => $pos_checkout_idempotency->nextOperationId(),
+                ];
+            }
         }
 
         //Check if there is a open register, if no then redirect to Create Register screen.
@@ -381,8 +418,9 @@ class SellPosController extends Controller
             return redirect()->action([\App\Http\Controllers\CashRegisterController::class, 'create']);
         }
 
+        $pos_checkout_operation_claimed = false;
         try {
-            $input = $request->except('_token');
+            $input = $request->except(['_token', 'pos_checkout_operation_id']);
             $input = $this->productUtil->applySalesTaxConfiguration(
                 (int) $request->session()->get('user.business_id'), $input
             );
@@ -452,6 +490,33 @@ class SellPosController extends Controller
                 }
 
                 DB::beginTransaction();
+
+                if ($is_pos_checkout) {
+                    $checkout_claim = $pos_checkout_idempotency->claim(
+                        DB::connection(),
+                        (int) $business_id,
+                        (int) $user_id,
+                        $pos_checkout_operation_id,
+                        $pos_checkout_payload
+                    );
+                    if (!empty($checkout_claim['conflict'])) {
+                        DB::rollBack();
+                        return response()->json([
+                            'success' => 0,
+                            'msg' => trans('lang_v1.pos_checkout_operation_conflict'),
+                        ], 409);
+                    }
+                    if (!empty($checkout_claim['replay'])) {
+                        DB::rollBack();
+                        return [
+                            'success' => 1,
+                            'msg' => trans('lang_v1.pos_checkout_already_processed'),
+                            'receipt' => '',
+                            'next_pos_checkout_operation_id' => $pos_checkout_idempotency->nextOperationId(),
+                        ];
+                    }
+                    $pos_checkout_operation_claimed = true;
+                }
 
                 if (empty($request->input('transaction_date'))) {
                     $input['transaction_date'] = \Carbon::now();
@@ -694,6 +759,14 @@ class SellPosController extends Controller
                 $this->transactionUtil->activityLog($transaction, 'added');
 
                 SaleSubmissionRule::initiate($transaction, true);
+                if ($pos_checkout_operation_claimed) {
+                    $pos_checkout_idempotency->complete(
+                        DB::connection(),
+                        (int) $business_id,
+                        $pos_checkout_operation_id,
+                        (int) $transaction->id
+                    );
+                }
                 DB::commit();
 
                 Log::info('Sale committed after EIS submission handling', [
@@ -744,6 +817,9 @@ class SellPosController extends Controller
 
                 if (!empty($whatsapp_link)) {
                     $output['whatsapp_link'] = $whatsapp_link;
+                }
+                if ($is_pos_checkout) {
+                    $output['next_pos_checkout_operation_id'] = $pos_checkout_idempotency->nextOperationId();
                 }
             } else {
                 $output = ['success' => 0,

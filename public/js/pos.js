@@ -951,6 +951,9 @@ $(document).ready(function() {
                             }
 
                             reset_pos_form();
+                            if (result.next_pos_checkout_operation_id) {
+                                $('#pos_checkout_operation_id').val(result.next_pos_checkout_operation_id);
+                            }
                         } else {
                             toastr.error(result.msg);
                         }
