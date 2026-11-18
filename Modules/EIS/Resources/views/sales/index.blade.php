@@ -196,10 +196,15 @@ $(function() {
             fetchAndPrintReceipt(button, printWindow);
         }).fail(function(xhr) {
             var result = xhr.responseJSON || {};
-            if (result.message === 'Terminal Not available for sync' || xhr.status === 502) {
-                var statusMessage = result.message === 'Terminal Not available for sync'
+            var terminalUnavailable = result.message === 'Terminal Not available for sync';
+            var unconfirmedLookup = xhr.status === 409
+                && result.message === 'EIS did not confirm the invoice lookup. No local data was changed.';
+            if (terminalUnavailable || xhr.status === 502 || unconfirmedLookup) {
+                var statusMessage = terminalUnavailable
                     ? 'Terminal Not available for sync. Opening the saved POS receipt without EIS sync.'
-                    : 'EIS is offline. Opening the saved POS receipt without EIS sync.';
+                    : (unconfirmedLookup
+                        ? 'EIS did not confirm the invoice lookup. Opening the saved POS receipt without EIS sync.'
+                        : 'EIS is offline. Opening the saved POS receipt without EIS sync.');
                 fetchAndPrintReceipt(button, printWindow,
                     statusMessage);
                 return;

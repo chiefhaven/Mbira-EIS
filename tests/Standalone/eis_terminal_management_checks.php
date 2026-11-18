@@ -471,8 +471,11 @@ managementCheck(!str_contains($salesView, 'Normal sales use the existing POS fis
     'EIS sales syncs each sale and prints only its POS receipt in a new window');
 managementCheck(str_contains($salesScript, "result.message === 'Terminal Not available for sync'")
     && str_contains($salesScript, 'xhr.status === 502')
+    && str_contains($salesScript, 'xhr.status === 409')
+    && str_contains($salesScript, "result.message === 'EIS did not confirm the invoice lookup. No local data was changed.'")
     && str_contains($salesScript, 'fetchAndPrintReceipt(button, printWindow,')
     && str_contains($salesScript, 'EIS is offline. Opening the saved POS receipt without EIS sync.')
+    && str_contains($salesScript, 'EIS did not confirm the invoice lookup. Opening the saved POS receipt without EIS sync.')
     && str_contains($salesScript, 'Opening the saved POS receipt without EIS sync.'),
     'Unavailable terminals and offline EIS print the saved POS receipt without syncing');
 $routeProviderSource = file_get_contents(dirname(__DIR__, 2).'\Modules\EIS\Providers\RouteServiceProvider.php');
