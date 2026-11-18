@@ -58,14 +58,14 @@
                                     @foreach ($sell_details as $key => $sell_detail)
                                         <tr>
                                             @php
-                                                $product_name =
-                                                    $sell_detail->product_name . '<br/>' . $sell_detail->sub_sku;
+                                                $product_description =
+                                                    e($sell_detail->product_description) . '<br/>' . e($sell_detail->sub_sku);
                                                 if (!empty($sell_detail->brand)) {
-                                                    $product_name .= ' ' . $sell_detail->brand;
+                                                    $product_description .= ' ' . e($sell_detail->brand);
                                                 }
                                             @endphp
                                             <td>
-                                                {!! $product_name !!}
+                                                {!! $product_description !!}
                                             </td>
                                             <td>
                                                 <input type="hidden" name="sell_details[{{ $key }}][id]"

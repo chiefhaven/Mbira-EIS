@@ -1035,6 +1035,7 @@ class SellPosController extends Controller
                 'p.enable_stock',
                 'p.image as product_image',
                 'p.name as product_actual_name',
+                'p.product_description',
                 'p.type as product_type',
                 'pv.name as product_variation_name',
                 'pv.is_dummy as is_dummy',
@@ -3188,6 +3189,7 @@ class SellPosController extends Controller
             ->where('transaction_sell_lines.transaction_id', $transaction->id)
             ->select(
                 DB::raw("IF(pv.is_dummy = 0, CONCAT(p.name, ' (', pv.name, ':',variations.name, ')'), p.name) AS product_name"),
+                'p.product_description',
                 'variations.sub_sku',
                 'transaction_sell_lines.id',
                 'transaction_sell_lines.res_service_staff_id',

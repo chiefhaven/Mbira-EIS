@@ -24,19 +24,19 @@
 			value="{{$so_line->id}}">
 		@endif
 		@php
-			$product_name = e($product->product_name) . '<br/>' . $product->sub_sku ;
-			if(!empty($product->brand)){ $product_name .= ' ' . $product->brand ;}
+			$product_description = e($product->product_description) . '<br/>' . e($product->sub_sku);
+			if(!empty($product->brand)){ $product_description .= ' ' . e($product->brand);}
 		@endphp
 
 		@if( ($edit_price || $edit_discount) && empty($is_direct_sell) )
 		<div title="@lang('lang_v1.pos_edit_product_price_help')" style="display: inline">
 		<span class="text-link text-info cursor-pointer" data-toggle="modal" data-target="#row_edit_product_price_modal_{{$row_count}}">
-			{!! $product_name !!}
+			{!! $product_description !!}
 			&nbsp;<i class="fa fa-info-circle"></i>
 		</span>
 		</div>
 		@else
-			{!! $product_name !!}
+			{!! $product_description !!}
 		@endif
 		<img src="@if(count($product->media) > 0)
 						{{$product->media->first()->display_url}}

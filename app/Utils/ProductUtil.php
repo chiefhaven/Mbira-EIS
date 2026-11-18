@@ -522,6 +522,7 @@ class ProductUtil extends Util
             'p.enable_sr_no',
             'p.type as product_type',
             'p.name as product_actual_name',
+            'p.product_description',
             'p.warranty_id',
             'p.image as product_image',
             'p.product_custom_field1',

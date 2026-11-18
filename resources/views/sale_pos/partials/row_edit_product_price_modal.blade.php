@@ -2,7 +2,7 @@
 	<div class="modal-content">
 		<div class="modal-header">
 			<button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button>
-			<h4 class="modal-title" id="myModalLabel">{{$product->product_name}} - {{$product->sub_sku}}</h4>
+			<h4 class="modal-title" id="myModalLabel">{{$product->product_description}} - {{$product->sub_sku}}</h4>
 		</div>
 		<div class="modal-body">
 			<div class="row">

@@ -17,6 +17,12 @@ function salesTaxCheck(bool $condition, string $message): void
 }
 
 salesTaxCheck(
+    str_contains($productUtil, "'p.product_description'")
+        && str_contains($productRow, 'e($product->product_description)')
+        && !str_contains($productRow, '$product->product_name'),
+    'POS sale rows must display the product description instead of the name'
+);
+salesTaxCheck(
     str_contains($productUtil, '$product->sell_price_inc_tax - $product->default_sell_price'),
     'Initial per-unit tax must come from the stored product prices'
 );
