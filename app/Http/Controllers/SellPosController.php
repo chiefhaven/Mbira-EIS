@@ -2066,6 +2066,7 @@ class SellPosController extends Controller
             $products = $products->select(
                 'p.id as product_id',
                 'p.name',
+                'p.product_description',
                 'p.type',
                 'p.enable_stock',
                 'p.image as product_image',
