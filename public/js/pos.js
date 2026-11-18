@@ -3,6 +3,7 @@ var global_p_category_id = null;
 var global_is_clear_local_storage = false;
 var eisBuyerCheckSequence = 0;
 var eisBuyerCheckRequest = null;
+var posCheckoutInProgress = false;
 
 function resetEisBuyerAuthorization() {
     eisBuyerCheckSequence++;
@@ -64,6 +65,11 @@ $(document).ready(function() {
         if (eisBuyerCheckRequest) {
             event.preventDefault();
             toastr.info('Wait for the EIS buyer TIN check to finish before completing the sale.');
+            return false;
+        }
+
+        if (this.id === 'add_pos_sell_form' && posCheckoutInProgress) {
+            event.preventDefault();
             return false;
         }
     });
@@ -914,7 +920,14 @@ $(document).ready(function() {
             }
 
             if (cnf) {
+                if (posCheckoutInProgress) {
+                    return false;
+                }
+
+                posCheckoutInProgress = true;
                 disable_pos_form_actions();
+                disable_pos_checkout_buttons();
+                $('#pos-checkout-progress').css('display', 'inline-flex');
 
                 var data = $(form).serialize();
                 data = data + '&status=final';
@@ -943,6 +956,19 @@ $(document).ready(function() {
                         }
 
                         enable_pos_form_actions();
+                        enable_pos_checkout_buttons();
+                        $('#pos-checkout-progress').hide();
+                        posCheckoutInProgress = false;
+                    },
+                    error: function(xhr) {
+                        var message = xhr.responseJSON && (xhr.responseJSON.msg || xhr.responseJSON.message)
+                            ? (xhr.responseJSON.msg || xhr.responseJSON.message)
+                            : LANG.something_went_wrong;
+                        toastr.error(message);
+                        enable_pos_form_actions();
+                        enable_pos_checkout_buttons();
+                        $('#pos-checkout-progress').hide();
+                        posCheckoutInProgress = false;
                     },
                 });
             }
@@ -2917,6 +2943,26 @@ $(document).on('shown.bs.tab', 'a[href="#tab_quotation"]', function () {
 $(document).on('shown.bs.tab', 'a[href="#tab_draft"]', function () {
     get_recent_transactions('draft', $('div#tab_draft'));
 });
+
+function disable_pos_checkout_buttons() {
+    $('.pos-bar button, button#pos-save, button#pos-save-card').each(function() {
+        var button = $(this);
+        if (button.data('pos-checkout-disabled') === undefined) {
+            button.data('pos-checkout-disabled', button.prop('disabled'));
+        }
+        button.prop('disabled', true);
+    });
+}
+
+function enable_pos_checkout_buttons() {
+    $('.pos-bar button, button#pos-save, button#pos-save-card').each(function() {
+        var button = $(this);
+        if (button.data('pos-checkout-disabled') !== undefined) {
+            button.prop('disabled', button.data('pos-checkout-disabled'));
+            button.removeData('pos-checkout-disabled');
+        }
+    });
+}
 
 function disable_pos_form_actions(){
     if (!window.navigator.onLine) {

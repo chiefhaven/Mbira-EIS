@@ -125,10 +125,28 @@
 .pos-bar__left{display:flex;align-items:center;gap:8px;flex-shrink:0}
 .pos-bar__middle{display:flex;align-items:center;gap:4px;flex-wrap:nowrap;flex-shrink:0}
 .pos-bar__right{display:flex;align-items:center;gap:6px;flex-shrink:0}
+.pos-checkout-progress{
+    align-items:center;
+    gap:8px;
+    color:#064e3b;
+    font-size:13px;
+    font-weight:600;
+    white-space:nowrap;
+}
+.pos-checkout-progress__spinner{
+    width:16px;
+    height:16px;
+    border:2px solid #a7f3d0;
+    border-top-color:#047857;
+    border-radius:50%;
+    animation:pos-checkout-spin .8s linear infinite;
+}
+@keyframes pos-checkout-spin{to{transform:rotate(360deg)}}
 
 /* ── Mobile overrides ── */
 @media(max-width:1023.98px){
     .pos-bar{flex-direction:column;align-items:stretch;padding:0;gap:0;border-radius:12px 12px 0 0}
+    .pos-checkout-progress{justify-content:center;padding:8px}
     .pos-bar__mobile-total{
         display:flex;align-items:center;justify-content:space-between;
         padding:12px 16px;border-bottom:1px solid #e5e7eb;
@@ -340,6 +358,11 @@
                 </button>
             @endif
         @endif
+    </div>
+
+    <div class="pos-checkout-progress" id="pos-checkout-progress" role="status" aria-live="polite" style="display:none">
+        <span class="pos-checkout-progress__spinner" aria-hidden="true"></span>
+        <span>@lang('lang_v1.processing')</span>
     </div>
 
     {{-- Right: recent transactions + logout --}}
