@@ -4,12 +4,17 @@
 require __DIR__.'\eis_terminal_isolation_checks.php';
 
 use Illuminate\Http\Request;
+use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 use Modules\Connector\Http\Controllers\Api\TillController;
 use Modules\Connector\Http\Middleware\ConnectorTill;
 use Modules\Connector\Support\TillAssignment;
 use Modules\EIS\Services\Terminal\TerminalContext;
+
+if (!class_exists('Log')) {
+    class_alias(Illuminate\Support\Facades\Log::class, 'Log');
+}
 
 $migration = require dirname(__DIR__, 2).'\Modules\Connector\Database\Migrations\2026_10_23_200000_create_connector_tills.php';
 $migration->up();
@@ -122,11 +127,55 @@ DB::transaction(fn () => TillAssignment::bind($actor, 3, $tillId));
 $sale = App\Transaction::findOrFail(3);
 locationCheck((int) $sale->connector_till_id === $tillId && TerminalContext::forSale($sale)->id === 1,
     'Assigned till routes a new sale without requiring a location default');
+$schema->table('transactions', function (Blueprint $table) {
+    $table->decimal('final_total', 18, 4)->default(0);
+});
 $limits = Modules\EIS\Models\EisSale::checkOfflineLimits(1, 10, 1, $tillId);
 locationCheck($limits['success'] && $limits['code'] !== 'CHECK_ERROR',
     'Offline-limit check uses assigned till rather than requiring the missing location default');
 $settings = Modules\EIS\Models\EisSetting::findOrFail(1);
 $configuration = Modules\EIS\Models\EisConfiguration::where('eis_setting_id', 1)->firstOrFail();
+$terminalConfigurationId = DB::table('eis_terminal_configurations')
+    ->where('configuration_id', $configuration->id)->value('id');
+$originalOfflineLimit = DB::table('eis_offline_limits')
+    ->where('terminal_configuration_id', $terminalConfigurationId)->first();
+DB::table('eis_offline_limits')->updateOrInsert(
+    ['terminal_configuration_id' => $terminalConfigurationId],
+    ['max_cumulative_amount' => 1, 'max_transaction_age_hours' => 0]
+);
+$health = Mockery::mock(\Modules\EIS\Services\Http\EisHealthService::class);
+$health->shouldReceive('isOnline')->andReturn(false);
+$app->instance(\Modules\EIS\Services\Http\EisHealthService::class, $health);
+$aboveCumulativeLimit = Modules\EIS\Models\EisSale::checkOfflineLimits(1, 1000, 1, $tillId);
+locationCheck($aboveCumulativeLimit['success'] && $aboveCumulativeLimit['code'] !== 'CHECK_ERROR',
+    'Offline sale is allowed above the configured cumulative amount');
+
+DB::table('eis_offline_limits')->where('terminal_configuration_id', $terminalConfigurationId)->update([
+    'max_cumulative_amount' => 0,
+    'max_transaction_age_hours' => 1,
+]);
+$oldPendingSaleId = DB::table('eis_sales')->insertGetId([
+    'business_id' => 1,
+    'transaction_id' => 999999,
+    'eis_setting_id' => 1,
+    'location_id' => 1,
+    'status' => 'pending',
+    'created_at' => now()->subHours(2),
+    'updated_at' => now()->subHours(2),
+]);
+$agedSaleResult = Modules\EIS\Models\EisSale::checkOfflineLimits(1, 10, 1, $tillId);
+locationCheck(!$agedSaleResult['success'] && $agedSaleResult['code'] === 'TRANSACTION_AGE_EXCEEDED',
+    'Transaction-age limit continues to block sales with overdue unsubmitted EIS sales');
+DB::table('eis_sales')->where('id', $oldPendingSaleId)->delete();
+if ($originalOfflineLimit) {
+    DB::table('eis_offline_limits')->where('terminal_configuration_id', $terminalConfigurationId)->update([
+        'max_cumulative_amount' => $originalOfflineLimit->max_cumulative_amount,
+        'max_transaction_age_hours' => $originalOfflineLimit->max_transaction_age_hours,
+    ]);
+} else {
+    DB::table('eis_offline_limits')->where('terminal_configuration_id', $terminalConfigurationId)->delete();
+}
+$app->forgetInstance(\Modules\EIS\Services\Http\EisHealthService::class);
 DB::table('eis_terminal_configurations')->where('configuration_id', $configuration->id)->update(['is_active' => false]);
 $app['config']['eis.environment'] = 'development';
 locationCheck(TerminalContext::forSale($sale)->id === 1, 'Development till accepts locally enabled remotely inactive terminal');

@@ -122,13 +122,6 @@ class EisSale extends Model
                 ->where('terminal_configuration_id', $terminalConfig->id)
                 ->first();
 
-            $offlineLimit = (float) (
-                $offlineLimitRow->max_cumulative_amount ??
-                $terminalConfig->max_cummulative_amount ??
-                $terminalConfig->max_cumulative_amount ??
-                0
-            );
-
             $maxTransactionAge = (int) (
                 $offlineLimitRow->max_transaction_age_hours ??
                 $terminalConfig->max_transaction_age ??
@@ -136,26 +129,17 @@ class EisSale extends Model
                 0
             );
             
-            // If no limits set, allow sale
-            if ($offlineLimit == 0 && $maxTransactionAge == 0) {
+            // Cumulative amount limits are not enforced; only transaction age can block a sale.
+            if ($maxTransactionAge == 0) {
                 return [
                     'success' => true,
                     'message' => 'No limits configured',
                     'code' => 'NO_LIMITS',
                     'details' => [
-                        'limit_type' => 'unlimited',
-                        'sale_amount' => $sale_amount
+                        'limit_type' => 'unlimited'
                     ]
                 ];
             }
-            
-            // ✅ Get total unsubmitted sales with transaction amounts using DB
-            $totalUnsubmitted = DB::table('eis_sales')
-                ->join('transactions', 'eis_sales.transaction_id', '=', 'transactions.id')
-                ->where('eis_sales.business_id', $business_id)
-                ->where('eis_sales.eis_setting_id', $settings->id)
-                ->where('eis_sales.status', '!=', 'submitted')
-                ->sum('transactions.final_total');
             
             // Get the oldest unsubmitted sale using DB
             $oldestUnsubmittedSale = DB::table('eis_sales')
@@ -191,43 +175,9 @@ class EisSale extends Model
                         'max_age_limit' => $maxTransactionAge,
                         'age_difference' => $ageDifferenceInHours,
                         'oldest_sale_date' => $oldestUnsubmittedSale->created_at ?? null,
-                        'total_unsubmitted' => $totalUnsubmitted,
                         'limit_type' => 'age_limit'
                     ]
                 ];
-            }
-            
-            // Check cumulative amount limit (max_cummulative_amount) only while EIS is offline
-            if ($offlineLimit > 0) {
-                $totalAfterSale = $totalUnsubmitted + $sale_amount;
-                
-                if ($totalAfterSale > $offlineLimit && ! self::isEisOnline((int) $business_id, $settings)) {
-                    $remaining = $offlineLimit - $totalUnsubmitted;
-                    
-                    \Log::warning('Cumulative amount limit exceeded', [
-                        'business_id' => $business_id,
-                        'location_id' => $location_id,
-                        'cumulative_limit' => $offlineLimit,
-                        'current_total' => $totalUnsubmitted,
-                        'sale_amount' => $sale_amount,
-                        'total_after_sale' => $totalAfterSale,
-                        'remaining' => $remaining
-                    ]);
-                    
-                    return [
-                        'success' => false,
-                        'message' => "Cumulative offline amount limit exceeded. Remaining: " . number_format($remaining, 2),
-                        'code' => 'CUMULATIVE_LIMIT_EXCEEDED',
-                        'details' => [
-                            'cumulative_limit' => $offlineLimit,
-                            'current_total' => $totalUnsubmitted,
-                            'sale_amount' => $sale_amount,
-                            'total_after_sale' => $totalAfterSale,
-                            'remaining' => $remaining,
-                            'limit_type' => 'cumulative_amount'
-                        ]
-                    ];
-                }
             }
             
             // All checks passed
@@ -236,11 +186,6 @@ class EisSale extends Model
                 'message' => 'Offline limits check passed',
                 'code' => 'LIMITS_PASSED',
                 'details' => [
-                    'cumulative_limit' => $offlineLimit,
-                    'current_total' => $totalUnsubmitted,
-                    'sale_amount' => $sale_amount,
-                    'total_after_sale' => $totalUnsubmitted + $sale_amount,
-                    'remaining' => $offlineLimit - ($totalUnsubmitted + $sale_amount),
                     'max_age_limit' => $maxTransactionAge,
                     'age_difference' => $ageDifferenceInHours,
                     'oldest_sale_date' => $oldestUnsubmittedSale->created_at ?? null,
@@ -268,23 +213,6 @@ class EisSale extends Model
                     'fallback' => 'fail-open'
                 ]
             ];
-        }
-    }
-
-    /**
-     * Same health signal as the header EIS status badge; any failure counts as offline.
-     */
-    protected static function isEisOnline(int $business_id, $settings): bool
-    {
-        $token = (string) ($settings->jwt_token ?? '');
-        if (empty($settings->status) || $token === '') {
-            return false;
-        }
-
-        try {
-            return app(\Modules\EIS\Services\Http\EisHealthService::class)->isOnline($business_id, $token);
-        } catch (\Throwable $e) {
-            return false;
         }
     }
 
