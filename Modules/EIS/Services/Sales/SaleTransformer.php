@@ -129,7 +129,7 @@ class SaleTransformer
                 'total' => round($lineTotal, 2),
                 'totalVAT' => round($vat, 2),
                 'taxRateId' => (string) $taxRateId,
-                'isProduct' => $this->isProductType($line->product->type ?? null),
+                'isProduct' => $this->isStockManaged($line->product?->enable_stock),
             ];
 
             // Build tax breakdown
@@ -337,9 +337,9 @@ class SaleTransformer
         }
     }
 
-    private function isProductType(?string $type): bool
+    private function isStockManaged(mixed $manageStock): bool
     {
-        return strtolower(trim((string) $type)) !== 'service';
+        return filter_var($manageStock, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE) === true;
     }
 
     /**
@@ -680,7 +680,7 @@ class SaleTransformer
                 'total' => round((float) ($item['total'] ?? 0), 2),
                 'totalVAT' => round((float) ($item['tax_amount'] ?? 0), 2),
                 'taxRateId' => (string) ($item['tax_rate_id'] ?? self::DEFAULT_TAX_RATE_ID),
-                'isProduct' => $this->isProductType($item['type'] ?? $item['productType'] ?? null),
+                'isProduct' => $this->isStockManaged($item['manage_stock'] ?? $item['enable_stock'] ?? false),
             ];
         }
         

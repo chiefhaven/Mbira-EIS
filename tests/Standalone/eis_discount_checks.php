@@ -50,7 +50,7 @@ function discountCheck(bool $condition, string $message): void
     }
     ++$checks;
 }
-function discountPayload(SaleTransformer $transformer, EisSetting $settings, array $attributes, float $total, array $invoiceDiscount = [], bool $inlineTaxEnabled = true, array $productTypes = []): array
+function discountPayload(SaleTransformer $transformer, EisSetting $settings, array $attributes, float $total, array $invoiceDiscount = [], bool $inlineTaxEnabled = true, array $stockSettings = []): array
 {
     $lines = [];
     foreach ($attributes as $index => $values) {
@@ -58,9 +58,11 @@ function discountPayload(SaleTransformer $transformer, EisSetting $settings, arr
         $line->setRawAttributes(['id' => $index + 1, 'product_id' => $index + 1] + $values);
         $line->exists = true;
         $product = null;
-        if (isset($productTypes[$index])) {
+        if (isset($stockSettings[$index])) {
+            $stockSetting = $stockSettings[$index];
             $product = new App\Product();
-            $product->setRawAttributes(['id' => $index + 1, 'business_id' => 6, 'type' => $productTypes[$index]]);
+            $product->setRawAttributes(['id' => $index + 1, 'business_id' => 6,
+                'type' => $stockSetting['type'], 'enable_stock' => $stockSetting['enable_stock']]);
         }
         $line->setRelation('product', $product)->setRelation('variations', null)->setRelation('modifiers', collect());
         $lines[] = $line;
@@ -157,9 +159,12 @@ $payload = discountPayload($transformer, $settings, [$tiny, $tiny, $tiny], 0.02,
 discountCheck(round(array_sum(array_column($payload['invoiceLineItems'], 'discount')), 2) === 0.01
     && round(array_sum(array_column($payload['invoiceLineItems'], 'total')), 2) === 0.02,
     'Proportional allocation distributes residual cents without losing the invoice discount');
-$typedLines = discountPayload($transformer, $settings, [$tiny, $tiny], 0.02, [], true, ['service', 'single']);
-discountCheck(array_column($typedLines['invoiceLineItems'], 'isProduct') === [false, true],
-    'EIS sale lines identify services as non-products and retain products as products');
+$stockManagedLines = discountPayload($transformer, $settings, [$tiny, $tiny], 0.02, [], true, [
+    ['type' => 'single', 'enable_stock' => false],
+    ['type' => 'service', 'enable_stock' => true],
+]);
+discountCheck(array_column($stockManagedLines['invoiceLineItems'], 'isProduct') === [false, true],
+    'EIS sale isProduct follows stock management instead of the catalog type');
 $payload = discountPayload($transformer, $settings, [$correct, $zero], 1000.35,
     ['discount_type' => 'percentage', 'discount_amount' => 10]);
 discountCheck(round(array_sum(array_column($payload['invoiceLineItems'], 'total')), 2) === 1000.35
