@@ -177,6 +177,15 @@ salesCheck($unavailable->getStatusCode() === 422
     && $unavailable->getData(true)['message'] === 'Terminal Not available for sync'
     && count($requests) === 0, 'Deleted terminals block Print & Sync with a useful message');
 $db->table('eis_settings')->where('id', 101)->update(['deleted_at' => null]);
+$offlineSync = Mockery::mock(\Modules\EIS\Services\Sales\SaleOutcomeRecoveryService::class);
+$offlineSync->shouldReceive('sync')->once()
+    ->andThrow(new Illuminate\Http\Client\ConnectionException('Synthetic EIS offline'));
+$requestCount = count($requests);
+$offlineResponse = $salesController->syncSale(managementRequest(), 1, $offlineSync);
+salesCheck($offlineResponse->getStatusCode() === 502
+    && $offlineResponse->getData(true)['message'] === 'EIS could not be reached. The local sale was not changed.'
+    && count($requests) === $requestCount,
+    'EIS connection failures are reported without changing the saved sale');
 $client = new SalesApiClient();
 $transformer = new ReturnAdjustmentPayload();
 $service = new SaleAdjustmentService($client, $transformer);

@@ -196,9 +196,12 @@ $(function() {
             fetchAndPrintReceipt(button, printWindow);
         }).fail(function(xhr) {
             var result = xhr.responseJSON || {};
-            if (result.message === 'Terminal Not available for sync') {
+            if (result.message === 'Terminal Not available for sync' || xhr.status === 502) {
+                var statusMessage = result.message === 'Terminal Not available for sync'
+                    ? 'Terminal Not available for sync. Opening the saved POS receipt without EIS sync.'
+                    : 'EIS is offline. Opening the saved POS receipt without EIS sync.';
                 fetchAndPrintReceipt(button, printWindow,
-                    'Terminal Not available for sync. Opening the saved POS receipt without EIS sync.');
+                    statusMessage);
                 return;
             }
             printWindow.close();
