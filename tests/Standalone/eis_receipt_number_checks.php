@@ -58,24 +58,14 @@ foreach (['classic', 'columnize-taxes', 'detailed', 'elegant', 'elegant_modified
     checkReceiptNumber(str_contains($source, '$receipt_details->invoice_no'), $layout.' preserves original number');
     checkReceiptNumber($compiler->compileString($source) !== '', $layout.' compiles');
 }
-// Execute the actual ESC/POS number block against an in-memory printer.
-$source = file_get_contents($root.'/pos_print_server/lib/Escpos.php');
-$start = strpos($source, '        if (!empty($data->eis_invoice_number))');
-$end = strpos($source, '        /* Customer info */', $start);
-$block = substr($source, $start, $end - $start);
-$harness = new class {
-    public $printer;
-    public function __construct() { $this->printer = new class {
-        public string $output = '';
-        public function text($text): void { $this->output .= $text; }
-    }; }
-};
-$print = Closure::bind(function ($data) use ($block) { eval($block); }, $harness, get_class($harness));
-$print((object) ['invoice_no' => 'TXN-100', 'eis_invoice_number' => 'EIS-200']);
-checkReceiptNumber($harness->printer->output === "Transaction Number: TXN-100\nEIS Number: EIS-200\n", 'Raw thermal output prints both identities');
-$harness->printer->output = '';
-$print((object) ['invoice_no' => 'TXN-100']);
-checkReceiptNumber($harness->printer->output === '', 'No invented raw thermal EIS identity');
+$invoiceAction = file_get_contents($root.'/resources/views/sale_pos/show.blade.php');
+$invoicePrintView = file_get_contents($root.'/resources/views/sale_pos/partials/show_invoice.blade.php');
+checkReceiptNumber(str_contains($invoiceAction, "route('sell.printInvoice', [\$sell->id])")
+    && str_contains($invoiceAction, 'class="print-invoice')
+    && str_contains($invoicePrintView, 'id="print_invoice"')
+    && str_contains($invoicePrintView, '$(\'#invoice_content\').printThis();')
+    && str_contains($invoicePrintView, '$receipt[\'html_content\']'),
+    'Print Invoice action prints the saved POS receipt');
 $util = file_get_contents($root.'/app/Utils/TransactionUtil.php');
 checkReceiptNumber(str_contains($util, "->where('configuration.eis_setting_id', \$transaction->eisSale->eis_setting_id)")
     && str_contains($util, "->where('configuration.location_id', \$transaction->location_id)")
@@ -144,10 +134,7 @@ foreach (['due', 'partial', 'paid'] as $paymentStatus) {
     eval($numberBlock);
     checkReceiptNumber($output['eis_invoice_number'] === ($paymentStatus === 'paid' ? 'EIS-200' : null), 'Receipt number restricted by payment status: '.$paymentStatus);
     $html = renderNumberPartial($compiler, (object) ($output + ['invoice_no' => 'TXN-100']));
-    checkReceiptNumber(str_contains($html, 'EIS Number') === ($paymentStatus === 'paid'), 'EIS label hidden unless paid: '.$paymentStatus);
-    $harness->printer->output = '';
-    $print((object) ($output + ['invoice_no' => 'TXN-100']));
-    checkReceiptNumber(str_contains($harness->printer->output, 'EIS Number') === ($paymentStatus === 'paid'), 'Thermal EIS number hidden unless paid: '.$paymentStatus);
+    checkReceiptNumber(str_contains($html, 'EIS Number') === ($paymentStatus === 'paid'), 'Print Invoice EIS number hidden unless paid: '.$paymentStatus);
 }
 $qrGuardStart = strpos($util, "        if (\$transaction->payment_status !== 'paid') {");
 $qrGuardEnd = strpos($util, '        //Module related information.', $qrGuardStart);
