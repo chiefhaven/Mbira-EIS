@@ -20,7 +20,7 @@ return [
     'total_vat' => 'Total VAT',
     'total_eis_sales' => 'Total EIS Sales',
     'fiscal_sales_help' => 'Submitted EIS invoice totals plus accepted fiscal notes, by submission date. Pending cancellations are not deducted.',
-    'fiscal_vat_help' => 'Submitted EIS VAT plus accepted fiscal-note VAT, by submission date. Pending cancellations are not deducted.',
+    'fiscal_vat_help' => 'VAT from submitted and failed EIS sales plus accepted fiscal notes, by submission date (sale date for failed submissions without a timestamp). Pending cancellations are not deducted.',
     'this_week' => 'This Week',
     'this_month' => 'This Month',
     'this_fy' => 'This Financial Year',

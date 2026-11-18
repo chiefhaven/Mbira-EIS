@@ -2987,7 +2987,7 @@ class TransactionUtil extends Util
     }
 
     /**
-    * Get portal VAT for submitted sales and accepted notes by submission date.
+    * Get EIS VAT for submitted/failed sales and accepted notes by reporting date.
     *
     * @param  int  $business_id
     * @param  string|null  $start_date
@@ -3009,8 +3009,9 @@ class TransactionUtil extends Util
             ->where('transactions.type', 'sell')
             ->where('transactions.status', 'final')
             ->where('transactions.payment_status', 'paid')
-            ->where('eis_sales.status', 'submitted')
-            ->select('eis_sales.id', 'eis_sales.submitted_at', 'eis_sales.request_payload', 'eis_sales.response_payload');
+            ->whereIn('eis_sales.status', ['submitted', 'failed'])
+            ->select('eis_sales.id', 'eis_sales.status', 'eis_sales.submitted_at',
+                'transactions.transaction_date', 'eis_sales.request_payload', 'eis_sales.response_payload');
 
         $queries = [$query];
         if (DB::getSchemaBuilder()->hasTable('eis_sale_adjustments')) {
@@ -3025,7 +3026,8 @@ class TransactionUtil extends Util
                 ->where('transactions.status', 'final')
                 ->where('transactions.payment_status', 'paid')
                 ->where('adjustment.status', 'accepted')
-                ->select('adjustment.id', 'adjustment.submitted_at',
+                ->select('adjustment.id', 'adjustment.status', 'adjustment.submitted_at',
+                    'transactions.transaction_date',
                     'adjustment.payload as request_payload', 'adjustment.response as response_payload');
         }
         foreach ($queries as $reportQuery) {
@@ -3046,12 +3048,18 @@ class TransactionUtil extends Util
         $total_tax = 0.0;
         $total_eis_sales = 0.0;
         foreach ($query->cursor() as $sale) {
-            if (!is_string($sale->submitted_at)
-                || !preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(?:\.\d+)?$/', $sale->submitted_at)) {
-                Log::error('Submitted EIS sale has no valid submission timestamp', ['eis_sale_id' => $sale->id]);
-                throw new \UnexpectedValueException('A submitted EIS sale has an incomplete submission date. Synchronize its invoice before viewing fiscal VAT totals.');
+            $periodAt = $sale->submitted_at;
+            if ($sale->status === 'failed'
+                && (!is_string($periodAt)
+                    || !preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(?:\.\d+)?$/', $periodAt))) {
+                $periodAt = $sale->transaction_date;
             }
-            $submissionDate = substr($sale->submitted_at, 0, 10);
+            if (!is_string($periodAt)
+                || !preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(?:\.\d+)?$/', $periodAt)) {
+                Log::error('EIS sale has no valid reporting timestamp', ['eis_sale_id' => $sale->id]);
+                throw new \UnexpectedValueException('An EIS sale has an incomplete reporting date. Synchronize its invoice before viewing fiscal VAT totals.');
+            }
+            $submissionDate = substr($periodAt, 0, 10);
             if ((!empty($start_date) && $submissionDate < $start_date) || (!empty($end_date) && $submissionDate > $end_date)) {
                 continue;
             }
@@ -3062,16 +3070,18 @@ class TransactionUtil extends Util
                 ? $remoteInvoice : $request;
             $vat = $invoice['invoiceSummary']['totalVAT'] ?? null;
             if (!is_numeric($vat) || !is_finite((float) $vat) || $vat < 0) {
-                Log::error('Submitted EIS sale has invalid fiscal VAT reporting data', ['eis_sale_id' => $sale->id]);
-                throw new \UnexpectedValueException('A submitted EIS sale has incomplete fiscal VAT data. Synchronize its invoice before viewing fiscal VAT totals.');
+                Log::error('EIS sale has invalid fiscal VAT reporting data', ['eis_sale_id' => $sale->id]);
+                throw new \UnexpectedValueException('An EIS sale has incomplete fiscal VAT data. Synchronize its invoice before viewing fiscal VAT totals.');
             }
             $total_tax += (float) $vat;
-            $invoiceTotal = $invoice['invoiceSummary']['invoiceTotal'] ?? null;
-            if (!is_numeric($invoiceTotal) || !is_finite((float) $invoiceTotal) || $invoiceTotal < 0) {
-                Log::error('Submitted EIS invoice has invalid sales reporting data', ['eis_sale_id' => $sale->id]);
-                throw new \UnexpectedValueException('A submitted EIS invoice has incomplete sales total data. Synchronize its invoice before viewing dashboard totals.');
+            if ($sale->status !== 'failed') {
+                $invoiceTotal = $invoice['invoiceSummary']['invoiceTotal'] ?? null;
+                if (!is_numeric($invoiceTotal) || !is_finite((float) $invoiceTotal) || $invoiceTotal < 0) {
+                    Log::error('Submitted EIS invoice has invalid sales reporting data', ['eis_sale_id' => $sale->id]);
+                    throw new \UnexpectedValueException('A submitted EIS invoice has incomplete sales total data. Synchronize its invoice before viewing dashboard totals.');
+                }
+                $total_eis_sales += (float) $invoiceTotal;
             }
-            $total_eis_sales += (float) $invoiceTotal;
         }
         $total_tax = round($total_tax, 2);
         return ['header_tax' => 0, 'item_tax' => $total_tax, 'total_tax' => $total_tax,

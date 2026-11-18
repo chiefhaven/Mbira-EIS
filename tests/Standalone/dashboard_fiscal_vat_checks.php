@@ -101,25 +101,32 @@ fiscalFixture(25, '2026-11-08T10:00:00', 999);
 $capsule->table('eis_sales')->where('id', 25)->update(['business_id' => 7]);
 fiscalFixture(26, '2026-11-08T10:00:00', 999);
 $capsule->table('eis_sales')->where('id', 26)->update(['location_id' => 14]);
-fiscalVatCheck($util->getVatTotals(6, '2026-11-08', '2026-11-08', 13, null, [13])['total_tax'] === 15683.0,
-    'Only submitted, paid, final sales within the same business/location may contribute');
+fiscalVatCheck($util->getVatTotals(6, '2026-11-08', '2026-11-08', 13, null, [13])['total_tax'] === 16682.0,
+    'Failed sales with a submission timestamp contribute VAT alongside submitted sales');
+fiscalVatCheck($util->getVatTotals(6, '2026-11-08', '2026-11-08', 13)['total_eis_sales'] === 78415.0,
+    'Failed sales do not increase the total of invoices accepted by EIS');
+fiscalFixture(29, '2026-11-08T10:00:00', 999);
+$capsule->table('eis_sales')->where('id', 29)->update(['status' => 'failed', 'submitted_at' => null]);
+fiscalVatCheck($util->getVatTotals(6, '2026-11-08', '2026-11-08', 13)['total_tax'] === 17681.0,
+    'Failed sales without a submission timestamp use their transaction date for period totals');
+$capsule->table('eis_sales')->where('id', 29)->delete();
 $remote = ['invoiceHeader' => ['invoiceDateTime' => '2026-11-07T23:00:00'],
     'invoiceSummary' => ['totalVAT' => 20, 'invoiceTotal' => 100]];
 fiscalFixture(27, '2026-11-08T10:00:00+02:00', 999, [], ['data' => $remote]);
 fiscalFixture(28, '2026-11-08T10:00:00+02:00', 999, [], ['data' => ['data' => $remote]]);
 fiscalVatCheck($util->getVatTotals(6, '2026-11-07', '2026-11-07', 13)['total_tax'] === 0.0,
     'Remote invoice dates must not override submission dates');
-fiscalVatCheck($util->getVatTotals(6, '2026-11-08', '2026-11-08', 13)['total_tax'] === 15723.0,
+fiscalVatCheck($util->getVatTotals(6, '2026-11-08', '2026-11-08', 13)['total_tax'] === 16722.0,
     'Both saved response envelope shapes prefer remote VAT while retaining the submission date');
 $capsule->table('eis_sales')->where('id', 28)->update(['submitted_at' => '2026-11-08 23:59:59']);
-fiscalVatCheck($util->getVatTotals(6, '2026-11-08', '2026-11-08', 13)['total_tax'] === 15723.0,
+fiscalVatCheck($util->getVatTotals(6, '2026-11-08', '2026-11-08', 13)['total_tax'] === 16722.0,
     'Submission date filters include the entire final day');
 $capsule->table('eis_sales')->where('id', 28)->update(['submitted_at' => null]);
 try {
     $util->getVatTotals(6, null, null, 13);
-    throw new RuntimeException('Missing submission dates must not fall back to transaction or invoice dates');
+    throw new RuntimeException('Submitted sales without submission dates must not fall back to transaction or invoice dates');
 } catch (UnexpectedValueException $e) {
-    fiscalVatCheck(str_contains($e->getMessage(), 'submission date'), 'Missing submission dates must raise an actionable error');
+    fiscalVatCheck(str_contains($e->getMessage(), 'reporting date'), 'Missing submitted sale dates must raise an actionable error');
 }
 $capsule->table('eis_sales')->where('id', 28)->update(['submitted_at' => '2026-11-08 23:59:59']);
 $note = ['sale_id' => 1, 'business_id' => 6, 'location_id' => 13, 'status' => 'accepted',
@@ -127,7 +134,7 @@ $note = ['sale_id' => 1, 'business_id' => 6, 'location_id' => 13, 'status' => 'a
     'payload' => json_encode(['invoiceHeader' => [], 'invoiceSummary' => ['totalVAT' => 1265.96, 'invoiceTotal' => 8500]]),
     'response' => json_encode(['data' => ['totalVat' => 1265.96]])];
 $capsule->table('eis_sale_adjustments')->insert($note);
-fiscalVatCheck($util->getVatTotals(6, '2026-11-08', '2026-11-08', 13)['total_tax'] === 16988.96,
+fiscalVatCheck($util->getVatTotals(6, '2026-11-08', '2026-11-08', 13)['total_tax'] === 17987.96,
     'Portal total adds accepted note VAT on the note submission date, not the original sale submission date');
 fiscalVatCheck($util->getVatTotals(6, '2026-11-09', '2026-11-09', 13)['total_tax'] === 3723.42,
     'Accepted notes must not be added again on the original sale submission day');
@@ -136,7 +143,7 @@ foreach (['prepared', 'sending', 'rejected', 'unknown', 'needs_review'] as $stat
 }
 $capsule->table('eis_sale_adjustments')->insert(array_replace($note, ['business_id' => 7]));
 $capsule->table('eis_sale_adjustments')->insert(array_replace($note, ['location_id' => 14]));
-fiscalVatCheck($util->getVatTotals(6, '2026-11-08', '2026-11-08', 13, 7, [13])['total_tax'] === 16988.96,
+fiscalVatCheck($util->getVatTotals(6, '2026-11-08', '2026-11-08', 13, 7, [13])['total_tax'] === 17987.96,
     'Unaccepted notes and cross-business/location notes must not contribute');
 fiscalVatCheck($util->getVatTotals(6, null, null, 13, 99, [13])['total_tax'] === 0.0,
     'Creator restrictions apply to fiscal notes as well as sales');
