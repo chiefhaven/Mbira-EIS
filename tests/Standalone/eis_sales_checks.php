@@ -36,8 +36,12 @@ Illuminate\Database\Eloquent\Model::clearBootedModels();
 $app->instance('db.schema', $schema);
 $app->instance('log', new Psr\Log\NullLogger());
 $app->instance('validator', $validator);
+$app->instance('translator', $translator);
 $app['config']->set('eis.base_url', 'https://eis.invalid/api/v1');
 $app['config']->set('eis.environment', 'production');
+foreach (['products', 'transactions', 'eis_sales', 'business'] as $table) {
+    $schema->dropIfExists($table);
+}
 $schema->create('business', function (Blueprint $t) {
     $t->increments('id'); $t->integer('currency_id'); $t->boolean('enable_rp')->default(false);
 });
@@ -49,10 +53,9 @@ DB::table('users')->insert(['id' => 7, 'business_id' => 1]);
 $gate = Mockery::mock(Illuminate\Contracts\Auth\Access\Gate::class);
 $gate->shouldReceive('forUser')->andReturnSelf();
 $actorAllowed = true;
-$cancelAllowed = true;
-$gate->shouldReceive('check')->andReturnUsing(function ($ability) use (&$actorAllowed, &$cancelAllowed) {
+$gate->shouldReceive('check')->andReturnUsing(function ($ability) use (&$actorAllowed) {
     if (in_array($ability, ['sell.delete', 'business_settings.access'], true)) {
-        return $actorAllowed && $cancelAllowed;
+        return $actorAllowed;
     }
     return $ability === 'access_all_locations' || $actorAllowed;
 });
@@ -105,7 +108,7 @@ $m = require dirname(__DIR__, 2).'\Modules\EIS\Database\Migrations\2026_10_24_03
 DB::table('eis_settings')->where('id', 101)->update(['branch_id' => 'SITE-A', 'tpin' => '12345678']);
 DB::table('eis_settings')->where('id', 102)->update(['branch_id' => 'SITE-A', 'tpin' => '12345678']);
 DB::table('transactions')->insert(['id' => 800, 'business_id' => 1, 'location_id' => 10, 'type' => 'sell',
-    'status' => 'final', 'payment_status' => 'paid', 'created_by' => 7, 'final_total' => 345, 'invoice_no' => 'POS-800']);
+    'status' => 'final', 'payment_status' => 'due', 'created_by' => 7, 'final_total' => 345, 'invoice_no' => 'POS-800']);
 DB::table('products')->insert(['id' => 1, 'business_id' => 1, 'sku' => 'SKU-1', 'enable_stock' => true]);
 DB::table('variations')->insert(['id' => 1, 'product_id' => 1, 'product_variation_id' => 1]);
 DB::table('transaction_sell_lines')->insert(['id' => 1, 'transaction_id' => 800, 'product_id' => 1, 'variation_id' => 1,
@@ -200,71 +203,15 @@ function localSalesGraph(): array {
 }
 $before = localSalesGraph();
 try {
-    DB::transaction(function () {
-        makeReturn(3);
-        salesCheck(DB::table('eis_utility_requests')->count() === 1, 'Full return prepares a durable cancellation inside the transaction');
-        throw new RuntimeException('Full return rollback test');
-    });
-} catch (RuntimeException $e) {
-    if ($e->getMessage() !== 'Full return rollback test') { throw $e; }
+    makeReturn(3);
+    throw new RuntimeException('A full fiscal return unexpectedly succeeded');
+} catch (InvalidArgumentException $e) {
+    salesCheck($e->getMessage() === 'Full fiscal returns are unavailable while EIS receipt cancellation and void requests are disabled. No return was saved.',
+        'Full fiscal returns are explicitly blocked while cancellation and void requests are disabled');
 }
-salesCheck(localSalesGraph() === $before && DB::table('eis_utility_requests')->count() === 0 && count($requests) === 0,
-    'Rolled-back full return discards the cancellation and after-commit send');
-$cancelAllowed = false;
-salesReject(fn () => makeReturn(3), 'Return permission alone does not grant receipt cancellation permission');
-salesCheck(localSalesGraph() === $before && count($requests) === 0, 'Unauthorized full cancellation rolls back the return and stock');
-$cancelAllowed = true;
-DB::table('eis_sales')->where('id', 1)->update(['receipt_number' => null, 'eis_invoice_number' => null]);
-salesReject(fn () => makeReturn(3), 'Missing fiscal receipt prevents full cancellation');
-DB::table('eis_sales')->where('id', 1)->update(['receipt_number' => 'RECEIPT-800', 'eis_invoice_number' => 'FISCAL-800']);
-$returnDeviceId = EisSetting::findOrFail(101)->device_id;
-foreach (['accepted', 'rejected', 'unknown', 'prepared'] as $outcome) {
-    $requests = [];
-    $responseStatus = $outcome === 'rejected' ? 400 : 200;
-    $responseBody = $outcome === 'rejected'
-        ? ['statusCode' => 0, 'message' => 'Synthetic rejection']
-        : ['statusCode' => 1, 'data' => ['invoiceNumber' => 'FISCAL-800', 'approvalStatus' => 'Pending']];
-    $disconnect = $outcome === 'unknown';
-    DB::beginTransaction();
-    $fullReturn = makeReturn(3);
-    salesCheck(count($requests) === 0, 'Cancellation waits for the outermost commit: '.$outcome);
-    if ($outcome === 'prepared') {
-        DB::table('eis_settings')->where('id', 101)->update(['device_id' => 'changed-device']);
-    }
-    DB::commit();
-    $cancellation = DB::table('eis_utility_requests')->first();
-    salesCheck($cancellation->status === $outcome && DB::table('eis_sale_adjustments')->count() === 0,
-        'Full return requests cancellation only, with persisted outcome: '.$outcome);
-    salesCheck((float) $fullReturn->final_total === 345.0
-        && (float) DB::table('variation_location_details')->value('qty_available') === 10.0,
-        'Local full return remains committed regardless of remote outcome: '.$outcome);
-    $message = $service->cancellationMessage($fullReturn);
-    salesCheck($message !== null && ($outcome === 'accepted' ? str_contains($message, 'Approval is separate')
-        : str_contains($message, 'Return saved')), 'Full return exposes cancellation outcome without false approval: '.$outcome);
-    if ($outcome !== 'prepared') {
-        salesCheck(count($requests) === 1 && end($requests)->url() === 'https://eis.invalid/api/v1/sales/cancel-receipt'
-            && end($requests)->data()['receiptNumber'] === 'FISCAL-800',
-            'Automatic cancellation uses the canonical receipt and exact EIS endpoint: '.$outcome);
-        app(Modules\EIS\Services\Utilities\UtilityRequestService::class)->submit(EisSetting::findOrFail(101), $cancellation->id, 7);
-        salesCheck(count($requests) === 1, 'Cancellation outcome is never blindly resent: '.$outcome);
-    } else {
-        salesCheck(count($requests) === 0, 'Changed terminal prevents sending without rolling back a committed return');
-    }
-    if ($outcome !== 'rejected') {
-        salesReject(fn () => makeReturn(2), 'Pending cancellation fences edits to local fiscal returns: '.$outcome);
-    }
-    DB::table('eis_settings')->where('id', 101)->update(['device_id' => $returnDeviceId]);
-    DB::table('eis_utility_requests')->delete();
-    foreach ($before as $table => $records) {
-        DB::table($table)->delete();
-        if ($records) { DB::table($table)->insert($records); }
-    }
-}
-$requests = [];
-$disconnect = false;
-$responseStatus = 200;
-$responseBody = ['statusCode' => 1, 'data' => []];
-echo "OK: {$salesChecks} automatic return cancellation checks\n";
+salesCheck(localSalesGraph() === $before && DB::table('eis_utility_requests')->count() === 0
+    && DB::table('eis_sale_adjustments')->count() === 0 && count($requests) === 0,
+    'Blocked full return leaves accounting, stock, allocations and EIS requests unchanged');
 try {
     DB::transaction(function () { makeReturn(1); throw new RuntimeException('Rollback test'); });
 } catch (RuntimeException $e) {}
@@ -321,7 +268,7 @@ salesReject(fn () => DB::transaction(fn () => Transaction::findOrFail($return->i
 salesCheck(Transaction::findOrFail($return->id)->exists, 'Blocked delete preserves linked return');
 salesReject(fn () => DB::transaction(fn () => Transaction::findOrFail(800)->delete()), 'Original sale with a fiscal note chain cannot be deleted');
 
-salesReject(fn () => makeReturn(3), 'Full cancellation cannot void an original invoice with an existing fiscal note chain');
+salesReject(fn () => makeReturn(3), 'Full fiscal returns remain blocked after a prior partial return');
 $return = makeReturn(2.5);
 $row = DB::table('eis_sale_adjustments')->orderByDesc('id')->first();
 $payload = json_decode($row->payload, true);
@@ -356,8 +303,8 @@ $viewFactory->shouldReceive('make')->once()->andReturnUsing(function ($name, $da
 });
 $app->instance(Illuminate\Contracts\View\Factory::class, $viewFactory);
 $salesListing = $controller->index(salesRequest())->getData()['sales'];
-salesCheck($salesListing->pluck('transaction_id')->sort()->values()->all() === [800, 801, 802]
-    && $salesListing->pluck('status')->sort()->values()->all() === ['failed', 'pending', 'submitted'],
+salesCheck($salesListing->pluck('transaction_id')->sort()->values()->all() === [801, 802]
+    && $salesListing->pluck('status')->sort()->values()->all() === ['failed', 'pending'],
     'EIS sales list includes only fully paid final POS sales with pending, submitted or failed EIS states');
 $responseBody = ['statusCode' => 1, 'data' => $original];
 foreach (['get-invoice-by-number', 'last-submitted-online-transaction', 'last-submitted-offline-transaction'] as $operation) {
@@ -418,7 +365,12 @@ foreach ([
 salesReject(fn () => $transformer->build($original, [$line], 1, 'FISCAL-800'), 'Changed local refund price cannot produce a mismatching fiscal adjustment');
 $levied = $original; $levied['invoiceSummary']['levyBreakDown'] = [['rateId' => 'LEVY']];
 salesReject(fn () => $transformer->build($levied, [$line], 115, 'FISCAL-800'), 'Unsupported levy allocation fails explicitly instead of inventing tax treatment');
-salesCheck(!str_contains(file_get_contents(dirname(__DIR__, 2).'\Modules\EIS\Resources\views\sales\index.blade.php'), '.html('),
+$salesView = file_get_contents(dirname(__DIR__, 2).'\Modules\EIS\Resources\views\sales\index.blade.php');
+$resultTableView = file_get_contents(dirname(__DIR__, 2).'\Modules\EIS\Resources\views\shared\result-table.blade.php');
+salesCheck(str_contains($salesView, "window.EisResultTables.render('#eis-sales-result', result.data);")
+    && str_contains($resultTableView, "container.text(scalar(value))")
+    && str_contains($resultTableView, "text: key")
+    && !str_contains($resultTableView, '.html('),
     'Sales results render as safe text rather than interpreted upstream HTML');
 
 $count = count($requests);
@@ -432,9 +384,10 @@ $app['config']->set('eis.base_url', 'https://eis.invalid/api/v1');
 DB::table('eis_settings')->where('id', 101)->update(['branch_id' => 'MOVED']);
 salesReject(fn () => $service->submit($setting, $row->id, 7), 'Moving the original terminal cannot reroute a saved adjustment');
 DB::table('eis_settings')->where('id', 101)->update(['branch_id' => 'SITE-A']);
+$returnTotal = DB::table('transactions')->where('id', $return->id)->value('final_total');
 DB::table('transactions')->where('id', $return->id)->update(['final_total' => 1]);
 salesReject(fn () => $service->submit($setting, $row->id, 7), 'Local accounting tampering invalidates saved review snapshot');
-DB::table('transactions')->where('id', $return->id)->update(['final_total' => 345]);
+DB::table('transactions')->where('id', $return->id)->update(['final_total' => $returnTotal]);
 salesCheck(count($requests) === $count, 'All stale endpoint/terminal/local ledger checks occur before HTTP');
 foreach ([
     ['invoiceNumber' => 'WRONG', 'originalInvoiceNumber' => 'OTHER', 'noteType' => 'Credit', 'invoiceTotal' => 0, 'totalVat' => 0],
