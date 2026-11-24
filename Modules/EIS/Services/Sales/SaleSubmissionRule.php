@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Modules\EIS\Exceptions\EisSaleException;
+use Modules\EIS\Exceptions\TerminalBlockedException;
 use Modules\EIS\Events\SaleCompleted;
 
 /**
@@ -31,7 +32,15 @@ class SaleSubmissionRule
     {
         $submissionError = null;
         if (DB::transactionLevel() > 0) {
-            $onlineResult = static::submitOnline($transaction);
+            try {
+                $onlineResult = static::submitOnline($transaction);
+            } catch (TerminalBlockedException $exception) {
+                if ($originalCheckout) {
+                    throw $exception;
+                }
+
+                return $exception->getMessage();
+            }
             if ($onlineResult === true) {
                 return null;
             }
@@ -87,6 +96,8 @@ class SaleSubmissionRule
 
             $sale = app(SaleSubmissionService::class)->submit($transaction, $settings);
             return $sale->status === 'submitted' ? true : ($sale->error_message ?: null);
+        } catch (TerminalBlockedException $exception) {
+            throw $exception;
         } catch (EisSaleException $exception) {
             if ($exception->httpStatus !== null && $exception->httpStatus !== 200) {
                 throw $exception;

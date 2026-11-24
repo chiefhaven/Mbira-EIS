@@ -1077,6 +1077,31 @@ try {
         && EisSale::where('transaction_id', $queuedBeforeBlock->id)->value('status') === 'failed',
         'Non-2xx transaction response also blocks the terminal and preserves the official reason on the failed sale');
 }
+$blocks->handleUtilityResponse($settings, 'check-terminal-unblock-status', [
+    'statusCode' => 1, 'data' => ['isUnblocked' => true],
+]);
+DB::beginTransaction();
+$blockedCheckout = splitSubmissionFixture('INV-BLOCKED-CHECKOUT');
+$blockedCheckoutId = $blockedCheckout->id;
+try {
+    SaleSubmissionRule::initiate($blockedCheckout, true);
+    throw new RuntimeException('Expected blocked terminal to reject the checkout');
+} catch (Modules\EIS\Exceptions\TerminalBlockedException $exception) {
+    DB::rollBack();
+    $blocks->persistBlockedStatus($exception->businessId, $exception->terminalId, $exception->blockingReason);
+}
+checkRetry(!Transaction::whereKey($blockedCheckoutId)->exists()
+    && !EisSale::where('transaction_id', $blockedCheckoutId)->exists()
+    && !DB::table('eis_failed_transactions')->where('transaction_id', $blockedCheckoutId)->exists()
+    && $settings->fresh()->is_blocked
+    && $settings->fresh()->blocking_reason === 'Rejected terminal: contact MRA.',
+    'Blocked checkout rolls back sale/retry rows while retaining terminal block state and reason');
+$nextSaleData = Illuminate\Support\Arr::except($queuedBeforeBlock->getAttributes(), ['id', 'connector_till_id']);
+$nextSaleData['invoice_no'] = 'INV-NEXT-AFTER-BLOCK';
+$savedSalesBeforeBlockCheck = Transaction::count();
+$assertBlocked(fn () => Transaction::create($nextSaleData), 'Rejected terminal');
+checkRetry(Transaction::count() === $savedSalesBeforeBlockCheck,
+    'Next sale cannot be saved after shouldBlockTerminal is persisted');
 checkRetry((new SaleResponseService())->shouldBlockTerminal(['data' => ['data' => ['shouldBlockTerminal' => true]]])
     && !(new SaleResponseService())->shouldBlockTerminal(['data' => ['data' => ['shouldBlockTerminal' => 'false']]]),
     'Shared response helper reads the documented nested flag without truthy-string conversion');

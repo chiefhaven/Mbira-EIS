@@ -41,7 +41,8 @@ $app->instance(Illuminate\Contracts\Routing\ResponseFactory::class, $responses);
 $schema = $capsule->getConnection()->getSchemaBuilder();
 foreach ([
     'business_locations' => ['business_id', 'name', 'default_eis_setting_id'],
-    'eis_settings' => ['business_id', 'location_id', 'status', 'jwt_token', 'secret_key', 'device_id'],
+    'eis_settings' => ['business_id', 'location_id', 'status', 'jwt_token', 'secret_key', 'device_id',
+        'is_blocked', 'blocking_reason'],
     'eis_configurations' => ['business_id', 'eis_setting_id', 'location_id', 'raw_response', 'last_synced_at'],
     'eis_terminal_configurations' => ['configuration_id', 'terminal_label', 'is_active'],
 ] as $name => $columns) {
@@ -282,10 +283,21 @@ managementCheck($mismatchResponse->getStatusCode() === 422
 $service->shouldReceive('getLatestConfig')->once()->with(1, 102)->andReturn(['success' => true, 'msg' => 'Synced']);
 managementCheck($controller->latestConfig(managementRequest(['terminal_id' => 201]), 102)->getData(true)['message'] === 'Synced',
     'Latest config pins canonical route terminal ID, not a body override');
+$db->table('eis_settings')->where('id', 102)->update([
+    'is_blocked' => true,
+    'blocking_reason' => 'Contact MRA to resolve the terminal suspension.',
+]);
 $shown = $controller->configuration(managementRequest(['terminal_id' => 201]), 102)->getData(true)['data'];
 managementCheck($shown['terminal_id'] === 102 && $shown['terminalConfiguration']['terminalLabel'] === 'Label 102'
     && $shown['globalConfiguration']['versionNo'] === 1 && $shown['taxpayerConfiguration']['versionNo'] === 3,
     'Configuration viewer pins route terminal and includes all three groups with their own versions');
+managementCheck($shown['terminalBlockStatus'] === [
+    'status' => 'Blocked',
+    'reason' => 'Contact MRA to resolve the terminal suspension.',
+], 'Configuration viewer shows the persisted terminal block status and reason');
+$unblockedStatus = $controller->configuration(managementRequest(), 101)->getData(true)['data']['terminalBlockStatus'];
+managementCheck($unblockedStatus === ['status' => 'Not blocked', 'reason' => null],
+    'Configuration viewer shows unblocked terminals without a stale reason');
 managementCheck(!str_contains(json_encode($shown), 'never-expose') && !isset($shown['terminalConfiguration']['jwtToken']),
     'Configuration viewer excludes credentials from saved API payload');
 managementCheck(!str_contains(json_encode($shown), 'nested-secret') && $shown['terminalConfiguration']['terminalSite']['siteId'] === 'SITE-102',

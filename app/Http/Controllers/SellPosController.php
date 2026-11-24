@@ -831,6 +831,13 @@ class SellPosController extends Controller
             }
         } catch (\Exception $e) {
             DB::rollBack();
+            if ($e instanceof \Modules\EIS\Exceptions\TerminalBlockedException) {
+                app(\Modules\EIS\Services\Terminal\TerminalBlockService::class)->persistBlockedStatus(
+                    $e->businessId,
+                    $e->terminalId,
+                    $e->blockingReason
+                );
+            }
             \Log::emergency('File:' . $e->getFile() . 'Line:' . $e->getLine() . 'Message:' . $e->getMessage());
             $msg = trans('messages.something_went_wrong');
 

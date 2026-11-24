@@ -108,6 +108,12 @@ class TerminalBlockService
         }
     }
 
+    public function persistBlockedStatus(int $businessId, int $terminalId, string $reason): void
+    {
+        $setting = EisSetting::where('business_id', $businessId)->findOrFail($terminalId);
+        $this->block($setting, trim($reason) ?: self::DEFAULT_REASON);
+    }
+
     private function block(EisSetting $setting, string $reason): void
     {
         EisSetting::where('business_id', $setting->business_id)->whereKey($setting->id)

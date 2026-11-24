@@ -142,6 +142,12 @@ class TerminalManagementController extends Controller
         ];
         $result = ['terminal_id' => $setting->id, 'location_id' => $setting->location_id,
             'last_synced_at' => $configuration->last_synced_at];
+        $result['terminalBlockStatus'] = [
+            'status' => $setting->is_blocked ? 'Blocked' : 'Not blocked',
+            'reason' => $setting->is_blocked
+                ? ($setting->blocking_reason ?: \Modules\EIS\Services\Terminal\TerminalBlockService::DEFAULT_REASON)
+                : null,
+        ];
         foreach ($groups as $name => $keys) {
             abort_unless(isset($data[$name]) && is_array($data[$name]), 409, 'Stored configuration is incomplete. Fetch the latest configuration.');
             $result[$name] = array_intersect_key($data[$name], array_flip($keys));

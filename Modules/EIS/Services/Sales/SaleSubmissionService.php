@@ -11,6 +11,7 @@ use Modules\EIS\Models\EisSale;
 use Modules\EIS\Models\EisSetting;
 use Modules\EIS\Services\Http\EisSaleClient;
 use Modules\EIS\Exceptions\EisSaleException;
+use Modules\EIS\Exceptions\TerminalBlockedException;
 use Modules\EIS\Services\Sales\InvoiceNumberGenerator;
 use Modules\EIS\Services\Sales\SaleResponseService;
 use Modules\EIS\Services\EisSubscriptionAccess;
@@ -174,7 +175,12 @@ class SaleSubmissionService
             );
             $blockedTerminal = $eisSetting->fresh();
             if ($blockedTerminal->is_blocked && (!($response['success'] ?? false) || ($response['data']['statusCode'] ?? null) !== 1)) {
-                $response['error'] = \Modules\EIS\Services\Terminal\TerminalBlockService::message($blockedTerminal);
+                throw new TerminalBlockedException(
+                    (int) $blockedTerminal->business_id,
+                    (int) $blockedTerminal->id,
+                    $blockedTerminal->blocking_reason
+                        ?: \Modules\EIS\Services\Terminal\TerminalBlockService::DEFAULT_REASON
+                );
             }
 
             // The client returns failures instead of throwing. Persist these so
