@@ -313,7 +313,7 @@ class InvoiceNumberGenerator
         }
     }
 
-    /** Count unique EIS invoices issued today by the selected terminal. */
+    /** Return the highest valid EIS invoice sequence issued for the selected terminal/date. */
     public function getDailyCount(
         int $businessId,
         ?int $terminalId = null,
@@ -342,7 +342,7 @@ class InvoiceNumberGenerator
                     });
             })
             ->get(['eis_invoice_number', 'request_payload']);
-        $countedInvoices = [];
+        $lastCount = 0;
         foreach ($invoices as $invoice) {
             $number = $invoice->eis_invoice_number;
             if (!is_string($number) || $number === '') {
@@ -356,14 +356,14 @@ class InvoiceNumberGenerator
             }
 
             $encodedCount = substr($number, strlen($prefix));
-            if ($encodedCount === '' || str_contains($encodedCount, '-')
-                || $this->base64ToBase10($encodedCount) < 1) {
+            $decodedCount = $this->base64ToBase10($encodedCount);
+            if ($encodedCount === '' || str_contains($encodedCount, '-') || $decodedCount < 1) {
                 continue;
             }
-            $countedInvoices[$number] = true;
+            $lastCount = max($lastCount, $decodedCount);
         }
 
-        return count($countedInvoices);
+        return $lastCount;
     }
 
     /** Return the next sequence for today's invoices on the selected terminal. */

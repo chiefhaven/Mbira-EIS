@@ -51,8 +51,17 @@ try {
     ]);
     locationCheck($generator->getDailyCount(1, 1) === 4
         && $generator->getNextDailyCount(1, 1) === 5,
-        'Daily sequence counts unique valid terminal invoices and recovers identities from saved request payloads (count='
+        'Daily sequence uses valid terminal invoices and recovers identities from saved request payloads (count='
             .$generator->getDailyCount(1, 1).')');
+    DB::table('eis_sales')->insert([
+        'business_id' => 1, 'transaction_id' => 196,
+        'location_id' => 1, 'eis_setting_id' => 1,
+        'eis_invoice_number' => implode('-', array_slice(explode('-', $firstDayNumbers[1]), 0, 3))
+            .'-'.$generator->base10ToBase64(8),
+        'status' => 'failed', 'created_at' => now(), 'updated_at' => now(),
+    ]);
+    locationCheck($generator->getDailyCount(1, 1) === 8 && $generator->getNextDailyCount(1, 1) === 9,
+        'Next daily sequence decodes the highest existing count instead of counting invoice rows');
     Carbon::setTestNow(Carbon::parse('2026-10-24 00:00:00'));
     foreach ([1 => 1, 2 => 2] as $terminalId => $position) {
         locationCheck($generator->getDailyCount(1, $terminalId) === 0, 'Every terminal count resets at midnight');
@@ -71,8 +80,8 @@ try {
         locationCheck($generator->getDailyCount(1, $terminalId) === 1, 'Next-day counter excludes all previous-day allocations');
     }
     $yesterday = Carbon::parse('2026-10-23 12:00:00');
-    locationCheck($generator->getDailyCount(1, 1, $yesterday) === 4
-        && $generator->getNextDailyCount(1, 1, $yesterday) === 5,
+    locationCheck($generator->getDailyCount(1, 1, $yesterday) === 8
+        && $generator->getNextDailyCount(1, 1, $yesterday) === 9,
         'Invoice count is selected by the invoice transaction date, not the retry date');
     $lateSubmissionNumber = $generator->generateInvoiceNumber(
         1,
@@ -84,8 +93,8 @@ try {
     );
     $lateParts = explode('-', $lateSubmissionNumber);
     locationCheck($lateParts[2] === $generator->base10ToBase64($generator->toJulianDate($yesterday))
-        && $lateParts[3] === $generator->base10ToBase64(5),
-        'Late first submission uses invoice transaction date and that date’s terminal count plus one');
+        && $lateParts[3] === $generator->base10ToBase64(9),
+        'Late first submission uses invoice transaction date and the highest sequence plus one');
     $before = DB::table('eis_sales')->where('transaction_id', 112)->value('eis_invoice_number');
     DB::table('eis_sales')->where('transaction_id', 112)->update(['status' => 'submitted', 'updated_at' => now()]);
     locationCheck($generator->getDailyCount(1, 1) === 1
