@@ -137,6 +137,30 @@ $settings = Modules\EIS\Models\EisSetting::findOrFail(1);
 $configuration = Modules\EIS\Models\EisConfiguration::where('eis_setting_id', 1)->firstOrFail();
 $terminalConfigurationId = DB::table('eis_terminal_configurations')
     ->where('configuration_id', $configuration->id)->value('id');
+$terminalConfiguration = DB::table('eis_terminal_configurations')->where('id', $terminalConfigurationId)->first();
+$invoiceGenerator = new Modules\EIS\Services\Sales\InvoiceNumberGenerator();
+$highestCount = $invoiceGenerator->getDailyCount(1, (int) $settings->id);
+$gapCount = $highestCount + 7;
+$connectorInvoice = $invoiceGenerator->generateInvoiceNumber(
+    1,
+    $gapCount,
+    (int) $terminalConfiguration->terminal_position,
+    (int) $terminalConfiguration->taxpayer_id,
+    (int) $settings->id
+);
+DB::table('eis_sales')->insert([
+    'business_id' => 1,
+    'transaction_id' => 999998,
+    'eis_setting_id' => $settings->id,
+    'location_id' => 1,
+    'eis_invoice_number' => $connectorInvoice,
+    'status' => 'failed',
+    'created_at' => now(),
+    'updated_at' => now(),
+]);
+locationCheck($invoiceGenerator->getNextDailyCount(1, (int) TerminalContext::forSale($sale)->id) === $gapCount + 1,
+    'Connector till sale uses the decoded highest EIS invoice sequence plus one');
+DB::table('eis_sales')->where('transaction_id', 999998)->delete();
 $originalOfflineLimit = DB::table('eis_offline_limits')
     ->where('terminal_configuration_id', $terminalConfigurationId)->first();
 DB::table('eis_offline_limits')->updateOrInsert(
