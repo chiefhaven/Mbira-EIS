@@ -85,7 +85,9 @@
                 @yield('vue')
             </div>
             <div class="tw-flex-1 tw-overflow-y-auto tw-h-screen" id="scrollable-container">
-                @include('layouts.partials.eis-terminal-block')
+                @if($pos_layout)
+                    @include('layouts.partials.eis-terminal-block')
+                @endif
                 @yield('content')
                 @if (!$pos_layout)
                 

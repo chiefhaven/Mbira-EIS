@@ -232,6 +232,9 @@ $blockStatus = $controller->checkBlockStatus(managementRequest(), 101)->getData(
 managementCheck(!$blockStatus['success']
     && $blockStatus['message'] === 'Unable to contact MRA to check terminal block status. The saved block state was not changed.',
     'A connection error after a healthy preflight keeps the original non-offline error message');
+$db->table('eis_settings')->where('id', 102)->update([
+    'is_blocked' => true, 'blocking_reason' => 'Blocked offline by user request.',
+]);
 $response = $controller->index(managementRequest())->getData(true);
 managementCheck($response['success'] && array_column($response['data']['terminals'], 'id') === [101, 102],
     'Restricted admin sees multiple terminals only at permitted locations');
@@ -241,6 +244,9 @@ managementCheck($response['data']['terminals'][0]['is_default'] && !$response['d
     'Location designated default is independent of terminal activation order');
 managementCheck($response['data']['terminals'][0]['is_active'] && !$response['data']['terminals'][1]['is_active'],
     'Per-terminal active and inactive statuses are listed');
+managementCheck($response['data']['terminals'][1]['is_blocked']
+    && $response['data']['terminals'][1]['blocking_reason'] === 'Blocked offline by user request.',
+    'Terminal list includes the persisted block status and reason');
 managementCheck(!str_contains(json_encode($response), 'fixture-token') && !str_contains(json_encode($response), 'fixture-secret'),
     'List never serializes terminal credentials');
 $user->locations = 'all';
@@ -496,6 +502,16 @@ managementCheck(str_contains($terminalView, "business.partials.settings_mra_eis"
     && str_contains($terminalView, "'standalone' => true"),
     'Standalone terminal page renders the MRA EIS settings interface');
 $terminalScript = file_get_contents(dirname(__DIR__, 2).'\Modules\EIS\Resources\views\terminals\script.blade.php');
+$appLayout = file_get_contents(dirname(__DIR__, 2).'\resources\views\layouts\app.blade.php');
+$restaurantLayout = file_get_contents(dirname(__DIR__, 2).'\resources\views\layouts\restaurant.blade.php');
+$terminalStatusScript = str_replace(["\r\n", "\r"], "\n", $terminalScript);
+$appLayout = str_replace(["\r\n", "\r"], "\n", $appLayout);
+managementCheck(str_contains($appLayout, "@if(\$pos_layout)\n                    @include('layouts.partials.eis-terminal-block')\n                @endif")
+    && !str_contains($restaurantLayout, 'layouts.partials.eis-terminal-block'),
+    'Blocked-terminal toast polling is limited to POS layouts');
+managementCheck(str_contains($terminalStatusScript, "'class': 'eis-status-label eis-status-danger', text: 'Blocked'")
+    && str_contains($terminalStatusScript, '.text(terminal.blocking_reason)'),
+    'Terminal list renders blocked status and reason as text');
 $source = file_get_contents(dirname(__DIR__, 2).'\resources\views\business\settings.blade.php');
 $taxSettingsView = file_get_contents(dirname(__DIR__, 2).'\resources\views\business\partials\settings_tax.blade.php');
 token_get_all($blade->compileString($taxSettingsView), TOKEN_PARSE);

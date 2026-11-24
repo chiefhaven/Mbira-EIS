@@ -56,10 +56,16 @@ $(function() {
                 $('<td>').text((terminal.terminal_label || terminal.device_id || 'Terminal') + ' (#' + terminal.id + ')').appendTo(row);
                 $('<td>').text(terminal.location_name).appendTo(row);
                 $('<td>').text(terminal.is_default ? 'Default' : '—').appendTo(row);
-                $('<td>').append($('<span>', {
+                var statusCell = $('<td>').appendTo(row);
+                $('<span>', {
                     'class': 'eis-status-label ' + (terminal.is_active ? 'eis-status-success' : 'eis-status-danger'),
                     text: terminal.is_active ? 'Active' : 'Inactive'
-                })).appendTo(row);
+                }).appendTo(statusCell);
+                if (terminal.is_blocked) {
+                    $('<span>', {'class': 'eis-status-label eis-status-danger', text: 'Blocked'}).appendTo(statusCell);
+                    $('<div>', {'class': 'text-muted eis-terminal-block-reason'})
+                        .text(terminal.blocking_reason).appendTo(statusCell);
+                }
                 var actions = $('<td>').appendTo(row);
                 $.each({configuration: 'View configurations', 'latest-config': 'Latest config', 'check-block-status': 'Check block status', 'request-new-token': 'Request new token', 'deactivate': 'Deactivate', 'default': 'Set default', 'delete': 'Delete'}, function(action, label) {
                     if ((action === 'deactivate' || action === 'default') && !terminal.is_active) return;

@@ -38,7 +38,8 @@ class TerminalManagementController extends Controller
             ->orderBy('eis_settings.id')
             ->get([
                 'eis_settings.id', 'eis_settings.location_id', 'eis_settings.status',
-                'eis_settings.device_id', 'terminal.terminal_label', 'terminal.is_active',
+                'eis_settings.device_id', 'eis_settings.is_blocked', 'eis_settings.blocking_reason',
+                'terminal.terminal_label', 'terminal.is_active',
             ])
             ->map(function ($terminal) use ($locations) {
                 $location = $locations->firstWhere('id', $terminal->location_id);
@@ -50,6 +51,10 @@ class TerminalManagementController extends Controller
                     'terminal_label' => $terminal->terminal_label,
                     'device_id' => $terminal->device_id,
                     'is_active' => TerminalContext::isOperational((bool) $terminal->status, $terminal->is_active),
+                    'is_blocked' => (bool) $terminal->is_blocked,
+                    'blocking_reason' => $terminal->is_blocked
+                        ? ($terminal->blocking_reason ?: TerminalBlockService::DEFAULT_REASON)
+                        : null,
                     'is_default' => (int) $location->default_eis_setting_id === (int) $terminal->id,
                 ];
             });
