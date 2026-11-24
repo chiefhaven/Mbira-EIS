@@ -25,9 +25,21 @@ class TerminalBlockService
 
     public static function visibleTo($user)
     {
-        $locations = $user->permitted_locations();
-        return EisSetting::where('business_id', $user->business_id)
-            ->when($locations !== 'all', fn ($query) => $query->whereIn('location_id', $locations))
+        $locations = $user->permitted_locations($user->business_id);
+        return EisSetting::query()
+            ->leftJoin('eis_configurations as configuration', function ($join) {
+                $join->on('configuration.eis_setting_id', '=', 'eis_settings.id')
+                    ->on('configuration.business_id', '=', 'eis_settings.business_id')
+                    ->on('configuration.location_id', '=', 'eis_settings.location_id')
+                    ->whereNull('configuration.deleted_at');
+            })
+            ->leftJoin('eis_terminal_configurations as terminal', function ($join) {
+                $join->on('terminal.configuration_id', '=', 'configuration.id')
+                    ->whereNull('terminal.deleted_at');
+            })
+            ->where('eis_settings.business_id', $user->business_id)
+            ->when($locations !== 'all', fn ($query) => $query->whereIn('eis_settings.location_id', $locations))
+            ->select('eis_settings.*', 'terminal.terminal_label')
             ->get()->filter(fn ($terminal) => $terminal->is_blocked);
     }
 

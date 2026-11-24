@@ -64,6 +64,7 @@ class TerminalManagementController extends Controller
         abort_unless($request->user() && $request->user()->business_id, 403);
         $terminals = \Modules\EIS\Services\Terminal\TerminalBlockService::visibleTo($request->user())
             ->map(fn ($terminal) => [
+                'terminal_label' => $terminal->terminal_label,
                 'device_id' => $terminal->device_id,
                 'message' => $terminal->blocking_reason
                     ?: \Modules\EIS\Services\Terminal\TerminalBlockService::DEFAULT_REASON,

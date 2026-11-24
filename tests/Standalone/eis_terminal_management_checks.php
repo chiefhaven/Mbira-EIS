@@ -287,6 +287,12 @@ $db->table('eis_settings')->where('id', 102)->update([
     'is_blocked' => true,
     'blocking_reason' => 'Contact MRA to resolve the terminal suspension.',
 ]);
+$blockedStatus = $controller->blockingStatus(managementRequest())->getData(true)['terminals'];
+managementCheck($blockedStatus === [[
+    'terminal_label' => 'Label 102',
+    'device_id' => 'DEVICE-102',
+    'message' => 'Contact MRA to resolve the terminal suspension.',
+]], 'Blocked terminal status includes its saved label for toast notifications');
 $shown = $controller->configuration(managementRequest(['terminal_id' => 201]), 102)->getData(true)['data'];
 managementCheck($shown['terminal_id'] === 102 && $shown['terminalConfiguration']['terminalLabel'] === 'Label 102'
     && $shown['globalConfiguration']['versionNo'] === 1 && $shown['taxpayerConfiguration']['versionNo'] === 3,

@@ -4,7 +4,7 @@ const path = require('path');
 const vm = require('vm');
 
 const view = fs.readFileSync(path.join(__dirname, '..', '..', 'resources', 'views', 'layouts', 'partials', 'eis-terminal-block.blade.php'), 'utf8');
-const initialTerminal = {device_id: 'T1', message: '<img src=x onerror=alert(1)> Contact MRA.'};
+const initialTerminal = {terminal_label: 'Till One', device_id: 'T1', message: '<img src=x onerror=alert(1)> Contact MRA.'};
 const script = view.match(/<script>([\s\S]*?)<\/script>/)[1]
     .replace("@json(route('eis.terminal-block-status'))", "'/eis/terminal-block-status'")
     .replace('@json($blockedTerminals)', JSON.stringify([initialTerminal]));
@@ -35,14 +35,14 @@ const tick = () => new Promise(resolve => setImmediate(resolve));
 
 (async () => {
     assert.strictEqual(toasts.length, 1, 'Already blocked terminals show a toast on page load');
-    assert.strictEqual(toasts[0].message, 'EIS terminal T1 blocked. <img src=x onerror=alert(1)> Contact MRA.');
+    assert.strictEqual(toasts[0].message, 'EIS terminal Till One blocked. <img src=x onerror=alert(1)> Contact MRA.');
     assert.strictEqual(toasts[0].title, 'EIS terminal blocked');
     assert.strictEqual(toasts[0].options.escapeHtml, true, 'MRA messages must be escaped as text');
     response = {ok: true, json: async () => ({terminals: [initialTerminal]})};
     poll();
     await tick();
     assert.strictEqual(toasts.length, 1, 'Unchanged polling must not repeat the toast');
-    response = {ok: true, json: async () => ({terminals: [{device_id: 'T1', message: 'Updated MRA reason.'}]})};
+    response = {ok: true, json: async () => ({terminals: [{terminal_label: 'Till One', device_id: 'T1', message: 'Updated MRA reason.'}]})};
     poll();
     await tick();
     assert.strictEqual(toasts.length, 2);
@@ -60,7 +60,7 @@ const tick = () => new Promise(resolve => setImmediate(resolve));
     poll();
     await tick();
     assert.strictEqual(toasts.length, 3, 'Blocking again displays a new toast');
-    assert(toasts[2].message.includes('T1 blocked.') && toasts[2].message.includes('T2 blocked.'));
+    assert(toasts[2].message.includes('Till One blocked.') && toasts[2].message.includes('T2 blocked.'));
     response = {ok: false, status: 401};
     poll();
     await tick();

@@ -4,6 +4,7 @@
         $blockedTerminals = \Modules\EIS\Services\Terminal\TerminalBlockService::visibleTo(auth()->user());
     }
     $blockedTerminals = $blockedTerminals->map(fn ($terminal) => [
+        'terminal_label' => $terminal->terminal_label,
         'device_id' => $terminal->device_id,
         'message' => $terminal->blocking_reason
             ?: \Modules\EIS\Services\Terminal\TerminalBlockService::DEFAULT_REASON,
@@ -14,7 +15,8 @@ window.addEventListener('load', function () {
     var lastMessage = '';
     function showBlockedTerminals(terminals) {
         var message = terminals.map(function (terminal) {
-            return 'EIS terminal ' + terminal.device_id + ' blocked. ' + terminal.message;
+            var label = typeof terminal.terminal_label === 'string' ? terminal.terminal_label.trim() : '';
+            return 'EIS terminal ' + (label || terminal.device_id || 'Terminal') + ' blocked. ' + terminal.message;
         }).join('\n\n');
         if (message && message !== lastMessage) {
             toastr.error(message, 'EIS terminal blocked', {escapeHtml: true});
