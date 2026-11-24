@@ -27,10 +27,20 @@ class EisUtilitiesClient
             app(\Modules\EIS\Services\Terminal\TerminalBlockService::class)
                 ->handleUtilityResponse($setting, $operation, $body);
         }
+        $terminalStatusField = match ($operation) {
+            'get-terminal-blocking-message' => 'isBlocked',
+            'check-terminal-unblock-status' => 'isUnblocked',
+            default => null,
+        };
+        $terminalStatusResponse = is_array($body) && $terminalStatusField !== null
+            && in_array($body['statusCode'] ?? null, [0, 1], true)
+            && is_array($body['data'] ?? null)
+            && is_bool($body['data'][$terminalStatusField] ?? null)
+            && empty($body['errors']);
         $outcome = 'unknown';
         if (is_array($body) && !$response->serverError()) {
-            if ($response->successful() && ($body['statusCode'] ?? null) === 1
-                && empty($body['errors']) && array_key_exists('data', $body)) {
+            if ($response->successful() && ($terminalStatusResponse
+                || (($body['statusCode'] ?? null) === 1 && empty($body['errors']) && array_key_exists('data', $body)))) {
                 $outcome = 'accepted';
             } elseif ($response->clientError() || ($body['statusCode'] ?? null) === 0) {
                 $outcome = 'rejected';

@@ -71,6 +71,8 @@ Route::prefix('eis/terminals')->middleware(['web', 'auth'])->name('eis.terminals
         ->whereNumber('terminalId')->name('latest-config');
     Route::get('{terminalId}/configuration', [TerminalManagementController::class, 'configuration'])
         ->whereNumber('terminalId')->name('configuration');
+    Route::post('{terminalId}/check-block-status', [TerminalManagementController::class, 'checkBlockStatus'])
+        ->whereNumber('terminalId')->name('check-block-status');
     Route::post('{terminalId}/request-new-token', [TerminalManagementController::class, 'requestNewToken'])
         ->whereNumber('terminalId')->name('request-new-token');
     Route::post('{terminalId}/deactivate', [TerminalManagementController::class, 'deactivate'])

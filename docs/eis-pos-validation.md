@@ -55,12 +55,23 @@ page load or changed block messages, not repeatedly on unchanged polls. Confirme
 unblocking resets notification state so a later block displays a new toast.
 Existing invoices remain readable.
 
+Terminal management provides a separate **Check block status** action. It calls
+`get-terminal-blocking-message` for the selected terminal without submitting a
+sale. A confirmed MRA block is persisted locally with its reason. If MRA reports
+unblocked while a local block remains, the action requests
+`check-terminal-unblock-status` and clears the local block only when MRA confirms
+`data.isUnblocked: true`. Otherwise it reports the unconfirmed state and retains
+the local block.
+
 Getting latest configuration also retrieves the selected terminal's blocking
 status and reason, including unchanged and forced syncs. The refresh runs outside
 the configuration save transaction. A confirmed block is persisted and picked up
 by the toast polling. If MRA reports no block for a locally blocked terminal, an
 explicit `check-terminal-unblock-status` request must confirm `data.isUnblocked:
 true` before clearing the block and reason. Other terminals are unchanged.
+The request uses the selected setting's `terminalId`; the documented `statusCode: 0`
+response is accepted only when HTTP succeeds, `errors` is empty, and
+`data.isUnblocked` is boolean. A false result retains the local block.
 Unavailable, rejected or malformed status responses report a configuration-refresh
 error and retain the saved block state; configuration changes may already be saved.
 

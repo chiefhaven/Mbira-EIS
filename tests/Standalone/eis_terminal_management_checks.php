@@ -13,6 +13,7 @@ use Illuminate\Support\Facades\Facade;
 use Illuminate\Validation\ValidationException;
 use Modules\EIS\Http\Controllers\TerminalManagementController;
 use Modules\EIS\Services\Terminal\EisTerminalActivationService;
+use Modules\EIS\Services\Terminal\TerminalBlockService;
 use Symfony\Component\HttpKernel\Exception\HttpException;
 
 $app = new class extends Container {
@@ -183,6 +184,30 @@ function managementReject(callable $work, int $status, string $message): void
 $service = Mockery::mock(EisTerminalActivationService::class);
 $controller = new TerminalManagementController($service);
 managementCheck($controller->getMiddleware()[0]['middleware'] === 'auth', 'Controller requires a session user');
+$blockService = Mockery::mock(TerminalBlockService::class);
+$blockService->shouldReceive('checkStatus')->once()
+    ->with(Mockery::on(fn ($setting) => (int) $setting->id === 101))
+    ->andReturn([
+        'mra_is_blocked' => false, 'unblock_confirmed' => false,
+        'is_blocked' => true, 'reason' => 'Blocked by administrator',
+    ]);
+$app->instance(TerminalBlockService::class, $blockService);
+$blockStatus = $controller->checkBlockStatus(managementRequest(), 101)->getData(true);
+managementCheck($blockStatus['success']
+    && str_contains($blockStatus['message'], 'did not confirm its unblocked status; the local block remains'),
+    'Manual block-status check reports MRA unblocked without clearing an existing local block');
+$confirmedBlockService = Mockery::mock(TerminalBlockService::class);
+$confirmedBlockService->shouldReceive('checkStatus')->once()
+    ->with(Mockery::on(fn ($setting) => (int) $setting->id === 101))
+    ->andReturn([
+        'mra_is_blocked' => false, 'unblock_confirmed' => true,
+        'is_blocked' => false, 'reason' => null,
+    ]);
+$app->instance(TerminalBlockService::class, $confirmedBlockService);
+$blockStatus = $controller->checkBlockStatus(managementRequest(), 101)->getData(true);
+managementCheck($blockStatus['success']
+    && str_contains($blockStatus['message'], 'local block has been cleared'),
+    'Manual block-status check reports explicit MRA unblock confirmation');
 $response = $controller->index(managementRequest())->getData(true);
 managementCheck($response['success'] && array_column($response['data']['terminals'], 'id') === [101, 102],
     'Restricted admin sees multiple terminals only at permitted locations');
@@ -403,6 +428,7 @@ foreach ([
     'activate' => ['POST', 'eis/terminals/activate'],
     'latest-config' => ['POST', 'eis/terminals/{terminalId}/latest-config'],
     'configuration' => ['GET', 'eis/terminals/{terminalId}/configuration'],
+    'check-block-status' => ['POST', 'eis/terminals/{terminalId}/check-block-status'],
     'request-new-token' => ['POST', 'eis/terminals/{terminalId}/request-new-token'],
     'deactivate' => ['POST', 'eis/terminals/{terminalId}/deactivate'],
     'delete' => ['POST', 'eis/terminals/{terminalId}/delete'],
@@ -462,6 +488,9 @@ managementCheck(!str_contains($source, "route('eis.terminal.") && !str_contains(
     && !str_contains($source, 'getTerminalStatus'), 'Obsolete API/singleton JS and credentials removed');
 managementCheck(str_contains($terminalScript, "(action === 'deactivate' || action === 'default') && !terminal.is_active"),
     'UI hides default action when combined terminal status is inactive');
+managementCheck(str_contains($terminalScript, "'check-block-status': @json(route('eis.terminals.check-block-status'")
+    && str_contains($terminalScript, "'check-block-status': 'Check block status'"),
+    'Terminal UI offers a separate block-status check action');
 managementCheck(str_contains($terminalScript, "action === 'delete' && terminal.is_active")
     && str_contains($terminalScript, "route('eis.terminals.delete'"),
     'UI offers deletion only for inactive terminals through the dedicated endpoint');

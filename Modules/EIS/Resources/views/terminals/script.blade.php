@@ -6,6 +6,7 @@ $(function() {
         index: @json(route('eis.terminals.index')),
         activate: @json(route('eis.terminals.activate')),
         'latest-config': @json(route('eis.terminals.latest-config', ['terminalId' => 0])),
+        'check-block-status': @json(route('eis.terminals.check-block-status', ['terminalId' => 0])),
         configuration: @json(route('eis.terminals.configuration', ['terminalId' => 0])),
         'request-new-token': @json(route('eis.terminals.request-new-token', ['terminalId' => 0])),
         deactivate: @json(route('eis.terminals.deactivate', ['terminalId' => 0])),
@@ -61,7 +62,7 @@ $(function() {
                     text: terminal.is_active ? 'Active' : 'Inactive'
                 })).appendTo(row);
                 var actions = $('<td>').appendTo(row);
-                $.each({configuration: 'View configurations', 'latest-config': 'Latest config', 'request-new-token': 'Request new token', 'deactivate': 'Deactivate', 'renew-tokens': 'Renew tokens', 'default': 'Set default', 'delete': 'Delete'}, function(action, label) {
+                $.each({configuration: 'View configurations', 'latest-config': 'Latest config', 'check-block-status': 'Check block status', 'request-new-token': 'Request new token', 'deactivate': 'Deactivate', 'renew-tokens': 'Renew tokens', 'default': 'Set default', 'delete': 'Delete'}, function(action, label) {
                     if ((action === 'deactivate' || action === 'default') && !terminal.is_active) return;
                     if (action === 'delete' && terminal.is_active) return;
                     $('<button>', {type: 'button', 'class': 'btn ' + (action === 'delete' ? 'btn-danger' : 'btn-default') + ' btn-xs eis-terminal-action'})

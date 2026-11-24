@@ -11,6 +11,7 @@ use Modules\EIS\Models\EisSetting;
 use Modules\EIS\Models\EisTerminalConfiguration;
 use Modules\EIS\Services\Configuration\TerminalTokenService;
 use Modules\EIS\Services\Terminal\EisTerminalActivationService;
+use Modules\EIS\Services\Terminal\TerminalBlockService;
 use Modules\EIS\Services\Terminal\TerminalContext;
 
 class TerminalManagementController extends Controller
@@ -112,6 +113,34 @@ class TerminalManagementController extends Controller
     public function configuration(Request $request, int $terminalId)
     {
         return response()->json(['success' => true, 'data' => $this->configurationData($this->terminal($request, $terminalId))]);
+    }
+
+    public function checkBlockStatus(Request $request, int $terminalId)
+    {
+        $terminal = $this->terminal($request, $terminalId);
+        try {
+            $status = app(TerminalBlockService::class)->checkStatus($terminal);
+        } catch (\Illuminate\Http\Client\ConnectionException $exception) {
+            \Illuminate\Support\Facades\Log::warning('EIS terminal block status check failed', ['terminal_id' => $terminalId]);
+            return $this->result([
+                'success' => false,
+                'message' => 'Unable to contact MRA to check terminal block status. The saved block state was not changed.',
+            ]);
+        } catch (\InvalidArgumentException $exception) {
+            return $this->result(['success' => false, 'message' => $exception->getMessage()]);
+        }
+
+        if ($status['mra_is_blocked']) {
+            $message = 'MRA reports this terminal is blocked: '.$status['reason'];
+        } elseif ($status['unblock_confirmed']) {
+            $message = 'MRA confirmed this terminal is unblocked. The local block has been cleared.';
+        } elseif ($status['is_blocked']) {
+            $message = 'MRA reports this terminal is not blocked, but did not confirm its unblocked status; the local block remains.';
+        } else {
+            $message = 'MRA reports this terminal is not blocked.';
+        }
+
+        return response()->json(['success' => true, 'message' => $message, 'msg' => $message]);
     }
 
     public function requestNewToken(Request $request, int $terminalId, TerminalTokenService $tokens)

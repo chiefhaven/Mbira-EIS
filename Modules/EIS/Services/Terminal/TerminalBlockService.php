@@ -51,7 +51,7 @@ class TerminalBlockService
         }
     }
 
-    public function refreshStatus(EisSetting $setting): void
+    public function refreshStatus(EisSetting $setting): array
     {
         $setting = EisSetting::where('business_id', $setting->business_id)->findOrFail($setting->id);
         if (trim((string) $setting->device_id) === '') {
@@ -64,8 +64,11 @@ class TerminalBlockService
         if ($result['outcome'] !== 'accepted' || !is_array($data) || !is_bool($data['isBlocked'] ?? null)) {
             throw new \InvalidArgumentException('MRA terminal block status could not be confirmed. The saved block state has been retained.');
         }
-        if ($data['isBlocked'] || !$setting->fresh()->is_blocked) {
-            return;
+        if ($data['isBlocked']) {
+            return ['mra_is_blocked' => true, 'unblock_confirmed' => false];
+        }
+        if (!$setting->fresh()->is_blocked) {
+            return ['mra_is_blocked' => false, 'unblock_confirmed' => false];
         }
 
         $result = $utilities->send($setting, 'check-terminal-unblock-status', $payload);
@@ -76,6 +79,22 @@ class TerminalBlockService
         if (!$data['isUnblocked']) {
             Log::warning('EIS has not confirmed terminal unblock; retaining block', ['terminal_id' => $setting->id]);
         }
+        return ['mra_is_blocked' => false, 'unblock_confirmed' => $data['isUnblocked']];
+    }
+
+    public function checkStatus(EisSetting $setting): array
+    {
+        $status = $this->refreshStatus($setting);
+        $setting = EisSetting::where('business_id', $setting->business_id)->findOrFail($setting->id);
+        $fresh = $setting->fresh();
+        return [
+            'mra_is_blocked' => $status['mra_is_blocked'],
+            'unblock_confirmed' => $status['unblock_confirmed'],
+            'is_blocked' => (bool) $fresh->is_blocked,
+            'reason' => $fresh->is_blocked
+                ? ($fresh->blocking_reason ?: self::DEFAULT_REASON)
+                : null,
+        ];
     }
 
     public function handleResponse(EisSetting $setting, array $response): void
@@ -106,7 +125,7 @@ class TerminalBlockService
 
     public function handleUtilityResponse(EisSetting $setting, string $operation, array $response): void
     {
-        if (($response['statusCode'] ?? null) !== 1 || !empty($response['errors'])) {
+        if (!in_array($response['statusCode'] ?? null, [0, 1], true) || !empty($response['errors'])) {
             return;
         }
         if ($operation === 'get-terminal-blocking-message' && ($response['data']['isBlocked'] ?? null) === true) {

@@ -80,7 +80,7 @@ $schema->create('eis_configurations', function (Blueprint $t) {
 });
 $schema->create('eis_terminal_configurations', function (Blueprint $t) {
     $t->increments('id'); $t->integer('configuration_id'); $t->boolean('is_active')->default(true);
-    $t->integer('terminal_position'); $t->integer('taxpayer_id'); $t->softDeletes();
+    $t->integer('terminal_position'); $t->integer('taxpayer_id'); $t->string('terminal_label')->nullable(); $t->softDeletes();
 });
 DB::table('eis_configurations')->insert([
     'id' => 1, 'business_id' => 7, 'eis_setting_id' => 1, 'location_id' => 3,
@@ -1032,18 +1032,82 @@ DB::table('business_locations')->where('id', 3)->update(['default_eis_setting_id
 $http = new Illuminate\Http\Client\Factory();
 Illuminate\Support\Facades\Http::swap($http);
 $http->preventStrayRequests();
-$http->fake(['*' => $http->response(['statusCode' => 1, 'data' => ['isUnblocked' => false]])]);
-$utilities->send($settings, 'check-terminal-unblock-status', ['terminalId' => 'BLOCK-TEST']);
+$http->fake([
+    'https://eis.invalid/api/v1/utilities/get-terminal-blocking-message' => $http->response([
+        'statusCode' => 0, 'data' => ['isBlocked' => false],
+    ]),
+    'https://eis.invalid/api/v1/utilities/check-terminal-unblock-status' => $http->response([
+        'statusCode' => 0, 'data' => ['isUnblocked' => false],
+    ]),
+]);
+$blocks->refreshStatus($settings);
 checkRetry($settings->fresh()->is_blocked, 'Unblock-status false leaves the terminal blocked');
+Illuminate\Support\Facades\Http::assertSent(fn ($request) => $request->url() === 'https://eis.invalid/api/v1/utilities/check-terminal-unblock-status'
+    && $request->data() === ['terminalId' => 'BLOCK-TEST']);
 $http = new Illuminate\Http\Client\Factory();
 Illuminate\Support\Facades\Http::swap($http);
 $http->preventStrayRequests();
-$http->fake(['*' => $http->response(['statusCode' => 1, 'data' => ['isUnblocked' => true]])]);
-$utilities->send($settings, 'check-terminal-unblock-status', ['terminalId' => 'BLOCK-TEST']);
+$http->fake([
+    'https://eis.invalid/api/v1/utilities/get-terminal-blocking-message' => $http->response([
+        'statusCode' => 0, 'data' => ['isBlocked' => false],
+    ]),
+    'https://eis.invalid/api/v1/utilities/check-terminal-unblock-status' => $http->response([
+        'statusCode' => 0, 'data' => ['isUnblocked' => true],
+    ]),
+]);
+$blocks->refreshStatus($settings);
 checkRetry(!$settings->fresh()->is_blocked && $settings->fresh()->blocking_reason === null,
-    'Only successful explicit EIS unblock confirmation clears the block and its message');
+    'Documented statusCode 0 with isUnblocked true clears the block and its message');
 $blocks::assertAllowed($settings);
 checkRetry(true, 'Stale terminal instances see confirmed unblocking without logout');
+
+$http = new Illuminate\Http\Client\Factory();
+Illuminate\Support\Facades\Http::swap($http);
+$http->preventStrayRequests();
+$http->fake(['https://eis.invalid/api/v1/utilities/get-terminal-blocking-message' => $http->response([
+    'statusCode' => 0, 'data' => ['isBlocked' => true, 'blockingReason' => 'Manual status check confirmed the block.'],
+])]);
+$status = $blocks->checkStatus($settings);
+checkRetry($status['mra_is_blocked'] && $status['is_blocked']
+    && $status['reason'] === 'Manual status check confirmed the block.',
+    'A manual status check persists a confirmed MRA block and its reason');
+Illuminate\Support\Facades\Http::assertSent(fn ($request) => $request->url() === 'https://eis.invalid/api/v1/utilities/get-terminal-blocking-message'
+    && $request->data() === ['terminalId' => 'BLOCK-TEST']);
+Illuminate\Support\Facades\Http::assertNotSent(fn ($request) => str_ends_with($request->url(), '/check-terminal-unblock-status'));
+
+$http = new Illuminate\Http\Client\Factory();
+Illuminate\Support\Facades\Http::swap($http);
+$http->preventStrayRequests();
+$http->fake([
+    'https://eis.invalid/api/v1/utilities/get-terminal-blocking-message' => $http->response([
+        'statusCode' => 0, 'data' => ['isBlocked' => false],
+    ]),
+    'https://eis.invalid/api/v1/utilities/check-terminal-unblock-status' => $http->response([
+        'statusCode' => 0, 'data' => ['isUnblocked' => false],
+    ]),
+]);
+$status = $blocks->checkStatus($settings);
+checkRetry(!$status['mra_is_blocked'] && $status['is_blocked']
+    && $settings->fresh()->blocking_reason === 'Manual status check confirmed the block.',
+    'A manual unblocked status report does not clear an existing local block');
+Illuminate\Support\Facades\Http::assertSent(fn ($request) => $request->url() === 'https://eis.invalid/api/v1/utilities/check-terminal-unblock-status'
+    && $request->data() === ['terminalId' => 'BLOCK-TEST']);
+
+$http = new Illuminate\Http\Client\Factory();
+Illuminate\Support\Facades\Http::swap($http);
+$http->preventStrayRequests();
+$http->fake([
+    'https://eis.invalid/api/v1/utilities/get-terminal-blocking-message' => $http->response([
+        'statusCode' => 0, 'data' => ['isBlocked' => false],
+    ]),
+    'https://eis.invalid/api/v1/utilities/check-terminal-unblock-status' => $http->response([
+        'statusCode' => 0, 'data' => ['isUnblocked' => true],
+    ]),
+]);
+$status = $blocks->checkStatus($settings);
+checkRetry(!$status['mra_is_blocked'] && $status['unblock_confirmed'] && !$status['is_blocked']
+    && $settings->fresh()->blocking_reason === null,
+    'The status check clears a local block after MRA explicitly confirms the terminal is unblocked');
 
 $http = new Illuminate\Http\Client\Factory();
 Illuminate\Support\Facades\Http::swap($http);
@@ -1055,7 +1119,7 @@ checkRetry($settings->fresh()->is_blocked
     'Unavailable blocking-reason lookup fails closed with an explicit taxpayer warning');
 $assertBlocked(fn () => $blocks::assertAllowed($settings), 'blocking reason is unavailable');
 $blocks->handleUtilityResponse($settings, 'check-terminal-unblock-status', [
-    'statusCode' => 0, 'data' => ['isUnblocked' => true],
+    'statusCode' => 0, 'data' => ['isUnblocked' => true], 'errors' => [['errorMessage' => 'Not confirmed']],
 ]);
 checkRetry($settings->fresh()->is_blocked, 'An unsuccessful unblock response never restores transaction access');
 $blocks->handleUtilityResponse($settings, 'check-terminal-unblock-status', ['statusCode' => 1, 'data' => ['isUnblocked' => true]]);
