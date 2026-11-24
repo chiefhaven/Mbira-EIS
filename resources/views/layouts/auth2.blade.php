@@ -18,6 +18,103 @@
 
     @include('layouts.partials.extracss_auth')
 
+    <style>
+        .login-brand-logo {
+            width: 128px;
+            height: 72px;
+        }
+        .login-brand-page {
+            padding-top: 104px;
+            padding-bottom: 16px;
+        }
+        .login-viewport {
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
+            min-height: 100dvh;
+        }
+        .login-viewport > .container-fluid {
+            display: flex;
+            flex-direction: column;
+            flex: 1;
+            width: 100%;
+        }
+        .login-viewport > .container-fluid > .eq-height-row {
+            display: flex;
+            flex: 1;
+        }
+        .login-brand-page {
+            display: flex;
+            flex-direction: column;
+        }
+        .login-brand-page .login-shell {
+            min-height: 0;
+            flex: 1;
+            padding: 12px 0;
+        }
+        .login-viewport > footer {
+            flex-shrink: 0;
+        }
+        @media (min-width: 768px) {
+            .login-brand-logo {
+                width: 192px;
+                height: 96px;
+            }
+            .login-brand-page {
+                padding-top: 136px;
+            }
+        }
+        @media (max-height: 700px) {
+            .login-brand-page .login-card {
+                padding-top: 16px;
+                padding-bottom: 12px;
+            }
+            .login-brand-page .login-header-block {
+                margin-bottom: 12px;
+            }
+            .login-brand-page .login-support-text {
+                margin-top: 8px;
+            }
+        }
+        @media (max-height: 500px) {
+            .login-brand-logo {
+                width: 96px;
+                height: 48px;
+            }
+            .login-brand-page {
+                padding-top: 72px;
+                padding-bottom: 4px;
+            }
+            .login-brand-page .login-shell {
+                padding: 4px 0;
+            }
+            .login-brand-page .login-card {
+                padding: 10px 16px;
+            }
+            .login-brand-page .form-group,
+            .login-brand-page .login-header-block {
+                margin-bottom: 6px;
+            }
+            .login-brand-page .tw-dw-label {
+                padding-top: 4px;
+                padding-bottom: 4px;
+            }
+            .login-brand-page input,
+            .login-brand-page button[type="submit"] {
+                height: 32px;
+            }
+            .login-brand-page #show_hide_icon {
+                top: 30px !important;
+            }
+            .login-brand-page .login-header-block h1 {
+                font-size: 20px;
+            }
+        }
+        .wizard>.content {
+            background-color: white !important;
+        }
+    </style>
+
     <!--[if lt IE 9]>
     <script src="https://oss.maxcdn.com/html5shiv/3.7.3/html5shiv.min.js"></script>
     <script src="https://oss.maxcdn.com/respond/1.4.2/respond.min.js"></script>
@@ -121,102 +218,6 @@
             // });
         });
     </script>
-    <style>
-        .login-brand-logo {
-            width: 128px;
-            height: 72px;
-        }
-        .login-brand-page {
-            padding-top: 104px;
-            padding-bottom: 16px;
-        }
-        .login-viewport {
-            display: flex;
-            flex-direction: column;
-            min-height: 100vh;
-            min-height: 100dvh;
-        }
-        .login-viewport > .container-fluid {
-            display: flex;
-            flex-direction: column;
-            flex: 1;
-            width: 100%;
-        }
-        .login-viewport > .container-fluid > .eq-height-row {
-            display: flex;
-            flex: 1;
-        }
-        .login-brand-page {
-            display: flex;
-            flex-direction: column;
-        }
-        .login-brand-page .login-shell {
-            min-height: 0;
-            flex: 1;
-            padding: 12px 0;
-        }
-        .login-viewport > footer {
-            flex-shrink: 0;
-        }
-        @media (min-width: 768px) {
-            .login-brand-logo {
-                width: 192px;
-                height: 96px;
-            }
-            .login-brand-page {
-                padding-top: 136px;
-            }
-        }
-        @media (max-height: 700px) {
-            .login-brand-page .login-card {
-                padding-top: 16px;
-                padding-bottom: 12px;
-            }
-            .login-brand-page .login-header-block {
-                margin-bottom: 12px;
-            }
-            .login-brand-page .login-support-text {
-                margin-top: 8px;
-            }
-        }
-        @media (max-height: 500px) {
-            .login-brand-logo {
-                width: 96px;
-                height: 48px;
-            }
-            .login-brand-page {
-                padding-top: 72px;
-                padding-bottom: 4px;
-            }
-            .login-brand-page .login-shell {
-                padding: 4px 0;
-            }
-            .login-brand-page .login-card {
-                padding: 10px 16px;
-            }
-            .login-brand-page .form-group,
-            .login-brand-page .login-header-block {
-                margin-bottom: 6px;
-            }
-            .login-brand-page .tw-dw-label {
-                padding-top: 4px;
-                padding-bottom: 4px;
-            }
-            .login-brand-page input,
-            .login-brand-page button[type="submit"] {
-                height: 32px;
-            }
-            .login-brand-page #show_hide_icon {
-                top: 30px !important;
-            }
-            .login-brand-page .login-header-block h1 {
-                font-size: 20px;
-            }
-        }
-        .wizard>.content {
-            background-color: white !important;
-        }
-    </style>
 </body>
 
 </html>
