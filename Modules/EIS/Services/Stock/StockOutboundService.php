@@ -4,6 +4,7 @@ namespace Modules\EIS\Services\Stock;
 
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Modules\EIS\Exceptions\EisOfflineException;
 use Modules\EIS\Jobs\SubmitStockOperationJob;
 use Modules\EIS\Models\EisSetting;
 use Modules\EIS\Services\Terminal\TerminalContext;
@@ -316,10 +317,13 @@ class StockOutboundService
             Log::error('EIS bulk stock submission has an unknown outcome', [
                 'operation_id' => $operationId, 'exception' => get_class($exception),
             ]);
+            $message = $exception instanceof EisOfflineException
+                ? 'EIS is offline or unreachable. The network outcome is unknown. Do not resubmit this operation.'
+                : 'The network outcome is unknown. Do not resubmit this operation.';
             $this->finishBulk($operation, [
                 'outcome' => 'unknown',
                 'response' => [],
-                'message' => 'The network outcome is unknown. Do not resubmit this operation.',
+                'message' => $message,
             ]);
         }
     }
@@ -356,10 +360,13 @@ class StockOutboundService
                 Log::error('EIS stock adjustment has an unknown outcome', [
                     'operation_id' => $operation->id, 'line_id' => $line->id, 'exception' => get_class($exception),
                 ]);
+                $message = $exception instanceof EisOfflineException
+                    ? 'EIS is offline or unreachable. The network outcome is unknown. Do not resubmit this operation.'
+                    : 'The network outcome is unknown. Do not resubmit this operation.';
                 $result = [
                     'outcome' => 'unknown',
                     'response' => [],
-                    'message' => 'The network outcome is unknown. Do not resubmit this operation.',
+                    'message' => $message,
                 ];
             }
             $this->saveLineResult($line->id, $result);

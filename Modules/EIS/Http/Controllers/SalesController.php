@@ -51,6 +51,9 @@ class SalesController extends Controller
         }
         try {
             $result = $client->send($setting, $input['operation'], $payload);
+        } catch (\Modules\EIS\Exceptions\EisOfflineException $exception) {
+            Log::warning('EIS sales lookup unavailable', ['terminal_id' => $setting->id, 'operation' => $input['operation']]);
+            return response()->json(['success' => false, 'message' => 'EIS is offline. No invoice was confirmed.'], 502);
         } catch (\Illuminate\Http\Client\ConnectionException $exception) {
             Log::warning('EIS sales lookup unavailable', ['terminal_id' => $setting->id, 'operation' => $input['operation']]);
             return response()->json(['success' => false, 'message' => 'EIS could not be reached. No invoice was confirmed.'], 502);
@@ -108,6 +111,9 @@ class SalesController extends Controller
         $trackedSale = \Modules\EIS\Models\EisSale::where('business_id', $sale->business_id)->findOrFail($sale->id);
         try {
             $result = $service->sync($trackedSale, $setting);
+        } catch (\Modules\EIS\Exceptions\EisOfflineException $exception) {
+            Log::warning('EIS individual sale sync unavailable', ['eis_sale_id' => $id, 'terminal_id' => $setting->id]);
+            return response()->json(['success' => false, 'message' => 'EIS is offline. The local sale was not changed.'], 502);
         } catch (\Illuminate\Http\Client\ConnectionException $exception) {
             Log::warning('EIS individual sale sync unavailable', ['eis_sale_id' => $id, 'terminal_id' => $setting->id]);
             return response()->json(['success' => false, 'message' => 'EIS could not be reached. The local sale was not changed.'], 502);

@@ -52,6 +52,9 @@ class UtilitiesController extends Controller
         }
         try {
             $result = $client->send($setting, $input['operation'], $payload);
+        } catch (\Modules\EIS\Exceptions\EisOfflineException $exception) {
+            Log::warning('EIS utility lookup unavailable', ['operation' => $input['operation'], 'terminal_id' => $setting->id]);
+            return response()->json(['success' => false, 'message' => 'EIS is offline. No successful lookup was confirmed.'], 502);
         } catch (\Illuminate\Http\Client\ConnectionException $exception) {
             Log::warning('EIS utility lookup unavailable', ['operation' => $input['operation'], 'terminal_id' => $setting->id]);
             return response()->json(['success' => false, 'message' => 'EIS could not be reached. No successful lookup was confirmed.'], 502);

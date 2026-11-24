@@ -11,7 +11,6 @@ $(function() {
         'request-new-token': @json(route('eis.terminals.request-new-token', ['terminalId' => 0])),
         deactivate: @json(route('eis.terminals.deactivate', ['terminalId' => 0])),
         delete: @json(route('eis.terminals.delete', ['terminalId' => 0])),
-        'renew-tokens': @json(route('eis.terminals.renew-tokens', ['terminalId' => 0])),
         'default': @json(route('eis.terminals.default', ['terminalId' => 0]))
     };
 
@@ -19,9 +18,9 @@ $(function() {
         $('#eis-management-message')
             .attr('class', 'alert ' + (error ? 'alert-danger' : 'alert-success'))
             .text(message);
-        if (error && activation === true) {
+        if (error) {
             swal({
-                title: 'Terminal activation failed',
+                title: activation === true ? 'Terminal activation failed' : 'EIS action failed',
                 text: message,
                 icon: 'error'
             });
@@ -62,7 +61,7 @@ $(function() {
                     text: terminal.is_active ? 'Active' : 'Inactive'
                 })).appendTo(row);
                 var actions = $('<td>').appendTo(row);
-                $.each({configuration: 'View configurations', 'latest-config': 'Latest config', 'check-block-status': 'Check block status', 'request-new-token': 'Request new token', 'deactivate': 'Deactivate', 'renew-tokens': 'Renew tokens', 'default': 'Set default', 'delete': 'Delete'}, function(action, label) {
+                $.each({configuration: 'View configurations', 'latest-config': 'Latest config', 'check-block-status': 'Check block status', 'request-new-token': 'Request new token', 'deactivate': 'Deactivate', 'default': 'Set default', 'delete': 'Delete'}, function(action, label) {
                     if ((action === 'deactivate' || action === 'default') && !terminal.is_active) return;
                     if (action === 'delete' && terminal.is_active) return;
                     $('<button>', {type: 'button', 'class': 'btn ' + (action === 'delete' ? 'btn-danger' : 'btn-default') + ' btn-xs eis-terminal-action'})
@@ -160,8 +159,6 @@ $(function() {
             var reason = window.prompt('Deactivate terminal #' + terminalId + '? Reason (optional):', '');
             if (reason === null) return;
             data.reason = reason;
-        } else if (action === 'renew-tokens' && !window.confirm('Renew tokens for terminal #' + terminalId + '? Existing credentials will become invalid.')) {
-            return;
         } else if (action === 'default' && !window.confirm('Use terminal #' + terminalId + ' as the default for its location?')) {
             return;
         } else if (action === 'delete' && !window.confirm('Delete inactive terminal #' + terminalId + '? It will be removed from this list, while EIS sales history is retained.')) {

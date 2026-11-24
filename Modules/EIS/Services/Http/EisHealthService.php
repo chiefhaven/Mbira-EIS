@@ -2,6 +2,7 @@
 
 namespace Modules\EIS\Services\Http;
 
+use Modules\EIS\Exceptions\EisOfflineException;
 use Modules\EIS\Services\EisSubscriptionAccess;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
@@ -9,11 +10,31 @@ use Illuminate\Support\Facades\Log;
 
 class EisHealthService
 {
+    public function assertOnline(int $businessId, string $token, ?string $baseUrl = null): void
+    {
+        $online = $baseUrl === null
+            ? $this->isOnline($businessId, $token)
+            : $this->isOnlineForBaseUrl($businessId, $token, $baseUrl);
+        if (!$online) {
+            throw new EisOfflineException('EIS is offline.');
+        }
+    }
+
     public function isOnline(int $businessId, string $token): bool
+    {
+        return $this->checkOnline($businessId, $token, (string) config('eis.base_url'));
+    }
+
+    public function isOnlineForBaseUrl(int $businessId, string $token, string $baseUrl): bool
+    {
+        return $this->checkOnline($businessId, $token, $baseUrl);
+    }
+
+    private function checkOnline(int $businessId, string $token, string $baseUrl): bool
     {
         app(EisSubscriptionAccess::class)->assertAllowed($businessId);
 
-        $base = rtrim(trim((string) config('eis.base_url')), '/');
+        $base = rtrim(trim($baseUrl), '/');
         // Deployments configure either the host or the complete API base.
         $base = preg_replace('~/api/v1$~', '', $base);
         $token = trim($token);

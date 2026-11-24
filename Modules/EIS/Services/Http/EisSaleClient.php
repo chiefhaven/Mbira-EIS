@@ -57,21 +57,6 @@ class EisSaleClient
             return $this->errorResult('Sale payload does not match its business terminal.', 'TERMINAL_MISMATCH', null, false);
         }
 
-        // Check if EIS server is online
-        if (! $this->health->isOnline($settings->business_id, $settings->jwt_token)) {
-            Log::error('EIS server is currently offline.', [
-                'business_id' => $settings->business_id
-            ]);
-
-            return $this->errorResult(
-                'EIS server is currently offline',
-                'SERVER_OFFLINE',
-                null,
-                true // Retryable
-            );
-        }
-
-        // Validate settings
         $validationResult = $this->validateSettings($settings);
         if (!$validationResult['valid']) {
             return $this->errorResult(
@@ -79,6 +64,20 @@ class EisSaleClient
                 'INVALID_SETTINGS',
                 null,
                 false // Not retryable - fix settings first
+            );
+        }
+
+        // Check if EIS server is online
+        if (! $this->health->isOnline($settings->business_id, $settings->jwt_token)) {
+            Log::error('EIS server is currently offline.', [
+                'business_id' => $settings->business_id
+            ]);
+
+            return $this->errorResult(
+                'EIS is offline.',
+                'SERVER_OFFLINE',
+                null,
+                true // Retryable
             );
         }
 

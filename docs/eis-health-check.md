@@ -1,10 +1,16 @@
 # EIS connectivity status
 
-The header and sale HTTP clients share `EisHealthService`. Its authenticated
-probe uses `POST /api/v1/utilities/ping`, accepting either a host-only EIS base
-URL or one ending in `/api/v1`. A successful response must contain the EIS
-success envelope and `data.serverDate`; HTML/login responses, HTTP errors and
-connection failures are not considered healthy.
+The header and authenticated EIS clients share `EisHealthService`. Clients
+preflight each EIS operation with its cached health result before sending the
+operation request. The authenticated probe uses `POST /api/v1/utilities/ping`,
+accepting either a host-only EIS base URL or one ending in `/api/v1`. A
+successful response must contain the EIS success envelope and `data.serverDate`;
+HTML/login responses, HTTP errors and connection failures are not considered
+healthy. The ping itself, initial terminal activation (which has no token), and
+refresh-token recovery (which must work with an expired access token) are exempt.
+User-facing errors identify EIS as offline only when the health preflight
+reports it offline; other connection and operation errors keep their specific
+messages.
 
 Healthy results are cached for 60 seconds; failed checks for 15 seconds. The
 cache is business-specific and includes a hashed host/token identity, so token

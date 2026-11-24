@@ -120,6 +120,12 @@ class TerminalManagementController extends Controller
         $terminal = $this->terminal($request, $terminalId);
         try {
             $status = app(TerminalBlockService::class)->checkStatus($terminal);
+        } catch (\Modules\EIS\Exceptions\EisOfflineException $exception) {
+            \Illuminate\Support\Facades\Log::warning('EIS terminal block status check failed', ['terminal_id' => $terminalId]);
+            return $this->result([
+                'success' => false,
+                'message' => 'EIS is offline. Unable to contact MRA to check terminal block status. The saved block state was not changed.',
+            ]);
         } catch (\Illuminate\Http\Client\ConnectionException $exception) {
             \Illuminate\Support\Facades\Log::warning('EIS terminal block status check failed', ['terminal_id' => $terminalId]);
             return $this->result([
@@ -306,18 +312,6 @@ class TerminalManagementController extends Controller
                 DB::table('tax_rates')->where('id', $rateId)->delete();
             }
         }
-    }
-
-    public function renewTokens(Request $request, int $terminalId)
-    {
-        $terminal = $this->terminal($request, $terminalId);
-        if (empty($terminal->jwt_token)) {
-            return $this->result(['success' => false, 'message' => 'Activate this terminal before renewing its tokens.']);
-        }
-
-        return $this->result($this->activationService->regenerateCredentials(
-            (int) $terminal->business_id, $terminal->jwt_token, $terminalId
-        ));
     }
 
     public function setDefault(Request $request, int $terminalId)

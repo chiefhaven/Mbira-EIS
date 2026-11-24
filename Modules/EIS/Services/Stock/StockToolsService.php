@@ -5,6 +5,7 @@ namespace Modules\EIS\Services\Stock;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
+use Modules\EIS\Exceptions\EisOfflineException;
 use Modules\EIS\Models\EisSetting;
 use Modules\EIS\Services\Terminal\TerminalContext;
 use Modules\EIS\Services\Utilities\EisUtilitiesClient;
@@ -111,9 +112,11 @@ class StockToolsService
         });
         if (!$claimed) { return $row; }
         $payload = json_decode($row->payload, true, 512, JSON_THROW_ON_ERROR);
+        $offline = false;
         try {
             $result = $this->client->submitTool($setting, $row->operation, $payload);
         } catch (\Throwable $exception) {
+            $offline = $exception instanceof EisOfflineException;
             Log::error('EIS stock tool outcome unknown', ['request_id' => $id, 'operation' => $row->operation,
                 'exception' => get_class($exception)]);
             $result = ['outcome' => 'unknown', 'response' => []];
@@ -131,7 +134,8 @@ class StockToolsService
             }
         }
         $message = $status === 'submitted' ? 'EIS accepted the request. No local stock, manufacturing, purchase or catalog records were changed.'
-            : 'EIS result: '.$status.'. Do not resend an uncertain request. Verify with MRA before further stock operations.';
+            : ($offline ? 'EIS is offline or unreachable. ' : '')
+                .'EIS result: '.$status.'. Do not resend an uncertain request. Verify with MRA before further stock operations.';
         DB::table('eis_stock_tool_requests')->where('id', $id)->update([
             'status' => $status, 'response' => json_encode($result['response'], JSON_THROW_ON_ERROR),
             'result_message' => $message, 'updated_at' => now(),

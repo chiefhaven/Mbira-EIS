@@ -4,6 +4,7 @@ namespace Modules\EIS\Services\Sales;
 
 use Illuminate\Support\Facades\Http;
 use Modules\EIS\Models\EisSetting;
+use Modules\EIS\Services\Http\EisHealthService;
 use Modules\EIS\Services\Utilities\EisUtilitiesClient;
 use Modules\EIS\Services\EisSubscriptionAccess;
 
@@ -20,6 +21,7 @@ class SalesApiClient
         if (trim((string) $setting->jwt_token) === '') {
             throw new \InvalidArgumentException('Activate the selected terminal first.');
         }
+        app(EisHealthService::class)->assertOnline((int) $setting->business_id, (string) $setting->jwt_token);
         $request = Http::withToken($setting->jwt_token)->acceptJson()->asJson()->connectTimeout(10)
             ->timeout(60)->withOptions(['allow_redirects' => false]);
         $url = EisUtilitiesClient::baseUrl().'/sales/'.$operation;

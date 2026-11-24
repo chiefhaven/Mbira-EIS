@@ -186,6 +186,14 @@ salesCheck($offlineResponse->getStatusCode() === 502
     && $offlineResponse->getData(true)['message'] === 'EIS could not be reached. The local sale was not changed.'
     && count($requests) === $requestCount,
     'EIS connection failures are reported without changing the saved sale');
+$healthOfflineSync = Mockery::mock(\Modules\EIS\Services\Sales\SaleOutcomeRecoveryService::class);
+$healthOfflineSync->shouldReceive('sync')->once()
+    ->andThrow(new Modules\EIS\Exceptions\EisOfflineException('EIS is offline.'));
+$offlineResponse = $salesController->syncSale(managementRequest(), 1, $healthOfflineSync);
+salesCheck($offlineResponse->getStatusCode() === 502
+    && $offlineResponse->getData(true)['message'] === 'EIS is offline. The local sale was not changed.'
+    && count($requests) === $requestCount,
+    'Only an offline health-preflight error is reported as EIS offline');
 $client = new SalesApiClient();
 $transformer = new ReturnAdjustmentPayload();
 $service = new SaleAdjustmentService($client, $transformer);
@@ -462,6 +470,14 @@ salesCheck(count($requests) === $count, 'Arbitrary operation never contacts EIS'
 $health = Mockery::mock(Modules\EIS\Services\Http\EisHealthService::class);
 $health->shouldReceive('isOnline')->andReturn(true);
 $submissionClient = new Modules\EIS\Services\Http\EisSaleClient($health);
+$invalidHealth = Mockery::mock(Modules\EIS\Services\Http\EisHealthService::class);
+$invalidHealth->shouldNotReceive('isOnline');
+$invalidSettingsClient = new Modules\EIS\Services\Http\EisSaleClient($invalidHealth);
+$invalidSettings = clone $setting;
+$invalidSettings->jwt_token = '';
+$invalidSubmission = $invalidSettingsClient->submit($original, $invalidSettings);
+salesCheck(!$invalidSubmission['success'] && $invalidSubmission['error'] === 'Missing EIS JWT token.',
+    'Missing credentials retain their settings error without being reported as EIS offline');
 $responseBody = ['statusCode' => 1, 'data' => []]; $responseStatus = 200;
 $count = count($requests);
 $submittedSale = $submissionClient->submit($original, $setting);

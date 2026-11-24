@@ -34,6 +34,9 @@ $schema = $capsule->getConnection()->getSchemaBuilder();
 $container->instance('db.schema', $schema);
 $container['config']['eis.base_url'] = 'https://eis.invalid';
 $container['config']['eis.timeout'] = 1;
+$container->instance(Modules\EIS\Services\Http\EisHealthService::class, new class extends Modules\EIS\Services\Http\EisHealthService {
+    public function isOnline(int $businessId, string $token): bool { return true; }
+});
 $translator = new Illuminate\Translation\Translator(new Illuminate\Translation\ArrayLoader(), 'en');
 $container->instance('translator', $translator);
 $factory = new Illuminate\Validation\Factory($translator, $container);

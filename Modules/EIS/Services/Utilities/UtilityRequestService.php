@@ -4,6 +4,7 @@ namespace Modules\EIS\Services\Utilities;
 
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Modules\EIS\Exceptions\EisOfflineException;
 use Modules\EIS\Models\EisSetting;
 use Modules\EIS\Services\Terminal\TerminalContext;
 use Modules\EIS\Services\EisSubscriptionAccess;
@@ -125,9 +126,11 @@ class UtilityRequestService
             return $request;
         }
         $payload = json_decode($request->payload, true, 512, JSON_THROW_ON_ERROR);
+        $offline = false;
         try {
             $result = $this->client->send($setting, $request->operation, $payload);
         } catch (\Throwable $exception) {
+            $offline = $exception instanceof EisOfflineException;
             Log::error('EIS utility mutation outcome unknown', [
                 'request_id' => $requestId, 'operation' => $request->operation, 'exception' => get_class($exception),
             ]);
@@ -161,7 +164,8 @@ class UtilityRequestService
                 : 'EIS accepted this initial-inventory batch. No local stock was changed.',
             'rejected' => 'EIS rejected the request. Review the saved result; it will not be resent.',
             'needs_review' => 'EIS returned an incomplete or partial result. Verify this request with MRA before taking further action.',
-            default => 'The EIS outcome is unknown. Do not resend. Verify the result with MRA first.',
+            default => ($offline ? 'EIS is offline or unreachable. ' : '')
+                .'The EIS outcome is unknown. Do not resend. Verify the result with MRA first.',
         };
         DB::table('eis_utility_requests')->where('id', $requestId)->update([
             'status' => $status, 'response' => json_encode($result['response'], JSON_THROW_ON_ERROR),

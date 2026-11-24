@@ -12,6 +12,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Facade;
 use Illuminate\Validation\ValidationException;
 use Modules\EIS\Http\Controllers\TerminalManagementController;
+use Modules\EIS\Services\Http\EisHealthService;
 use Modules\EIS\Services\Terminal\EisTerminalActivationService;
 use Modules\EIS\Services\Terminal\TerminalBlockService;
 use Symfony\Component\HttpKernel\Exception\HttpException;
@@ -24,6 +25,7 @@ $app = new class extends Container {
 };
 Container::setInstance($app);
 $app->instance('config', new Illuminate\Config\Repository(['eis' => ['environment' => 'production']]));
+$app->instance('log', new Psr\Log\NullLogger());
 $capsule = new Capsule($app);
 $capsule->addConnection(['driver' => 'sqlite', 'database' => ':memory:']);
 $capsule->setAsGlobal();
@@ -31,6 +33,9 @@ $capsule->bootEloquent();
 $app->instance('db', $capsule->getDatabaseManager());
 Facade::setFacadeApplication($app);
 Facade::clearResolvedInstances();
+$app->instance(EisHealthService::class, new class extends EisHealthService {
+    public function isOnline(int $businessId, string $token): bool { return true; }
+});
 $translator = new Illuminate\Translation\Translator(new Illuminate\Translation\ArrayLoader(), 'en');
 $validator = new Illuminate\Validation\Factory($translator, $app);
 Request::macro('validate', function ($rules) use ($validator) {
@@ -208,6 +213,25 @@ $blockStatus = $controller->checkBlockStatus(managementRequest(), 101)->getData(
 managementCheck($blockStatus['success']
     && str_contains($blockStatus['message'], 'local block has been cleared'),
     'Manual block-status check reports explicit MRA unblock confirmation');
+$offlineBlockService = Mockery::mock(TerminalBlockService::class);
+$offlineBlockService->shouldReceive('checkStatus')->once()
+    ->with(Mockery::on(fn ($setting) => (int) $setting->id === 101))
+    ->andThrow(new Modules\EIS\Exceptions\EisOfflineException('EIS is offline.'));
+$app->instance(TerminalBlockService::class, $offlineBlockService);
+$blockStatus = $controller->checkBlockStatus(managementRequest(), 101)->getData(true);
+managementCheck(!$blockStatus['success']
+    && str_contains($blockStatus['message'], 'EIS is offline')
+    && str_contains($blockStatus['message'], 'saved block state was not changed'),
+    'Offline EIS response explains the failed check and preserves saved block state');
+$connectionBlockService = Mockery::mock(TerminalBlockService::class);
+$connectionBlockService->shouldReceive('checkStatus')->once()
+    ->with(Mockery::on(fn ($setting) => (int) $setting->id === 101))
+    ->andThrow(new Illuminate\Http\Client\ConnectionException('connection failed'));
+$app->instance(TerminalBlockService::class, $connectionBlockService);
+$blockStatus = $controller->checkBlockStatus(managementRequest(), 101)->getData(true);
+managementCheck(!$blockStatus['success']
+    && $blockStatus['message'] === 'Unable to contact MRA to check terminal block status. The saved block state was not changed.',
+    'A connection error after a healthy preflight keeps the original non-offline error message');
 $response = $controller->index(managementRequest())->getData(true);
 managementCheck($response['success'] && array_column($response['data']['terminals'], 'id') === [101, 102],
     'Restricted admin sees multiple terminals only at permitted locations');
@@ -266,13 +290,13 @@ $db->table('eis_settings')->where('id', 102)->update(['status' => 0]);
 $db->table('business_locations')->where('id', 10)->update(['default_eis_setting_id' => 101]);
 $app['config']->set('eis.environment', 'production');
 
-foreach (['index', 'activate', 'latestConfig', 'configuration', 'deactivate', 'destroy', 'renewTokens', 'setDefault'] as $action) {
+foreach (['index', 'activate', 'latestConfig', 'configuration', 'deactivate', 'destroy', 'setDefault'] as $action) {
     managementReject(fn () => $controller->$action(managementRequest([], null), 101), 401, $action.' rejects anonymous users');
     $user->allowed = false;
     managementReject(fn () => $controller->$action(managementRequest(), 101), 403, $action.' requires business settings permission');
     $user->allowed = true;
 }
-foreach (['latestConfig', 'configuration', 'deactivate', 'destroy', 'renewTokens', 'setDefault'] as $action) {
+foreach (['latestConfig', 'configuration', 'deactivate', 'destroy', 'setDefault'] as $action) {
     foreach ([103, 104, 201, 999] as $id) {
         managementReject(fn () => $controller->$action(managementRequest(), $id), 404, $action.' rejects inaccessible terminal '.$id);
     }
@@ -343,12 +367,6 @@ $db->table('eis_configurations')->where('id', 1102)->update(['raw_response' => $
 $service->shouldReceive('deactivate')->once()->with(1, 'Retired', 7, 102)->andReturn(['success' => true]);
 managementCheck($controller->deactivate(managementRequest(['reason' => 'Retired']), 102)->getData(true)['success'],
     'Deactivation pins tenant, actor, reason and terminal');
-$service->shouldReceive('regenerateCredentials')->once()->with(1, 'fixture-token-101', 101)
-    ->andReturn(['success' => true, 'data' => ['jwt_token' => 'rotated', 'secret_key' => 'rotated-secret']]);
-$result = $controller->renewTokens(managementRequest(['token' => 'attacker-supplied']), 101)->getData(true);
-managementCheck($result['success'] && !isset($result['data']), 'Renewal uses stored terminal token and keeps rotated credentials server-side');
-$db->table('eis_settings')->where('id', 102)->update(['jwt_token' => null]);
-managementCheck($controller->renewTokens(managementRequest(), 102)->getStatusCode() === 422, 'Renewal without credentials fails without service calls');
 $service->shouldReceive('getLatestConfig')->once()->with(1, 101)->andReturn(['success' => false, 'message' => 'Unavailable']);
 managementCheck($controller->latestConfig(managementRequest(), 101)->getStatusCode() === 422, 'Service failures return actionable error status');
 $db->table('eis_settings')->where('id', 102)->update(['status' => 1]);
@@ -432,13 +450,14 @@ foreach ([
     'request-new-token' => ['POST', 'eis/terminals/{terminalId}/request-new-token'],
     'deactivate' => ['POST', 'eis/terminals/{terminalId}/deactivate'],
     'delete' => ['POST', 'eis/terminals/{terminalId}/delete'],
-    'renew-tokens' => ['POST', 'eis/terminals/{terminalId}/renew-tokens'],
     'default' => ['POST', 'eis/terminals/{terminalId}/default'],
 ] as $name => [$method, $uri]) {
     $route = $routes->getByName('eis.terminals.'.$name);
     managementCheck($route && $route->uri() === $uri && in_array($method, $route->methods()), 'Management route contract: '.$name);
     managementCheck(in_array('web', $route->middleware()) && in_array('auth', $route->middleware()), 'Session/CSRF middleware retained: '.$name);
 }
+managementCheck($routes->getByName('eis.terminals.renew-tokens') === null,
+    'Redundant credential renewal route is not exposed in terminal management');
 $blade = new Illuminate\View\Compilers\BladeCompiler(new Illuminate\Filesystem\Filesystem(), dirname(__DIR__, 2).'\storage\framework\views');
 foreach (['settings', 'partials\settings_mra_eis'] as $view) {
     $source = file_get_contents(dirname(__DIR__, 2).'\resources\views\business\\'.$view.'.blade.php');
@@ -488,9 +507,17 @@ managementCheck(!str_contains($source, "route('eis.terminal.") && !str_contains(
     && !str_contains($source, 'getTerminalStatus'), 'Obsolete API/singleton JS and credentials removed');
 managementCheck(str_contains($terminalScript, "(action === 'deactivate' || action === 'default') && !terminal.is_active"),
     'UI hides default action when combined terminal status is inactive');
+managementCheck(str_contains($terminalScript, "'request-new-token': 'Request new token'")
+    && !str_contains($terminalScript, 'renew-tokens')
+    && !str_contains($terminalScript, 'Renew tokens'),
+    'Terminal management offers only the audited new-token request action');
 managementCheck(str_contains($terminalScript, "'check-block-status': @json(route('eis.terminals.check-block-status'")
     && str_contains($terminalScript, "'check-block-status': 'Check block status'"),
     'Terminal UI offers a separate block-status check action');
+managementCheck(str_contains($terminalScript, "if (error) {")
+    && str_contains($terminalScript, "title: activation === true ? 'Terminal activation failed' : 'EIS action failed'")
+    && str_contains($terminalScript, 'swal({'),
+    'Terminal errors are shown in a dialog box');
 managementCheck(str_contains($terminalScript, "action === 'delete' && terminal.is_active")
     && str_contains($terminalScript, "route('eis.terminals.delete'"),
     'UI offers deletion only for inactive terminals through the dedicated endpoint');
@@ -521,10 +548,10 @@ managementCheck(str_contains($salesScript, "result.message === 'Terminal Not ava
     && str_contains($salesScript, 'xhr.status === 409')
     && str_contains($salesScript, "result.message === 'EIS did not confirm the invoice lookup. No local data was changed.'")
     && str_contains($salesScript, 'fetchAndPrintReceipt(button, printWindow,')
-    && str_contains($salesScript, 'EIS is offline. Opening the saved POS receipt without EIS sync.')
+    && str_contains($salesScript, "result.message || 'EIS verification failed. Opening the saved POS receipt without EIS sync.'")
     && str_contains($salesScript, 'EIS did not confirm the invoice lookup. Opening the saved POS receipt without EIS sync.')
     && str_contains($salesScript, 'Opening the saved POS receipt without EIS sync.'),
-    'Unavailable terminals and offline EIS print the saved POS receipt without syncing');
+    'Print fallback preserves the original message unless the health check reports EIS offline');
 $routeProviderSource = file_get_contents(dirname(__DIR__, 2).'\Modules\EIS\Providers\RouteServiceProvider.php');
 managementCheck(str_contains($routeProviderSource, "'SetSessionData'")
     && str_contains($routeProviderSource, "'AdminSidebarMenu'"),

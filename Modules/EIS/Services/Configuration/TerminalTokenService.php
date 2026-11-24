@@ -4,6 +4,7 @@ namespace Modules\EIS\Services\Configuration;
 
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Modules\EIS\Exceptions\EisOfflineException;
 use Modules\EIS\Models\EisSetting;
 use Modules\EIS\Models\EisTerminalConfiguration;
 use Modules\EIS\Services\Terminal\TerminalContext;
@@ -83,7 +84,10 @@ class TerminalTokenService
             Log::error('EIS terminal token request requires verification', [
                 'request_id' => $id, 'terminal_id' => $current->id, 'exception' => get_class($exception),
             ]);
-            $message = 'Token request #'.$id.' has an uncertain outcome. Credentials were not confirmed locally. Verify with MRA before requesting another token.';
+            $offline = $exception instanceof EisOfflineException
+                ? 'EIS is offline or unreachable. '
+                : '';
+            $message = $offline.'Token request #'.$id.' has an uncertain outcome. Credentials were not confirmed locally. Verify with MRA before requesting another token.';
             DB::table('eis_terminal_token_requests')->where('id', $id)->update([
                 'status' => 'unknown', 'result_message' => $message, 'updated_at' => now(),
             ]);

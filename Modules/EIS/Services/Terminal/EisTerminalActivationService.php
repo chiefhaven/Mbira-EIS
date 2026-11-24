@@ -11,6 +11,7 @@ use Modules\EIS\Models\EisTaxRate;
 use Modules\EIS\Models\EisSetting;
 use Modules\EIS\Services\Configuration\ConfigurationSyncService;
 use Modules\EIS\Services\EisSubscriptionAccess;
+use Modules\EIS\Services\Http\EisHealthService;
 
 class EisTerminalActivationService
 {
@@ -72,7 +73,8 @@ class EisTerminalActivationService
                 
                 if ($terminalId && $secretKey && $jwtToken) {
                     // Send activation confirmation to EIS API
-                    $confirmationSuccess = $this->sendActivationConfirmation($businessId, $terminalId, $activationCode, $jwtToken, $secretKey);
+                    $confirmationResult = $this->sendActivationConfirmation($businessId, $terminalId, $activationCode, $jwtToken, $secretKey);
+                    $confirmationSuccess = $confirmationResult === true;
                     $result['data']['is_confirmed'] = $confirmationSuccess;
                     $result['confirmed'] = $confirmationSuccess;
                     if ($confirmationSuccess) {
@@ -81,7 +83,9 @@ class EisTerminalActivationService
                     }
                     
                     if (!$confirmationSuccess) {
-                        $result['message'] .= ' Warning: EIS did not acknowledge the activation confirmation; check the logs before using this terminal.';
+                        $result['message'] .= $confirmationResult === null
+                            ? ' Warning: EIS is offline. Activation confirmation is pending.'
+                            : ' Warning: EIS did not acknowledge the activation confirmation; check the logs before using this terminal.';
                         Log::warning('Activation confirmation could not be sent to EIS', [
                             'terminal_id' => $terminalId,
                             'business_id' => $businessId,
@@ -130,9 +134,10 @@ class EisTerminalActivationService
      * @param string $secretKey
      * @return bool
      */
-    private function sendActivationConfirmation(int $businessId, string $terminalId, string $activationCode, string $jwtToken, string $secretKey): bool
+    private function sendActivationConfirmation(int $businessId, string $terminalId, string $activationCode, string $jwtToken, string $secretKey): ?bool
     {
         try {
+            app(EisHealthService::class)->assertOnline($businessId, $jwtToken);
             $url = $this->apiBaseUrl . '/onboarding/terminal-activated-confirmation';
 
             $payload = [
@@ -188,6 +193,12 @@ class EisTerminalActivationService
 
             return true;
 
+        } catch (\Modules\EIS\Exceptions\EisOfflineException $e) {
+            Log::warning('EIS is offline; activation confirmation is pending', [
+                'terminal_id' => $terminalId,
+                'business_id' => $businessId,
+            ]);
+            return null;
         } catch (\Exception $e) {
             Log::error('Failed to send activation confirmation', [
                 'terminal_id' => $terminalId,
@@ -1436,6 +1447,7 @@ class EisTerminalActivationService
             }
 
             $url = $this->apiBaseUrl . '/onboarding/regenerate-credentials';
+            app(EisHealthService::class)->assertOnline($businessId, $token);
             
             $response = Http::withToken($token)
                 ->acceptJson()
@@ -1485,6 +1497,13 @@ class EisTerminalActivationService
                 ]
             ];
 
+        } catch (\Modules\EIS\Exceptions\EisOfflineException $e) {
+            Log::warning('EIS credential renewal connection failed', ['business_id' => $businessId]);
+
+            return [
+                'success' => false,
+                'message' => 'EIS is offline or unreachable. Verify the credential renewal outcome with MRA before retrying.',
+            ];
         } catch (\Exception $e) {
             Log::error('Failed to regenerate credentials', [
                 'business_id' => $businessId,

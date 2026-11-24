@@ -750,20 +750,26 @@ class BusinessController extends Controller
                 'terminalId' => $settings['terminal_id'],
             ];
 
-            $confirmResponse = Http::withHeaders([
-                    'Authorization' => 'Bearer ' . $jwt,
-                    'x-signature' => $x_signature,
-                    'Accept' => 'application/json',
-                ])
-                ->timeout(60)
-                ->post($base_url . '/onboarding/terminal-activated-confirmation', $confirmPayload);
+            $confirmResponse = null;
+            $confirmData = null;
+            $confirmationSkippedOffline = !app(\Modules\EIS\Services\Http\EisHealthService::class)
+                ->isOnlineForBaseUrl((int) $business->id, $jwt, $base_url);
+            if (!$confirmationSkippedOffline) {
+                $confirmResponse = Http::withHeaders([
+                        'Authorization' => 'Bearer ' . $jwt,
+                        'x-signature' => $x_signature,
+                        'Accept' => 'application/json',
+                    ])
+                    ->timeout(60)
+                    ->post($base_url . '/onboarding/terminal-activated-confirmation', $confirmPayload);
 
-            $confirmData = $confirmResponse->json();
+                $confirmData = $confirmResponse->json();
+            }
 
             /**
              * STEP 7: FINAL STATUS
              */
-            if ($confirmResponse->successful()) {
+            if ($confirmResponse && $confirmResponse->successful()) {
                 $settings['status'] = 'ACTIVE';
             } else {
                 $settings['status'] = 'PENDING_CONFIRMATION';
@@ -781,7 +787,9 @@ class BusinessController extends Controller
              */
             $output = [
                 'success' => 1,
-                'msg' => 'Terminal activation processed',
+                'msg' => $confirmationSkippedOffline
+                    ? 'EIS is offline. Terminal activation is pending confirmation.'
+                    : 'Terminal activation processed',
                 'data' => [
                     'activation' => $data,
                     'confirmation' => $confirmData,
@@ -798,9 +806,12 @@ class BusinessController extends Controller
                 'line' => $e->getLine(),
             ]);
 
+            $message = $e instanceof \Modules\EIS\Exceptions\EisOfflineException
+                ? 'EIS is offline or unreachable. Verify terminal activation status with MRA before retrying.'
+                : 'Terminal activation failed: ' . $e->getMessage();
             $output = [
                 'success' => 0,
-                'msg' => 'Terminal activation failed: ' . $e->getMessage(),
+                'msg' => $message,
             ];
 
             return $output;

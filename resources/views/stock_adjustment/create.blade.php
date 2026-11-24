@@ -206,8 +206,12 @@
                         option.textContent = reason;
                         reasonSelect.appendChild(option);
                     });
-                }).catch(function () {
-                    reasonSelect.innerHTML = '<option value="">Reasons unavailable</option>';
+                }).catch(function (error) {
+                    reasonSelect.innerHTML = '';
+                    var option = document.createElement('option');
+                    option.value = '';
+                    option.textContent = error.message || 'EIS reasons are unavailable.';
+                    reasonSelect.appendChild(option);
                     reasonSelect.disabled = true;
                 });
             }

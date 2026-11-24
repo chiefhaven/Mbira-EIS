@@ -5,6 +5,7 @@ namespace Modules\EIS\Services\Stock;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
 use Modules\EIS\Models\EisSetting;
+use Modules\EIS\Services\Http\EisHealthService;
 use Modules\EIS\Services\Terminal\TerminalContext;
 use Modules\EIS\Services\EisSubscriptionAccess;
 
@@ -131,6 +132,7 @@ class StockOperationsClient
         }
         TerminalContext::assertBusiness($setting, (int) $setting->business_id);
         TerminalContext::site($setting);
+        app(EisHealthService::class)->assertOnline((int) $setting->business_id, (string) $setting->jwt_token);
 
         return Http::baseUrl($base.'/')
             ->withToken($setting->jwt_token)

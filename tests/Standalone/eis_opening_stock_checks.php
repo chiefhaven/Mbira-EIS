@@ -64,6 +64,9 @@ function openingFixture() {
     $container->instance('log', $log);
     Facade::setFacadeApplication($container);
     Facade::clearResolvedInstances();
+    $container->instance(Modules\EIS\Services\Http\EisHealthService::class, new class extends Modules\EIS\Services\Http\EisHealthService {
+        public function isOnline(int $businessId, string $token): bool { return true; }
+    });
     $db = $capsule->getConnection();
     verify($db->getDriverName() === 'sqlite' && $db->getDatabaseName() === ':memory:', 'isolated fixture');
     $tables = [

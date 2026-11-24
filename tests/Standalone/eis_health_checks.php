@@ -50,6 +50,27 @@ foreach (['https://eis.invalid', 'https://eis.invalid/', 'https://eis.invalid/ap
 }
 
 $health->clearCache(7);
+fakeHealth(fn () => Http::response($pong));
+checkHealth($health->isOnlineForBaseUrl(7, 'fixture-token', 'https://legacy.invalid/api/v1'),
+    'Configured legacy host can be checked explicitly');
+checkHealth(Http::recorded()[0][0]->url() === 'https://legacy.invalid/api/v1/utilities/ping',
+    'Explicit legacy host is used for the health probe');
+
+$health->clearCache(7);
+fakeHealth(fn () => Http::response($pong));
+$health->assertOnline(7, 'fixture-token');
+checkHealth(count(Http::recorded()) === 1, 'assertOnline completes the authenticated health preflight');
+$health->clearCache(7);
+fakeHealth(fn () => Http::response($pong, 503));
+try {
+    $health->assertOnline(7, 'fixture-token');
+    throw new RuntimeException('Offline EIS health preflight was accepted');
+} catch (ConnectionException $exception) {
+    checkHealth(str_contains($exception->getMessage(), 'EIS is offline'),
+        'assertOnline rejects EIS operations when the health probe fails');
+}
+
+$health->clearCache(7);
 Cache::put('eis.health.7', false, 30000);
 Cache::put('eis_status_7', 'offline', 300);
 fakeHealth(fn () => Http::response($pong));

@@ -4,6 +4,7 @@ namespace Modules\EIS\Services\Utilities;
 
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Validation\ValidationException;
+use Modules\EIS\Exceptions\EisOfflineException;
 use Modules\EIS\Models\EisSetting;
 
 /** Contracts: https://eis-api.mra.mw/swagger/v1/swagger.json */
@@ -41,6 +42,8 @@ class EisValidationClient
     {
         try {
             $result = $this->client->send($settings, $endpoint, $payload);
+        } catch (EisOfflineException $e) {
+            throw ValidationException::withMessages([$field => 'EIS is offline. Please retry validation before saving the sale.']);
         } catch (ConnectionException $e) {
             throw ValidationException::withMessages([$field => 'EIS validation is unavailable. Please retry before saving the sale.']);
         } catch (\InvalidArgumentException $e) {

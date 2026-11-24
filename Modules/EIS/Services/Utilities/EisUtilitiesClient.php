@@ -5,6 +5,7 @@ namespace Modules\EIS\Services\Utilities;
 use Illuminate\Support\Facades\Http;
 use Modules\EIS\Models\EisSetting;
 use Modules\EIS\Services\EisSubscriptionAccess;
+use Modules\EIS\Services\Http\EisHealthService;
 
 class EisUtilitiesClient
 {
@@ -16,6 +17,9 @@ class EisUtilitiesClient
         $base = self::baseUrl();
         if (trim((string) $setting->jwt_token) === '') {
             throw new \InvalidArgumentException('Configure the EIS endpoint and selected terminal token first.');
+        }
+        if ($operation !== 'ping') {
+            app(EisHealthService::class)->assertOnline((int) $setting->business_id, (string) $setting->jwt_token);
         }
         $request = Http::acceptJson()->asJson()->withToken($setting->jwt_token)
             ->connectTimeout(10)->timeout(max(10, (int) config('eis.timeout', 30)))->withOptions(['allow_redirects' => false]);

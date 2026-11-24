@@ -6,6 +6,7 @@ use Illuminate\Database\Connection;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
+use Modules\EIS\Exceptions\EisOfflineException;
 use Modules\EIS\Models\EisSetting;
 use Modules\EIS\Services\Utilities\EisUtilitiesClient;
 
@@ -109,6 +110,13 @@ class TerminalBlockService
             $result = app(EisUtilitiesClient::class)->send($setting, 'get-terminal-blocking-message', [
                 'terminalId' => (string) $setting->device_id,
             ]);
+        } catch (EisOfflineException $exception) {
+            $this->block(
+                $setting,
+                'Terminal blocked by MRA. EIS is offline, so its blocking reason could not be retrieved. Check MRA before continuing.'
+            );
+            Log::warning('EIS terminal blocking reason unavailable', ['terminal_id' => $setting->id]);
+            return;
         } catch (ConnectionException|\InvalidArgumentException $exception) {
             Log::warning('EIS terminal blocking reason unavailable', ['terminal_id' => $setting->id]);
             return;

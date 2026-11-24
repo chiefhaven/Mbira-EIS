@@ -79,8 +79,6 @@ Route::prefix('eis/terminals')->middleware(['web', 'auth'])->name('eis.terminals
         ->whereNumber('terminalId')->name('deactivate');
     Route::post('{terminalId}/delete', [TerminalManagementController::class, 'destroy'])
         ->whereNumber('terminalId')->name('delete');
-    Route::post('{terminalId}/renew-tokens', [TerminalManagementController::class, 'renewTokens'])
-        ->whereNumber('terminalId')->name('renew-tokens');
     Route::post('{terminalId}/default', [TerminalManagementController::class, 'setDefault'])
         ->whereNumber('terminalId')->name('default');
 });

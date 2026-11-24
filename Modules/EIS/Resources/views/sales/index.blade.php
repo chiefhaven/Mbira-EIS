@@ -204,7 +204,7 @@ $(function() {
                     ? 'Terminal Not available for sync. Opening the saved POS receipt without EIS sync.'
                     : (unconfirmedLookup
                         ? 'EIS did not confirm the invoice lookup. Opening the saved POS receipt without EIS sync.'
-                        : 'EIS is offline. Opening the saved POS receipt without EIS sync.');
+                        : (result.message || 'EIS verification failed. Opening the saved POS receipt without EIS sync.'));
                 fetchAndPrintReceipt(button, printWindow,
                     statusMessage);
                 return;

@@ -484,6 +484,13 @@ class StockAdjustmentController extends Controller
         try {
             TerminalContext::assertActive($setting);
             $reasons = app(StockOutboundService::class)->adjustmentReasons($setting);
+        } catch (\Modules\EIS\Exceptions\EisOfflineException $exception) {
+            \Log::warning('EIS stock adjustment reasons unavailable', [
+                'business_id' => $businessId, 'location_id' => $locationId, 'exception' => get_class($exception),
+            ]);
+            throw ValidationException::withMessages([
+                'eis_adjustment_reason' => 'EIS is offline. Stock adjustment reasons could not be confirmed.',
+            ]);
         } catch (\Throwable $exception) {
             \Log::warning('EIS stock adjustment reasons unavailable', [
                 'business_id' => $businessId, 'location_id' => $locationId, 'exception' => get_class($exception),

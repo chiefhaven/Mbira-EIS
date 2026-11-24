@@ -337,7 +337,7 @@ class PosBuyerValidationService
             if ($relief) {
                 throw ValidationException::withMessages([
                     'is_relief' =>
-                        'EIS is currently unavailable. Relief sales require online certificate validation.',
+                        'EIS is offline. Relief sales require online certificate validation.',
                 ]);
             }
 

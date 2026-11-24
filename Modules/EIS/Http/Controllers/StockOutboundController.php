@@ -87,6 +87,14 @@ class StockOutboundController extends Controller
         $setting = $this->settingForLocation($businessId, $location);
         try {
             return response()->json(['success' => true, 'data' => $this->service->adjustmentReasons($setting)]);
+        } catch (\Modules\EIS\Exceptions\EisOfflineException $exception) {
+            \Log::warning('EIS stock reasons unavailable', [
+                'business_id' => $businessId, 'location_id' => $locationId, 'exception' => get_class($exception),
+            ]);
+            return response()->json([
+                'success' => false,
+                'message' => 'EIS is offline. No stock adjustment was sent.',
+            ], 502);
         } catch (\Throwable $exception) {
             \Log::warning('EIS stock reasons unavailable', ['business_id' => $businessId, 'location_id' => $locationId, 'exception' => get_class($exception)]);
             return response()->json([
@@ -153,7 +161,13 @@ class StockOutboundController extends Controller
         }
 
         if ($input['operation_type'] === 'adjustment') {
-            $reasons = $this->service->adjustmentReasons($setting);
+            try {
+                $reasons = $this->service->adjustmentReasons($setting);
+            } catch (\Modules\EIS\Exceptions\EisOfflineException $exception) {
+                throw ValidationException::withMessages([
+                    'adjustment_reason' => 'EIS is offline. No stock adjustment was submitted.',
+                ]);
+            }
             if (!in_array($input['adjustment_reason'], $reasons, true)) {
                 throw ValidationException::withMessages(['adjustment_reason' => 'Choose a current reason returned by EIS.']);
             }

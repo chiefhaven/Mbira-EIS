@@ -6,11 +6,15 @@ use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Modules\EIS\Services\EisSubscriptionAccess;
+use Modules\EIS\Services\Http\EisHealthService;
 use Modules\EIS\Services\Terminal\TerminalContext;
 
 // Exercise real activation persistence without calling the activation API.
 $app->instance(EisSubscriptionAccess::class, new class extends EisSubscriptionAccess {
     public function assertAllowed(int $businessId): void {}
+});
+$app->instance(EisHealthService::class, new class extends EisHealthService {
+    public function isOnline(int $businessId, string $token): bool { return true; }
 });
 $app['config']['eis.base_url'] = 'https://eis.invalid';
 $baseUrlMigration = require dirname(__DIR__, 2).'\Modules\EIS\Database\Migrations\2026_10_23_171800_restore_eis_settings_base_url.php';
@@ -1041,6 +1045,7 @@ $http = new Illuminate\Http\Client\Factory(); $http->preventStrayRequests();
 Illuminate\Support\Facades\Http::swap($http);
 Illuminate\Support\Facades\Http::fake(fn () => Illuminate\Support\Facades\Http::response(['ok' => true]));
 $health = Mockery::mock(Modules\EIS\Services\Http\EisHealthService::class);
+$health->shouldReceive('isOnline')->andReturn(true);
 $httpClient = new Modules\EIS\Services\Http\EisHttpClient(new Modules\EIS\Services\Security\EisSignatureService(), $health);
 $endpointSetting = new Modules\EIS\Models\EisSetting([
     'base_url' => 'https://stale.invalid', 'business_id' => 1, 'jwt_token' => 'test-token',

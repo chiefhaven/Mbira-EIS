@@ -65,6 +65,9 @@ function catalogFixture(): array
     ));
     $app['config']['eis.system_user_id'] = 1;
     $app['config']['eis.base_url'] = 'https://fixture.invalid';
+    $app->instance(Modules\EIS\Services\Http\EisHealthService::class, new class extends Modules\EIS\Services\Http\EisHealthService {
+        public function isOnline(int $businessId, string $token): bool { return true; }
+    });
     Facade::setFacadeApplication($app);
     Facade::clearResolvedInstances();
     $db = $capsule->getConnection();

@@ -51,6 +51,10 @@ class StockToolsController extends Controller
         $payload = StockToolsOperations::payload($setting, $input['operation'], $fields);
         try {
             $data = $client->lookup($setting, $input['operation'], $payload);
+        } catch (\Modules\EIS\Exceptions\EisOfflineException $exception) {
+            Log::warning('EIS stock lookup unavailable', ['operation' => $input['operation'], 'terminal_id' => $setting->id,
+                'exception' => get_class($exception)]);
+            return response()->json(['success' => false, 'message' => 'EIS is offline. No local records changed.'], 502);
         } catch (\Illuminate\Http\Client\ConnectionException | \UnexpectedValueException | \InvalidArgumentException $exception) {
             Log::warning('EIS stock lookup unavailable', ['operation' => $input['operation'], 'terminal_id' => $setting->id,
                 'exception' => get_class($exception)]);

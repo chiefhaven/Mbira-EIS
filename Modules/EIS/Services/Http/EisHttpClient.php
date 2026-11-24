@@ -27,7 +27,7 @@ class EisHttpClient
         app(EisSubscriptionAccess::class)->assertAllowed((int) ($setting->business_id ?? 0));
 
         if (! $this->health->isOnline($setting->business_id, $setting->jwt_token)) {
-            throw new EisSaleException('EIS server is currently offline.');
+            throw new EisSaleException('EIS is offline.');
         }
 
         $timestamp = time();
@@ -53,6 +53,10 @@ class EisHttpClient
     public function get($endpoint, $setting)
     {
         app(EisSubscriptionAccess::class)->assertAllowed((int) ($setting->business_id ?? 0));
+
+        if (! $this->health->isOnline($setting->business_id, $setting->jwt_token)) {
+            throw new EisSaleException('EIS is offline.');
+        }
 
         $timestamp = time();
 

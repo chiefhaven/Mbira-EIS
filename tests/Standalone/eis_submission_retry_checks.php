@@ -42,6 +42,9 @@ $container->instance('cache', new class {
     public function __construct() { $this->store = new Illuminate\Cache\ArrayStore(); }
     public function lock($name, $seconds) { return new Illuminate\Cache\ArrayLock($this->store, $name, $seconds); }
 });
+$container->instance(Modules\EIS\Services\Http\EisHealthService::class, new class extends Modules\EIS\Services\Http\EisHealthService {
+    public function isOnline(int $businessId, string $token): bool { return true; }
+});
 Facade::setFacadeApplication($container);
 $schema = $capsule->getConnection()->getSchemaBuilder();
 $schema->create('transactions', function (Blueprint $t) {
@@ -1112,12 +1115,20 @@ checkRetry(!$status['mra_is_blocked'] && $status['unblock_confirmed'] && !$statu
 $http = new Illuminate\Http\Client\Factory();
 Illuminate\Support\Facades\Http::swap($http);
 $http->preventStrayRequests();
+$container->instance(EisHealthService::class, new class extends EisHealthService {
+    public function isOnline(int $businessId, string $token): bool { return false; }
+});
 $http->fake(['*' => $http->response(['statusCode' => 0], 503)]);
 $blocks->handleResponse($settings, ['data' => ['shouldBlockTerminal' => 1]]);
 checkRetry($settings->fresh()->is_blocked
-    && $settings->fresh()->blocking_reason === $blocks::DEFAULT_REASON,
-    'Unavailable blocking-reason lookup fails closed with an explicit taxpayer warning');
-$assertBlocked(fn () => $blocks::assertAllowed($settings), 'blocking reason is unavailable');
+    && str_contains($settings->fresh()->blocking_reason, 'EIS is offline')
+    && str_contains($settings->fresh()->blocking_reason, 'blocking reason could not be retrieved'),
+    'Offline blocking-reason lookup fails closed with an explicit offline warning');
+Illuminate\Support\Facades\Http::assertNothingSent();
+$container->instance(EisHealthService::class, new class extends EisHealthService {
+    public function isOnline(int $businessId, string $token): bool { return true; }
+});
+$assertBlocked(fn () => $blocks::assertAllowed($settings), 'EIS is offline');
 $blocks->handleUtilityResponse($settings, 'check-terminal-unblock-status', [
     'statusCode' => 0, 'data' => ['isUnblocked' => true], 'errors' => [['errorMessage' => 'Not confirmed']],
 ]);

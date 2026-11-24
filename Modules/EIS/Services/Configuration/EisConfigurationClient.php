@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Modules\EIS\Services\Utilities\EisUtilitiesClient;
 use Modules\EIS\Services\EisSubscriptionAccess;
+use Modules\EIS\Services\Http\EisHealthService;
 
 class EisConfigurationClient
 {
@@ -15,13 +16,14 @@ class EisConfigurationClient
     {
         app(EisSubscriptionAccess::class)->assertAllowed($businessId);
         $this->validateToken($token);
+        app(EisHealthService::class)->assertOnline($businessId, $token);
         for ($attempt = 1; $attempt <= 3; $attempt++) {
             try {
                 $response = $this->request($token, 'get-latest-configs');
             } catch (ConnectionException $exception) {
                 Log::warning('EIS configuration connection failed', ['attempt' => $attempt]);
                 if ($attempt === 3) {
-                    throw new \RuntimeException('EIS configuration could not be reached after three attempts.');
+                    throw new \RuntimeException('EIS configuration could not be reached after three attempts.', 0, $exception);
                 }
                 $this->backoff($attempt);
                 continue;
@@ -46,6 +48,7 @@ class EisConfigurationClient
     {
         app(EisSubscriptionAccess::class)->assertAllowed($businessId);
         $this->validateToken($token);
+        app(EisHealthService::class)->assertOnline($businessId, $token);
         // This endpoint rotates credentials: never retry, including after a lost response.
         return $this->envelope($this->request($token, 'request-new-terminal-token'));
     }

@@ -33,6 +33,11 @@ class ProductStatusController extends Controller
                 'productId' => $productMap->eis_product_id,
             ]);
             $result = $client->send($setting, 'product-status', $payload);
+        } catch (\Modules\EIS\Exceptions\EisOfflineException $exception) {
+            Log::warning('EIS product status lookup unavailable', [
+                'business_id' => $businessId, 'product_id' => $productId,
+            ]);
+            return response()->json(['success' => false, 'message' => 'EIS is offline. No product status was confirmed.'], 502);
         } catch (\Illuminate\Http\Client\ConnectionException $exception) {
             Log::warning('EIS product status lookup unavailable', [
                 'business_id' => $businessId, 'product_id' => $productId,

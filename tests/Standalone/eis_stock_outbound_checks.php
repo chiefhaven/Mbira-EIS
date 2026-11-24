@@ -12,6 +12,7 @@ use Illuminate\Support\Facades\Facade;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Config\Repository;
 use Modules\EIS\Models\EisSetting;
+use Modules\EIS\Services\Http\EisHealthService;
 use App\Http\Controllers\StockAdjustmentController;
 use Modules\EIS\Services\Stock\StockOperationsClient;
 use Modules\EIS\Services\Stock\StockOutboundService;
@@ -93,6 +94,9 @@ $factory->fake(function ($request) use (&$requests, &$adjustmentAttempt, &$trans
 $factory->preventStrayRequests();
 $app->instance(Factory::class, $factory);
 Facade::setFacadeApplication($app);
+$app->instance(EisHealthService::class, new class extends EisHealthService {
+    public function isOnline(int $businessId, string $token): bool { return true; }
+});
 
 $schema = $capsule->getConnection()->getSchemaBuilder();
 $schema->create('business', function (Blueprint $table) { $table->increments('id'); });
