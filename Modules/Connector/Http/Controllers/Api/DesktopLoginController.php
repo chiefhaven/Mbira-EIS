@@ -2,13 +2,16 @@
 
 namespace Modules\Connector\Http\Controllers\Api;
 
+use Carbon\Carbon;
 use Illuminate\Contracts\Config\Repository;
 use Illuminate\Contracts\Container\Container;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Controller;
+use Illuminate\Support\Facades\Cache;
 use Modules\Connector\Support\DesktopPasswordLogin;
 use Modules\Connector\Support\DesktopTokenIssuer;
+use Modules\EIS\Jobs\SyncBusinessTerminalsLatestConfigJob;
 use Nyholm\Psr7\ServerRequest;
 
 class DesktopLoginController extends Controller
@@ -77,11 +80,33 @@ class DesktopLoginController extends Controller
             $response->headers->set('Cache-Control', 'no-store');
             $response->headers->set('Pragma', 'no-cache');
 
+            $this->syncTerminalLatestConfigsOnFirstLoginOfDay($user);
+
             return $response;
         } catch (\Throwable $ignored) {
             // Do not report/log exceptions containing credentials or token payloads.
             return $this->failure();
         }
+    }
+
+    private function syncTerminalLatestConfigsOnFirstLoginOfDay($user): void
+    {
+        $business = $user->business ?? \App\Business::find($user->business_id);
+        if (!$business) {
+            return;
+        }
+
+        $timezone = $business->time_zone ?? $this->config->get('app.timezone', 'UTC');
+        $now = Carbon::now($timezone);
+        $cacheKey = 'eis:first-login-terminal-latest-config-sync:' . $business->id . ':' . $now->toDateString();
+
+        $secondsUntilEndOfDay = max(60, $now->copy()->endOfDay()->diffInSeconds($now));
+        if (!Cache::add($cacheKey, true, $secondsUntilEndOfDay)) {
+            return;
+        }
+
+        SyncBusinessTerminalsLatestConfigJob::dispatch((int) $business->id)
+            ->onQueue('eis-submission');
     }
 
     private function failure(): JsonResponse

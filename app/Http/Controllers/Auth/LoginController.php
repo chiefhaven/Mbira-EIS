@@ -6,10 +6,13 @@ use App\Http\Controllers\Controller;
 use App\Providers\RouteServiceProvider;
 use App\Utils\BusinessUtil;
 use App\Utils\ModuleUtil;
+use Carbon\Carbon;
 use Illuminate\Foundation\Auth\AuthenticatesUsers;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Cookie;
+use Modules\EIS\Jobs\SyncBusinessTerminalsLatestConfigJob;
 
 class LoginController extends Controller
 {
@@ -83,6 +86,28 @@ class LoginController extends Controller
             Auth::logout();
             return redirect('/login')->with('status', ['success' => 0, 'msg' => __('lang_v1.login_not_allowed')]);
         }
+
+        $this->syncTerminalLatestConfigsOnFirstLoginOfDay($user);
+    }
+
+    protected function syncTerminalLatestConfigsOnFirstLoginOfDay($user): void
+    {
+        $business = $user->business;
+        if (!$business) {
+            return;
+        }
+
+        $timezone = $business->time_zone ?? config('app.timezone', 'UTC');
+        $now = Carbon::now($timezone);
+        $cacheKey = 'eis:first-login-terminal-latest-config-sync:' . $business->id . ':' . $now->toDateString();
+
+        $secondsUntilEndOfDay = max(60, $now->copy()->endOfDay()->diffInSeconds($now));
+        if (!Cache::add($cacheKey, true, $secondsUntilEndOfDay)) {
+            return;
+        }
+
+        SyncBusinessTerminalsLatestConfigJob::dispatch((int) $business->id)
+            ->onQueue('eis-submission');
     }
 
     protected function redirectTo()
