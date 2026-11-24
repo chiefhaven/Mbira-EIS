@@ -758,7 +758,7 @@ class SellPosController extends Controller
 
                 $this->transactionUtil->activityLog($transaction, 'added');
 
-                SaleSubmissionRule::initiate($transaction, true);
+                $eis_submission_error = SaleSubmissionRule::initiate($transaction, true);
                 if ($pos_checkout_operation_claimed) {
                     $pos_checkout_idempotency->complete(
                         DB::connection(),
@@ -814,6 +814,9 @@ class SellPosController extends Controller
                 }
 
                 $output = ['success' => 1, 'msg' => $msg, 'receipt' => $receipt];
+                if ($eis_submission_error) {
+                    $output['eis_submission_error'] = $eis_submission_error;
+                }
 
                 if (!empty($whatsapp_link)) {
                     $output['whatsapp_link'] = $whatsapp_link;
@@ -835,6 +838,9 @@ class SellPosController extends Controller
                 $msg = $e->getMessage();
             }
             if (get_class($e) == \App\Exceptions\AdvanceBalanceNotAvailable::class) {
+                $msg = $e->getMessage();
+            }
+            if ($e instanceof \Modules\EIS\Exceptions\EisSaleException) {
                 $msg = $e->getMessage();
             }
             if ($e instanceof \Illuminate\Validation\ValidationException) {

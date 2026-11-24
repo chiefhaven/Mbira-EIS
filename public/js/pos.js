@@ -943,7 +943,11 @@ $(document).ready(function() {
                                 window.open(result.whatsapp_link);
                             }
                             $('#modal_payment').modal('hide');
-                            toastr.success(result.msg);
+                            if (result.eis_submission_error) {
+                                toastr.error(result.eis_submission_error);
+                            } else {
+                                toastr.success(result.msg);
+                            }
 
                             // Print before reset: edit reset navigates away from this page.
                             if (result.receipt && result.receipt.is_enabled) {

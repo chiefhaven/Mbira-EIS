@@ -27,10 +27,17 @@ class SaleSubmissionRule
      * is thrown to the caller so the enclosing sale/payment transaction can roll back. Offline or
      * indeterminate submissions remain queued after commit.
      */
-    public static function initiate(Transaction $transaction, bool $originalCheckout = false): void
+    public static function initiate(Transaction $transaction, bool $originalCheckout = false): ?string
     {
-        if (DB::transactionLevel() > 0 && static::submitOnline($transaction)) {
-            return;
+        $submissionError = null;
+        if (DB::transactionLevel() > 0) {
+            $onlineResult = static::submitOnline($transaction);
+            if ($onlineResult === true) {
+                return null;
+            }
+            if (is_string($onlineResult)) {
+                $submissionError = $onlineResult;
+            }
         }
 
         DB::afterCommit(function () use ($transaction, $originalCheckout) {
@@ -56,9 +63,11 @@ class SaleSubmissionRule
                 ]);
             }
         });
+
+        return $submissionError;
     }
 
-    private static function submitOnline(Transaction $transaction): bool
+    private static function submitOnline(Transaction $transaction): bool|string|null
     {
         try {
             $transaction = $transaction->newQuery()
@@ -67,17 +76,17 @@ class SaleSubmissionRule
             if (!static::qualifies($transaction)
                 || !app(\Modules\EIS\Services\EisSubscriptionAccess::class)
                     ->allows((int) $transaction->business_id)) {
-                return false;
+                return null;
             }
 
             $settings = \Modules\EIS\Services\Terminal\TerminalContext::forSale($transaction);
             if (!app(\Modules\EIS\Services\Http\EisHealthService::class)
                 ->isOnline((int) $transaction->business_id, (string) $settings->jwt_token)) {
-                return false;
+                return null;
             }
 
             $sale = app(SaleSubmissionService::class)->submit($transaction, $settings);
-            return $sale->status === 'submitted';
+            return $sale->status === 'submitted' ? true : ($sale->error_message ?: null);
         } catch (EisSaleException $exception) {
             if ($exception->httpStatus !== null && $exception->httpStatus !== 200) {
                 throw $exception;
@@ -87,13 +96,13 @@ class SaleSubmissionRule
                 'transaction_id' => $transaction->id,
                 'http_status' => $exception->httpStatus,
             ]);
-            return false;
+            return $exception->getMessage();
         } catch (\Throwable $exception) {
             Log::warning('Online EIS submission could not be completed; retaining sale for retry', [
                 'transaction_id' => $transaction->id,
                 'exception' => get_class($exception),
             ]);
-            return false;
+            return null;
         }
     }
 

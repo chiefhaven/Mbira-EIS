@@ -33,6 +33,7 @@ $capsule->addConnection(['driver' => 'sqlite', 'database' => ':memory:', 'prefix
 $capsule->setEventDispatcher(new Illuminate\Events\Dispatcher($container));
 $capsule->setAsGlobal();
 $capsule->bootEloquent();
+$capsule->getConnection()->setTransactionManager(new Illuminate\Database\DatabaseTransactionsManager());
 Container::setInstance($container);
 $container->instance('db', $capsule->getDatabaseManager());
 $container->instance('log', new Psr\Log\NullLogger());
@@ -954,6 +955,15 @@ checkRetry(!Transaction::whereKey($rollbackSaleId)->exists()
     && !EisSale::where('transaction_id', $rollbackSaleId)->exists()
     && !DB::table('eis_failed_transactions')->where('transaction_id', $rollbackSaleId)->exists(),
     'A non-200 response rolls back the sale and its EIS/retry tracking, including paid split checkout');
+$client->response = ['success' => true, 'status' => 200, 'data' => [
+    'statusCode' => 0, 'remark' => 'EIS rejected the invoice with a validation detail.',
+]];
+DB::beginTransaction();
+$rejectedSale = splitSubmissionFixture('INV-HTTP-200-REJECTION');
+$submissionError = SaleSubmissionRule::initiate($rejectedSale);
+checkRetry($submissionError === 'EIS rejected the invoice with a validation detail.',
+    'An HTTP-200 EIS rejection returns its actual message for the POS toast');
+DB::rollBack();
 $client->response = ['success' => false, 'error' => 'Fixture offline'];
 $blocks = new Modules\EIS\Services\Terminal\TerminalBlockService();
 $utilities = new Modules\EIS\Services\Utilities\EisUtilitiesClient();
