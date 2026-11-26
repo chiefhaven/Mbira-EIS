@@ -45,7 +45,6 @@ class SaleSubmissionService
     private function submitLocked(Transaction $transaction, object $settings, bool $forceOffline): EisSale
     {
         \Modules\EIS\Services\Terminal\TerminalContext::assertBusiness($settings, (int) $transaction->business_id);
-        $this->assertRollbackSafeTracking($transaction);
         // Fence before invoice counters, tracking or any external call.
         \App\Services\Sales\SavedSaleWriteGuard::fiscal($transaction->getConnection(), $transaction->id);
         $transaction->refresh();
@@ -188,20 +187,46 @@ class SaleSubmissionService
             // queue/manual retries are recognized and include the signature.
             $httpStatus = isset($response['status']) && is_numeric($response['status'])
                 ? (int) $response['status'] : null;
+            $responseStatusCode = is_array($terminalResponse)
+                && is_numeric($terminalResponse['statusCode'] ?? null)
+                ? (int) $terminalResponse['statusCode'] : null;
+            $responseErrorCode = is_array($terminalResponse)
+                ? $this->negativeErrorCode($terminalResponse['errors'] ?? null) : null;
+            if (($responseStatusCode !== null && $responseStatusCode < -1)
+                || $responseErrorCode !== null) {
+                $duplicateInvoice = $responseStatusCode === -2 || $responseErrorCode === -2;
+            }
+            if ((($responseStatusCode !== null && $responseStatusCode < -1)
+                || $responseErrorCode !== null)
+                && $transaction->getConnection()->transactionLevel() > 0) {
+                throw new EisSaleException(
+                    $response['error'] ?? $terminalResponse['remark'] ?? 'EIS rejected the invoice.',
+                    $duplicateInvoice ? EisSaleException::DUPLICATE_INVOICE : 0,
+                    null,
+                    $httpStatus,
+                    $responseStatusCode,
+                    $responseErrorCode
+                );
+            }
             if (($httpStatus !== null && $httpStatus !== 200) || ! ($response['success'] ?? false)
                 || ($response['data']['statusCode'] ?? null) !== 1) {
                 $eisSale->update(['response_payload' => $response]);
                 $payload = $this->prepareOfflineValidationData($transaction, $settings, $eisSale, $payload);
                 if ($httpStatus !== null && $httpStatus !== 200) {
-                    $duplicateInvoice = ($response['error_code'] ?? null) === 'DUPLICATE_INVOICE';
+                    $duplicateInvoice = ($response['error_code'] ?? null) === 'DUPLICATE_INVOICE'
+                        || $responseStatusCode === -2
+                        || $responseErrorCode === -2;
                     throw new EisSaleException(
                         $response['error'] ?? $response['data']['remark'] ?? sprintf('EIS returned HTTP %s', $httpStatus),
                         $duplicateInvoice ? EisSaleException::DUPLICATE_INVOICE : 0,
                         null,
-                        $httpStatus
+                        $httpStatus,
+                        $responseStatusCode,
+                        $responseErrorCode
                     );
                 }
-                if (($response['error_code'] ?? null) === 'DUPLICATE_INVOICE') {
+                if (($response['error_code'] ?? null) === 'DUPLICATE_INVOICE'
+                    || $responseStatusCode === -2 || $responseErrorCode === -2) {
                     $duplicateInvoice = true;
                     $resolution = $this->outcomeRecovery()->resolve($eisSale, $eisSetting, $payload, $response, 'duplicate');
                     if ($resolution === 'verified') {
@@ -211,7 +236,9 @@ class SaleSubmissionService
                         'EIS reports this invoice number already exists. Automatic lookup could not verify an exact match; no further submission will be attempted.',
                         EisSaleException::DUPLICATE_INVOICE,
                         null,
-                        $httpStatus
+                        $httpStatus,
+                        $responseStatusCode,
+                        $responseErrorCode
                     );
                 }
                 if ($this->isAmbiguousSubmissionResponse($response)) {
@@ -221,10 +248,7 @@ class SaleSubmissionService
                     }
                     if ($resolution !== 'absent') {
                         throw new EisSaleException(
-                            'EIS submission outcome is unresolved. The exact invoice will be looked up again before another submission.',
-                            0,
-                            null,
-                            $httpStatus
+                            'EIS submission outcome is unresolved. The exact invoice will be looked up again before another submission.'
                         );
                     }
                 }
@@ -246,6 +270,17 @@ class SaleSubmissionService
                 'error' => $e->getMessage(),
                 'eis_invoice_number' => $eisInvoiceNumber ?? null,
             ]);
+
+            if ($e instanceof EisSaleException && $e->requiresCheckoutRollback()
+                && $transaction->getConnection()->transactionLevel() > 0) {
+                $eisSale->delete();
+                DB::table('eis_failed_transactions')
+                    ->where('business_id', $transaction->business_id)
+                    ->where('transaction_id', $transaction->id)
+                    ->delete();
+
+                throw $e;
+            }
 
             if ($payload === [] && is_array($eisSale->request_payload)) {
                 $payload = $eisSale->request_payload;
@@ -273,35 +308,36 @@ class SaleSubmissionService
         }
     }
 
-    private function assertRollbackSafeTracking(Transaction $transaction): void
-    {
-        $connection = $transaction->getConnection();
-        if ($connection->transactionLevel() < 1 || $connection->getDriverName() !== 'mysql') {
-            return;
-        }
-
-        if ($connection !== (new EisSale())->getConnection() || $connection !== DB::connection()) {
-            throw new EisSaleException(
-                'EIS sale tracking must use the same database connection as the sale so checkout can roll back safely.'
-            );
-        }
-
-        foreach (['eis_sales', 'eis_failed_transactions'] as $table) {
-            $engine = $connection->table('information_schema.TABLES')
-                ->where('TABLE_SCHEMA', $connection->getDatabaseName())
-                ->where('TABLE_NAME', $table)
-                ->value('ENGINE');
-            if (strtoupper((string) $engine) !== 'INNODB') {
-                throw new EisSaleException(
-                    'EIS sale rollback requires InnoDB for '.$table.'. Run the EIS database migrations before checkout.'
-                );
-            }
-        }
-    }
-
     private function outcomeRecovery(): SaleOutcomeRecoveryService
     {
         return $this->outcomeRecovery ?? app(SaleOutcomeRecoveryService::class);
+    }
+
+    private function negativeErrorCode($errors): ?int
+    {
+        if (is_object($errors)) {
+            $errors = get_object_vars($errors);
+        }
+        if (!is_array($errors)) {
+            return null;
+        }
+
+        $entries = array_key_exists('errorCode', $errors) ? [$errors] : $errors;
+        foreach ($entries as $entry) {
+            if (is_object($entry)) {
+                $entry = get_object_vars($entry);
+            }
+            if (!is_array($entry) || !is_numeric($entry['errorCode'] ?? null)) {
+                continue;
+            }
+
+            $code = (int) $entry['errorCode'];
+            if ($code < -1) {
+                return $code;
+            }
+        }
+
+        return null;
     }
 
     private function prepareOfflineValidationData(

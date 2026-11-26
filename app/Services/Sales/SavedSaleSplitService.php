@@ -1210,8 +1210,7 @@ class SavedSaleSplitService
     protected function scheduleFiscal($id)
     {
         \Modules\EIS\Services\Sales\SaleSubmissionRule::initiate(
-            \App\Transaction::on($this->db->getName())->findOrFail($id),
-            true
+            \App\Transaction::on($this->db->getName())->findOrFail($id)
         );
     }
 }

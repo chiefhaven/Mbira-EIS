@@ -5,13 +5,6 @@ var eisBuyerCheckSequence = 0;
 var eisBuyerCheckRequest = null;
 var posCheckoutInProgress = false;
 
-function posCheckoutErrorMessage(response) {
-    var message = response && (response.msg || response.message || response.error);
-    return typeof message === 'string' && message.trim()
-        ? message
-        : LANG.something_went_wrong;
-}
-
 function resetEisBuyerAuthorization() {
     eisBuyerCheckSequence++;
     if (eisBuyerCheckRequest) {
@@ -653,7 +646,7 @@ $(document).ready(function() {
                     reset_pos_form();
                     toastr.success(result.msg);
                 } else {
-                    toastr.error(posCheckoutErrorMessage(result));
+                    toastr.error(result.msg);
                 }
             },
         });
@@ -975,7 +968,10 @@ $(document).ready(function() {
                         posCheckoutInProgress = false;
                     },
                     error: function(xhr) {
-                        toastr.error(posCheckoutErrorMessage(xhr.responseJSON));
+                        var message = xhr.responseJSON && (xhr.responseJSON.msg || xhr.responseJSON.message)
+                            ? (xhr.responseJSON.msg || xhr.responseJSON.message)
+                            : LANG.something_went_wrong;
+                        toastr.error(message);
                         enable_pos_form_actions();
                         enable_pos_checkout_buttons();
                         $('#pos-checkout-progress').hide();
