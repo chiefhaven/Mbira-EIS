@@ -840,7 +840,8 @@ class RestaurantBillService
     protected function initiateFiscal(int $id): void
     {
         \Modules\EIS\Services\Sales\SaleSubmissionRule::initiate(
-            \App\Transaction::on($this->db->getName())->findOrFail($id)
+            \App\Transaction::on($this->db->getName())->findOrFail($id),
+            true
         );
     }
 

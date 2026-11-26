@@ -937,9 +937,11 @@ $container->instance(EisSubscriptionAccess::class, new class extends EisSubscrip
     public function allows(int $businessId): bool { return true; }
     public function assertAllowed(int $businessId): void {}
 });
-$container->instance(EisHealthService::class, new class extends EisHealthService {
-    public function isOnline(int $businessId, string $token): bool { return true; }
-});
+$checkoutHealth = new class extends EisHealthService {
+    public bool $online = true;
+    public function isOnline(int $businessId, string $token): bool { return $this->online; }
+};
+$container->instance(EisHealthService::class, $checkoutHealth);
 $container->instance(SaleSubmissionService::class, $service);
 $client->response = ['success' => false, 'error' => 'EIS denied the request.', 'error_code' => 'HTTP_ERROR_403', 'status' => 403];
 DB::beginTransaction();
@@ -948,24 +950,89 @@ $rollbackSaleId = $rollbackSale->id;
 $rollbackSale->payment_status = 'due';
 DB::table('transactions')->where('id', $rollbackSaleId)->update(['payment_status' => 'paid']);
 try {
-    SaleSubmissionRule::initiate($rollbackSale);
+    SaleSubmissionRule::initiate($rollbackSale, true);
     throw new RuntimeException('Expected non-200 EIS response to abort the sale');
 } catch (EisSaleException $exception) {
     checkRetry($exception->httpStatus === 403, 'The HTTP status is preserved for checkout rollback decisions');
+    checkRetry($exception->getMessage() === 'EIS denied the request.', 'The EIS rejection message is preserved for the POS error toast');
     DB::rollBack();
 }
 checkRetry(!Transaction::whereKey($rollbackSaleId)->exists()
     && !EisSale::where('transaction_id', $rollbackSaleId)->exists()
     && !DB::table('eis_failed_transactions')->where('transaction_id', $rollbackSaleId)->exists(),
     'A non-200 response rolls back the sale and its EIS/retry tracking, including paid split checkout');
+foreach ([400, 401] as $httpStatus) {
+    $client->response = [
+        'success' => false,
+        'error' => 'EIS denied the request.',
+        'error_code' => 'HTTP_ERROR_'.$httpStatus,
+        'status' => $httpStatus,
+    ];
+    DB::beginTransaction();
+    $sale = splitSubmissionFixture('INV-ROLLBACK-'.$httpStatus);
+    $saleId = $sale->id;
+    try {
+        SaleSubmissionRule::initiate($sale, true);
+        throw new RuntimeException('Expected HTTP '.$httpStatus.' EIS response to abort checkout');
+    } catch (EisSaleException $exception) {
+        checkRetry($exception->httpStatus === $httpStatus, 'HTTP '.$httpStatus.' is preserved for rollback');
+        DB::rollBack();
+    }
+    checkRetry(!Transaction::whereKey($saleId)->exists()
+        && !EisSale::where('transaction_id', $saleId)->exists(),
+        'HTTP '.$httpStatus.' rolls back sale and EIS tracking');
+}
+$client->response = [
+    'success' => false,
+    'error' => 'EIS could not complete the request.',
+    'error_code' => 'HTTP_ERROR_500',
+    'status' => 500,
+];
+$recoveryClient->responder = function () {
+    return ['outcome' => 'unknown', 'response' => []];
+};
+DB::beginTransaction();
+$serverErrorSale = splitSubmissionFixture('INV-ROLLBACK-500');
+$serverErrorSaleId = $serverErrorSale->id;
+try {
+    SaleSubmissionRule::initiate($serverErrorSale, true);
+    throw new RuntimeException('Expected HTTP 500 EIS response to abort checkout');
+} catch (EisSaleException $exception) {
+    checkRetry($exception->httpStatus === 500, 'Ambiguous HTTP 500 retains its status for rollback');
+    DB::rollBack();
+}
+checkRetry(!Transaction::whereKey($serverErrorSaleId)->exists()
+    && !EisSale::where('transaction_id', $serverErrorSaleId)->exists(),
+    'HTTP 500 rolls back sale and EIS tracking');
+$recoveryClient->responder = null;
+$client->response = ['success' => false, 'error' => 'EIS temporarily unavailable.', 'error_code' => 'HTTP_ERROR_404', 'status' => 404];
+$client->beforeResponse = null;
+DB::beginTransaction();
+$notRollbackStatus = splitSubmissionFixture('INV-OFFLINE-404');
+$offlineStatusMessage = SaleSubmissionRule::initiate($notRollbackStatus, true);
+checkRetry($offlineStatusMessage === 'EIS temporarily unavailable.',
+    'Other HTTP statuses are surfaced as offline errors instead of aborting checkout');
+checkRetry(DB::transactionLevel() === 1, 'HTTP 404 leaves the checkout transaction open for offline commit');
+DB::rollBack();
+$checkoutHealth->online = false;
+DB::beginTransaction();
+$offlineCheckout = splitSubmissionFixture('INV-OFFLINE-CHECKOUT');
+$offlineCheckoutId = $offlineCheckout->id;
+checkRetry(str_contains((string) SaleSubmissionRule::initiate($offlineCheckout, true), 'EIS is offline'),
+    'An unavailable EIS terminal returns a useful offline message without aborting checkout');
+DB::rollBack();
+checkRetry(!Transaction::whereKey($offlineCheckoutId)->exists()
+    && !EisSale::where('transaction_id', $offlineCheckoutId)->exists(),
+    'The test cleanup rolls back the offline checkout without EIS tracking');
+$checkoutHealth->online = true;
 $client->response = ['success' => true, 'status' => 200, 'data' => [
     'statusCode' => 0, 'remark' => 'EIS rejected the invoice with a validation detail.',
 ]];
 DB::beginTransaction();
 $rejectedSale = splitSubmissionFixture('INV-HTTP-200-REJECTION');
-$submissionError = SaleSubmissionRule::initiate($rejectedSale);
+$submissionError = SaleSubmissionRule::initiate($rejectedSale, true);
 checkRetry($submissionError === 'EIS rejected the invoice with a validation detail.',
-    'An HTTP-200 EIS rejection returns its actual message for the POS toast');
+    'An HTTP-200 EIS rejection returns its actual message and does not abort checkout');
 DB::rollBack();
 $client->response = ['success' => false, 'error' => 'Fixture offline'];
 $blocks = new Modules\EIS\Services\Terminal\TerminalBlockService();

@@ -4,7 +4,6 @@ namespace Modules\EIS\Services\Sales;
 
 use App\Transaction;
 use Illuminate\Database\Eloquent\Builder;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Modules\EIS\Exceptions\EisSaleException;
 use Modules\EIS\Exceptions\TerminalBlockedException;
@@ -24,14 +23,14 @@ class SaleSubmissionRule
     /**
      * Ask EIS to submit a sale that was just saved.
      *
-     * When called inside a transaction, submit immediately if EIS is online. A non-200 EIS response
-     * is thrown to the caller so the enclosing sale/payment transaction can roll back. Offline or
-     * indeterminate submissions remain queued after commit.
+     * Explicit EIS errors that require checkout rollback are thrown to the caller.
+     * Offline and other unsuccessful responses are retained for retry after commit.
      */
     public static function initiate(Transaction $transaction, bool $originalCheckout = false): ?string
     {
+        $connection = $transaction->getConnection();
         $submissionError = null;
-        if (DB::transactionLevel() > 0) {
+        if ($connection->transactionLevel() > 0) {
             try {
                 $onlineResult = static::submitOnline($transaction);
             } catch (TerminalBlockedException $exception) {
@@ -49,7 +48,7 @@ class SaleSubmissionRule
             }
         }
 
-        DB::afterCommit(function () use ($transaction, $originalCheckout) {
+        $connection->afterCommit(function () use ($transaction, $originalCheckout) {
             try {
                 // Payment utilities save a separate model; the caller may still hold an unpaid snapshot.
                 $committed = $transaction->newQuery()
@@ -91,7 +90,7 @@ class SaleSubmissionRule
             $settings = \Modules\EIS\Services\Terminal\TerminalContext::forSale($transaction);
             if (!app(\Modules\EIS\Services\Http\EisHealthService::class)
                 ->isOnline((int) $transaction->business_id, (string) $settings->jwt_token)) {
-                return null;
+                return 'EIS is offline or unreachable. Check the terminal connection and try again.';
             }
 
             $sale = app(SaleSubmissionService::class)->submit($transaction, $settings);
@@ -99,21 +98,21 @@ class SaleSubmissionRule
         } catch (TerminalBlockedException $exception) {
             throw $exception;
         } catch (EisSaleException $exception) {
-            if ($exception->httpStatus !== null && $exception->httpStatus !== 200) {
+            if (in_array($exception->httpStatus, [400, 401, 403, 500], true)) {
                 throw $exception;
             }
 
-            Log::warning('Online EIS submission did not complete; retaining sale for retry', [
+            Log::warning('Online EIS submission did not complete', [
                 'transaction_id' => $transaction->id,
                 'http_status' => $exception->httpStatus,
             ]);
             return $exception->getMessage();
         } catch (\Throwable $exception) {
-            Log::warning('Online EIS submission could not be completed; retaining sale for retry', [
+            Log::warning('Online EIS submission could not be completed', [
                 'transaction_id' => $transaction->id,
                 'exception' => get_class($exception),
             ]);
-            return null;
+            return 'EIS submission could not be completed. Check the terminal connection and try again.';
         }
     }
 

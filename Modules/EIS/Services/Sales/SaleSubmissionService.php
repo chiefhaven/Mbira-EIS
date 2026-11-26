@@ -45,6 +45,7 @@ class SaleSubmissionService
     private function submitLocked(Transaction $transaction, object $settings, bool $forceOffline): EisSale
     {
         \Modules\EIS\Services\Terminal\TerminalContext::assertBusiness($settings, (int) $transaction->business_id);
+        $this->assertRollbackSafeTracking($transaction);
         // Fence before invoice counters, tracking or any external call.
         \App\Services\Sales\SavedSaleWriteGuard::fiscal($transaction->getConnection(), $transaction->id);
         $transaction->refresh();
@@ -220,7 +221,10 @@ class SaleSubmissionService
                     }
                     if ($resolution !== 'absent') {
                         throw new EisSaleException(
-                            'EIS submission outcome is unresolved. The exact invoice will be looked up again before another submission.'
+                            'EIS submission outcome is unresolved. The exact invoice will be looked up again before another submission.',
+                            0,
+                            null,
+                            $httpStatus
                         );
                     }
                 }
@@ -266,6 +270,32 @@ class SaleSubmissionService
             }
 
             throw $e;
+        }
+    }
+
+    private function assertRollbackSafeTracking(Transaction $transaction): void
+    {
+        $connection = $transaction->getConnection();
+        if ($connection->transactionLevel() < 1 || $connection->getDriverName() !== 'mysql') {
+            return;
+        }
+
+        if ($connection !== (new EisSale())->getConnection() || $connection !== DB::connection()) {
+            throw new EisSaleException(
+                'EIS sale tracking must use the same database connection as the sale so checkout can roll back safely.'
+            );
+        }
+
+        foreach (['eis_sales', 'eis_failed_transactions'] as $table) {
+            $engine = $connection->table('information_schema.TABLES')
+                ->where('TABLE_SCHEMA', $connection->getDatabaseName())
+                ->where('TABLE_NAME', $table)
+                ->value('ENGINE');
+            if (strtoupper((string) $engine) !== 'INNODB') {
+                throw new EisSaleException(
+                    'EIS sale rollback requires InnoDB for '.$table.'. Run the EIS database migrations before checkout.'
+                );
+            }
         }
     }
 
