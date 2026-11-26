@@ -113,6 +113,8 @@ class ConfigurationSyncService
                         'terminal_version' => $existingConfig->terminal_version,
                         'taxpayer_version' => $existingConfig->taxpayer_version
                     ]);
+
+                    $this->syncTaxRates($existingConfig, $data);
                     
                     // Update last_synced_at even if unchanged
                     $existingConfig->update(['last_synced_at' => now()]);

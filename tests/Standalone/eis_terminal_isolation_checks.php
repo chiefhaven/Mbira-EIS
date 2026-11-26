@@ -923,6 +923,19 @@ locationCheck((float) $vat->rate === 17.0 && !$vat->is_activated && DB::table('t
     'Existing rate amount and activation update without duplicate rate rows');
 locationCheck(count($configService->productSyncRequests) === $productSyncCount + 1,
     'Updated tax rate and activation schedule another product resync');
+DB::table('tax_rates')->where('configuration_id', 2)->where('tax_rate_id', 'VAT')->update([
+    'name' => 'Stale VAT',
+    'rate' => 1,
+    'is_activated' => true,
+]);
+$productSyncCount = count($configService->productSyncRequests);
+$configService->sync(1, 'token2', false, 2);
+$vat = DB::table('tax_rates')->where('configuration_id', 2)->where('tax_rate_id', 'VAT')->first();
+locationCheck($vat->name === 'Updated VAT' && (float) $vat->rate === 17.0 && !$vat->is_activated
+    && DB::table('tax_rates')->where('configuration_id', 2)->count() === 1,
+    'Unchanged latest configuration refreshes stale tax rate rows without duplicates');
+locationCheck(count($configService->productSyncRequests) === $productSyncCount,
+    'Refreshing unchanged tax rates does not trigger a redundant product sync');
 locationCheck(!DB::table('eis_settings')->where('id', 2)->value('status'),
     'Full configuration refresh never re-enables a locally deactivated terminal');
 $schema->table('products', function (Blueprint $table) { $table->integer('tax')->nullable(); });
