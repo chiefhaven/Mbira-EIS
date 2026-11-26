@@ -49,22 +49,30 @@ class ConfigurationSyncService
     ) {
     }
 
-    /**
-     * Synchronize EIS configuration for a business.
-     *
-     * @param int $businessId
-     * @param string $token
-     * @return EisConfiguration
-     * @throws SyncException
-     * @throws \InvalidArgumentException
-     */
     public function sync(
         int $businessId,
         string $token,
         bool $force = false,
         ?int $terminalId = null
     ): EisConfiguration {
-        app(EisSubscriptionAccess::class)->assertAllowed($businessId);
+        return $this->syncConfiguration($businessId, $token, $force, $terminalId, false);
+    }
+
+    public function syncForScheduledJob(int $businessId, string $token, ?int $terminalId = null): EisConfiguration
+    {
+        return $this->syncConfiguration($businessId, $token, false, $terminalId, true);
+    }
+
+    protected function syncConfiguration(
+        int $businessId,
+        string $token,
+        bool $force,
+        ?int $terminalId,
+        bool $allowWithoutSubscription
+    ): EisConfiguration {
+        if (!$allowWithoutSubscription) {
+            app(EisSubscriptionAccess::class)->assertAllowed($businessId);
+        }
         $this->validateBusinessId($businessId);
         $this->validateToken($token);
 

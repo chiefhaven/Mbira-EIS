@@ -12,7 +12,6 @@ use Illuminate\Support\Facades\Log;
 use Modules\EIS\Models\EisConfiguration;
 use Modules\EIS\Models\EisSetting;
 use Modules\EIS\Services\Configuration\ConfigurationSyncService;
-use Modules\EIS\Services\EisSubscriptionAccess;
 
 class SyncEISConfigurationJob implements ShouldQueue
 {
@@ -26,7 +25,7 @@ class SyncEISConfigurationJob implements ShouldQueue
     private const CHUNK_SIZE = 50;
     private const MAX_PROCESS_LIMIT = 500;
 
-    public function handle(ConfigurationSyncService $syncService, EisSubscriptionAccess $subscriptionAccess): array
+    public function handle(ConfigurationSyncService $syncService): array
     {
         $startTime = microtime(true);
         $processedCount = 0;
@@ -48,14 +47,7 @@ class SyncEISConfigurationJob implements ShouldQueue
                         ->orWhere('sync_status', '!=', 'failed')
                         ->orWhere('sync_error_retry_after', '<', now());
                 });
-            $businessIds = (clone $settingsQuery)->distinct()->pluck('business_id');
-            $eligibleBusinessIds = $businessIds
-                ->filter(fn ($businessId) => $subscriptionAccess->allows((int) $businessId))
-                ->values()
-                ->all();
-
             $settingsQuery = $settingsQuery
-                ->whereIn('business_id', $eligibleBusinessIds)
                 ->orderBy('last_sync_at', 'asc')
                 ->limit(self::MAX_PROCESS_LIMIT);
             
@@ -126,10 +118,9 @@ class SyncEISConfigurationJob implements ShouldQueue
     {
         try {
             DB::transaction(function () use ($setting, $syncService, &$successCount) {
-                $result = $syncService->sync(
+                $result = $syncService->syncForScheduledJob(
                     $setting->business_id,
                     $setting->jwt_token,
-                    false,
                     (int) $setting->id
                 );
                 
