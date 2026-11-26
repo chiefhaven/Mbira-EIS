@@ -40,6 +40,13 @@ function renderVatPartial(string $name, object $receipt_details, bool $table_row
 $method = new ReflectionMethod(TransactionUtil::class, 'receiptFiscalTaxDetails');
 $method->setAccessible(true);
 $util = new TransactionUtil();
+$exemptTaxCodeMethod = new ReflectionMethod(TransactionUtil::class, 'isExemptReceiptTaxCode');
+$exemptTaxCodeMethod->setAccessible(true);
+vatDisplayCheck($exemptTaxCodeMethod->invoke($util, 'E')
+    && $exemptTaxCodeMethod->invoke($util, 'e')
+    && !$exemptTaxCodeMethod->invoke($util, 'B')
+    && !$exemptTaxCodeMethod->invoke($util, 'A'),
+    'Only E-rated lines count toward the receipt exempt total');
 $config = ['globalConfiguration' => ['taxrates' => [
     ['id' => 'B', 'name' => 'Zero Rated', 'rate' => 0],
     ['id' => 'A', 'name' => 'Standard Rated', 'rate' => 17.5],

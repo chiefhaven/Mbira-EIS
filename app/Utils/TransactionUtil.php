@@ -1515,7 +1515,7 @@ class TransactionUtil extends Util
                     $output['taxes'][$line['tax_name']] += ($line['tax_unformatted'] * $line['quantity_uf']);
                 }
 
-                if (! empty($line['tax_id']) && $line['tax_percent'] == 0) {
+                if ($this->isExemptReceiptTaxCode($line['tax_code'] ?? null)) {
                     $total_exempt += $line['line_total_uf'];
                 }
                 $subtotal_exc_tax += $line['line_total_exc_tax_uf'];
@@ -2263,6 +2263,11 @@ class TransactionUtil extends Util
         ));
 
         return $description !== '' ? $description : (string) $product->name;
+    }
+
+    private function isExemptReceiptTaxCode(?string $taxCode): bool
+    {
+        return strtoupper(trim($taxCode ?? '')) === 'E';
     }
 
     /**
