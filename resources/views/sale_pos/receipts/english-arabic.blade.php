@@ -197,6 +197,13 @@
                                         <td class="print-red" style="text-align: center;">{{ $receipt_details->taxable_amount }}</td>
                                         <td></td>
                                     </tr>
+                                    @if(!empty($receipt_details->total_exempt_uf))
+                                        <tr>
+                                            <td style="font-weight: bold; text-align: right;">{{ __('lang_v1.exempt') }}:</td>
+                                            <td class="print-red" style="text-align: center;">{{ $receipt_details->total_exempt }}</td>
+                                            <td></td>
+                                        </tr>
+                                    @endif
                                     @if(!empty($receipt_details->vat_breakdown))
                                         @foreach($receipt_details->vat_breakdown as $vat_rate)
                                             <tr>

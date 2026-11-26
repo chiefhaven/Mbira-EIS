@@ -371,16 +371,6 @@
 							</td>
 						</tr>
 					@endif
-					@if(!empty($receipt_details->total_exempt_uf))
-					<tr>
-						<th style="width:70%">
-							@lang('lang_v1.exempt')
-						</th>
-						<td class="text-right">
-							{{$receipt_details->total_exempt}}
-						</td>
-					</tr>
-					@endif
 					<!-- Shipping Charges -->
 					@if(!empty($receipt_details->shipping_charges))
 						<tr>

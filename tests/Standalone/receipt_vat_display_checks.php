@@ -157,15 +157,22 @@ vatDisplayCheck($details0043['subtotal'] === 45500.0 && $details0043['taxable_am
     'Invoice 0043 reads the persisted taxable amount alongside its saved subtotal and VAT');
 $receipt = (object) ['eis_invoice_number' => 'TEST', 'vat_registered' => true,
     'vat_registered_label' => 'VAT Registered', 'taxable_amount_label' => 'Taxable Amount:',
-    'taxable_amount' => '7,234.04', 'vat_total_label' => 'VAT (17.5%):', 'vat_amount' => '1,265.96'];
+    'taxable_amount' => '7,234.04', 'total_exempt_uf' => 500, 'total_exempt' => 'K500.00',
+    'vat_total_label' => 'VAT (17.5%):', 'vat_amount' => '1,265.96'];
 $html = renderVatPartial('vat_summary', $receipt);
-vatDisplayCheck(substr_count($html, 'class="width-50 text-right"') === 4
+vatDisplayCheck(substr_count($html, 'class="width-50 text-right"') === 6
     && str_contains($html, 'class="flex-box receipt-taxable-amount"')
+    && str_contains($html, 'class="flex-box receipt-exempt-amount"')
     && str_contains($html, 'class="flex-box receipt-total-vat"'),
-    'VAT and taxable amount use the same equal-width right-aligned columns as receipt totals');
+    'Taxable, exempt and VAT amounts use the receipt totals alignment');
 vatDisplayCheck(str_contains($html, 'Taxable Amount') && str_contains($html, '7,234.04')
+    && str_contains($html, 'Exempt:') && str_contains($html, 'K500.00')
     && str_contains($html, 'VAT (17.5%):') && str_contains($html, '1,265.96'),
-    'Receipt renders taxable amount and Total VAT followed by the standard rate');
+    'Receipt renders the exempt amount with its currency-formatted value');
+$tableExemptHtml = renderVatPartial('vat_summary', $receipt, true);
+vatDisplayCheck(str_contains($tableExemptHtml, '<tr class="receipt-exempt-amount">')
+    && str_contains($tableExemptHtml, 'Exempt:') && str_contains($tableExemptHtml, 'K500.00'),
+    'Table-style receipt renders the exempt amount');
 $receipt->vat_breakdown = [
     ['label' => 'VAT - A 17.5%:', 'amount' => '17.50'],
     ['label' => 'VAT - E:', 'amount' => '0.00'],
@@ -243,6 +250,11 @@ foreach (['classic', 'columnize-taxes', 'detailed', 'elegant', 'elegant_modified
     if ($name === 'english-arabic') {
         vatDisplayCheck(str_contains($source, '$receipt_details->vat_breakdown'),
             'English-Arabic receipt supports VAT breakdown rows');
+        vatDisplayCheck(str_contains($source, '$receipt_details->total_exempt'),
+            'English-Arabic receipt prints the exempt total');
+    } else {
+        vatDisplayCheck(str_contains($source, 'partial.vat_summary'),
+            $name.' uses the shared summary that prints the exempt total');
     }
     if ($name !== 'elegant_modified') {
         $qrPosition = strpos($source, 'DNS2D::getBarcodePNG');

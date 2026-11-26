@@ -6,6 +6,12 @@
                 <td class="text-right">{{ $receipt_details->taxable_amount }}</td>
             </tr>
         @endif
+        @if(!empty($receipt_details->total_exempt_uf))
+            <tr class="receipt-exempt-amount">
+                <th>{{ __('lang_v1.exempt') }}:</th>
+                <td class="text-right">{{ $receipt_details->total_exempt }}</td>
+            </tr>
+        @endif
         @if(!empty($receipt_details->vat_breakdown))
             @foreach($receipt_details->vat_breakdown as $vat_rate)
                 <tr class="receipt-total-vat">
@@ -24,6 +30,12 @@
         <div class="flex-box receipt-taxable-amount">
             <p class="width-50 {{ $label_alignment ?? 'text-right' }}">{{ $receipt_details->taxable_amount_label }}</p>
             <p class="width-50 text-right">{{ $receipt_details->taxable_amount }}</p>
+        </div>
+        @endif
+        @if(!empty($receipt_details->total_exempt_uf))
+        <div class="flex-box receipt-exempt-amount">
+            <p class="width-50 {{ $label_alignment ?? 'text-right' }}">{{ __('lang_v1.exempt') }}:</p>
+            <p class="width-50 text-right">{{ $receipt_details->total_exempt }}</p>
         </div>
         @endif
         @if(!empty($receipt_details->vat_breakdown))
